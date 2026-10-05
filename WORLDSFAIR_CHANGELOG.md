@@ -1,5 +1,7 @@
 # World's Fair disclosure
 
+This public repository starts with a sanitized snapshot and fresh history. The task SHAs below from the earlier development phase identify commits in the private source repository; they are disclosed provenance, not publicly mirrored history.
+
 All times use Europe/London. The original Worker and `wrangler.toml` are preserved. Task entries are recorded after their implementation commit; a commit cannot contain its own SHA.
 
 - 2026-10-05 03:19 BST · Task 1 · `37a4a71441b1679cea4f59fe90560614d0ed9d71` · Imported current source onto isolated branch, created provenance tags/new KV, blocked signing and owner routes, added Solana default/badge/real version, deployed separate Worker and verified live pools; full tests, type checks and Worker runtime test passed.
@@ -10,3 +12,11 @@ All times use Europe/London. The original Worker and `wrangler.toml` are preserv
 - 2026-10-05 04:33 BST · Task 6 · `7c81ee6391929a8cfb71c5c987ddbe395399730b` · Polished cream mobile/desktop screens, 44px controls, loading/empty/error states, dates and finite-number fallbacks; resolved rule destination names and labels. Full suite, both type checks and both real Worker runtime exercises passed. Browser checks at 390×844 and 1280×900 covered live-data pre-flight and local synthetic paper purchase/valuation, deposit, rule allocation, 50% roll and capital history; live Jupiter authentication remains TODO.
 
 - 2026-10-05 14:07 BST · Task A · `4f6841b1e8d32fdb6199d2fd685d0b487dd417a3` · Added one-tap suggested Bid-Ask range targeting a 45–50% floor with at most 69 native bins. Incompatible bin steps explain their limit instead of suggesting a shallower range. Preserves user cost assumptions and refreshes anchor evidence. Full suite, both type checks and both Worker runtime exercises passed.
+
+
+## Public repository
+
+- 2026-10-05 14:41 BST · `1916c029ba9cfad87ccf64aa02af1d2756006dbc` · First sanitized public snapshot in `xNFTpat/worlds-fair`, product name **Still**. Retains inherited research and range maths with the new paper ledger; does not claim all initial snapshot code was authored during the hackathon. Original private history, original deployment config, personal media/research/financial fixtures and production recovery records are excluded. Synthetic fixtures preserve test coverage.
+- This snapshot completes the additional brief: suggested ranges (A), optional fixed devnet Memo receipts (E), eight Why explainers/closed Advanced/local skipped log (F), public branding/three-destination navigation/mobile cards/balance-first portfolio and disclosure (G). The existing pot, baskets, staking/vault estimates and profit rules remain available. No custom Anchor vault, live deposit or SPL receipt token is included.
+- Keyless Jupiter quote/Price access is supported under a shared 30-request rolling-minute cap. Public browsing does not prefetch quotes; opening a pool requests evidence. Caches preserve original source age. Provider failures and incomplete mint evidence stay unavailable. Direct provider reads and bounded local cost reads were exercised; no real swap or wallet transaction was submitted.
+- Validation: all 60 test scripts, both TypeScript checks, scanner runtime, paper ledger runtime and devnet receipt runtime passed. Additional mobile browser checks verified 390px layout, paper funding, live-rate paper staking review and three-way portfolio navigation. Tests use synthetic signing; actual Phantom devnet approval remains in TODO. Separate deployment records verify what is live.
