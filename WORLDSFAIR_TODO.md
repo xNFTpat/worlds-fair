@@ -4,6 +4,8 @@ Product: **Still — Clarity before capital.** Public repository: [xNFTpat/world
 
 ## Release checks
 
+- [x] Verify the next flow/reliability change (`03017a4da964dc8950f15e32c1bd56cef092d29c`): 62 test scripts, both TypeScript checks, and three runtime suites passed. Local mobile checks covered basket form placement, balance/holdings navigation, an unchosen then manually chosen range, and cancelling a paper staking review without changing its balance. Deployment evidence is recorded separately.
+
 - [x] Verify the first sanitized public release: all **60 test scripts**, both TypeScript checks and **three runtime suites** passed. The clean branch was committed and pushed, the separate demo deployed, and public access checked. Recorded release: **5 October 2026, 13:42 UTC**, public commit `d2ed57d2e64b291c071c8378a79d7cdc2286c2bb`. This records that release, not subsequent unverified changes.
 - [x] Check the released layout at **390 × 844** and desktop **1280 × 900**; mobile document width was 390px. A local filled paper account and native staking estimate were exercised without a wallet signature.
 - [ ] Finish the remaining final-release visual states: empty, loading, unavailable and confirmation dialogs, plus the live filled basket portfolio. Retain dated evidence and repeat version/footer checks after the next deployment.
