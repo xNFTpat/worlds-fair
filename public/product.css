@@ -20,3 +20,5 @@ html,body{background:var(--cream);color:var(--ink)}body{font-family:'Instrument 
 .wf-preflight-thresholds>summary{display:flex;align-items:center;min-height:44px;font-size:11px;color:var(--khaki);cursor:pointer}.wf-preflight-why>summary{min-height:44px}.basket-history:not([open]){padding-bottom:0}
 
 .wf-paper-explore{min-width:0;scroll-margin-top:24px}.wf-paper-selection-nav{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 20px}.wf-paper-return{margin:0 0 16px}.wf-paper-selection-nav button,.wf-paper-return button{min-height:44px}.wf-paper-holdings{scroll-margin-top:24px}.wf-paper-explore .basket-detail{margin-top:12px}
+
+#view-baskets .wf-paper-destination-nav button[aria-pressed=true]{color:var(--ink)}.wf-paper-start{scroll-margin-top:24px}
