@@ -36,9 +36,13 @@ const zero=basketHoldingHtml({...holding,valuation:{...complete,pnlSol:0,vsHoldS
 const receipt={kind:'basket',holdingId:holding.id,slug:holding.slug,name:holding.name,amountSol:1,legs:[leg],quoteAsOf:iso(0)};
 assert.match(basketReceiptHtml(receipt),/PAPER QUOTE RECEIPT/);assert.match(basketReceiptHtml(receipt),/Quotes only; no swaps were sent/);
 assert.equal(basketReceiptHtml({kind:'seed'}),'');
-assert.match(basketFailureMessage(Error('Jupiter API key not configured')),/No paper SOL was debited/);
-assert.equal(basketFailureMessage(Object.assign(Error('Paper-buy needs an API key on this demo. No Paper SOL was moved.'),{code:'basket_quotes_unconfigured'})),'Jupiter quote access is unavailable. No paper SOL was debited.','Credential errors have one clear explanation without repeating the provider message');
+assert.equal(basketFailureMessage(Object.assign(Error('Paper-buy needs an API key on this demo. No Paper SOL was moved.'),{code:'basket_quotes_unconfigured'})),'Live quotes are unavailable on this demo right now. No paper SOL was debited. Try another option or come back later.','Credential errors have one clear explanation without repeating the provider message');
+for(const code of ['basket_provider_timeout','vault_provider_timeout','basket_quote_expired'])assert.match(basketFailureMessage({code,message:'Technical upstream timeout'}),/Fresh quotes did not arrive in time.*No paper SOL was debited.*Retry the same amount/);
+for(const code of ['basket_quote_rate_limited','vault_quote_budget'])assert.match(basketFailureMessage({code}),/Wait a minute, then retry/);
+assert.match(basketFailureMessage({code:'paper_cash_unavailable'}),/Return to your paper balance/);
+assert.doesNotMatch(basketFailureMessage(Error('RPC stack trace or API key not configured')),/RPC|API key|No paper SOL was debited/,'Unknown provider text cannot prove whether a purchase was saved');
 assert.doesNotMatch(basketFailureMessage(Error('Connection lost')),/No paper SOL was debited/,'An ambiguous response must not claim a known balance outcome');
+assert.match(basketFailureMessage(Error('Connection lost')),/Retry the same amount.*without making a second purchase/);
 assert.match(recoveryLabel({action:'basket',payload:{slug:'a-basket',amountSol:'1'}}),/basket purchase · 1 SOL/);
 assert.equal(recoveryLabel({action:'refresh',payload:{}}),'holding price refresh');
 

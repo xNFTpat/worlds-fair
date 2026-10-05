@@ -62,6 +62,8 @@ Jupiter quote and Price reads work without a key under a shared 30-request rolli
 
 `SOLANA_RPC` is a read-only market-data endpoint. A dedicated endpoint may improve availability. Keep optional local credentials in ignored `.dev.vars`, using the safe `.dev.vars.example`; never copy another deployment's secrets or commit them. No wallet private key is needed.
 
+For the standard public Solana mainnet URL, bounded market reads can fall back to the documented [PublicNode endpoint](https://solana.publicnode.com/). Public responses must prove the mainnet genesis identity; existing mint-program, account and quote-age checks still apply. The adapter caches only immutable block timestamps, observes provider cooldowns, and never sends transactions. Custom/keyed RPC endpoints stay with their configured provider. Holder enumeration is unavailable on the shared fallback, and public services can still reject reads; missing evidence remains unavailable rather than passing a safety check.
+
 ## Deploy this demo safely
 
 ```sh

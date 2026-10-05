@@ -82,7 +82,8 @@ export function poolDrawerModel(row,input={},now=Date.now()){
  const supports=[...new Set((row.structure?.supportLevels||[]).map(v=>typeof v==='number'?v:v?.priceSol).filter(v=>positive(v)&&v<reference))].sort((a,b)=>b-a);
  let suggested=null;if(positive(reference)&&Number.isInteger(binStep)&&binStep>0&&binStep<=10000)suggested=defaultResearchFloor({priceSol:reference,binStep,oneSided,preferredFloorPriceSol:supports[0]});
  const overnightSuggested=anchor||fresh(pool.fetchedAt,PREFLIGHT_THRESHOLDS.marketMaxAgeMs,now)?suggestOvernightRange({priceSol:reference,binStep,solIsBase:pool.base?.address===SOL,...(anchor?{activeBinId:anchor.activeBinId,minNativeBinId:anchor.minNativeBinId,maxNativeBinId:anchor.maxNativeBinId}:{})}):{status:'unavailable',reason:'The reference price is saved or undated. Refresh the pool before choosing a suggested range.'};
- const floorPriceSol=input.floorPriceSol===undefined?suggested?.floorPriceSol:input.floorPriceSol;
+ const rangeChosen=input.rangeChosen!==false;
+ const floorPriceSol=rangeChosen?(input.floorPriceSol===undefined?suggested?.floorPriceSol:input.floorPriceSol):null;
  const sale=quoteFor(row,sizeSol,mode,now),fund=oneSided?null:quoteFor(row,sizeSol/2,mode,now),saleValue=quoteValue(sale),fundValue=quoteValue(fund),tax=taxFor(row,now);
  const quotedSale= sale&&positive(saleValue)&&finite(sale.exitCostSol)&&sale.exitCostSol>=0?Math.max(sale.exitCostSol,finite(sale.exitFeeFloorSol)?sale.exitFeeFloorSol:0)/saleValue:null;
  const exitFraction=input.saleCostFraction??(finite(quotedSale)&&quotedSale<=1?quotedSale:.005),saleAssumed=input.saleCostFraction!=null||!finite(quotedSale)||quotedSale>1;
@@ -103,10 +104,10 @@ export function poolDrawerModel(row,input={},now=Date.now()){
  const net4h=validAmounts&&referenceCost!==null&&rate!==null?rate*4-referenceCost/sizeSol:null;
  const exitHours=validAmounts&&referenceExit!==null&&rate>0?referenceExit/(sizeSol*rate):validAmounts&&referenceExit===0?0:null;
  let range=null,error=null;
- try{if(!validAmounts)throw Error('Enter a positive size and nonnegative network/rent assumptions.');range=buildResearchRange({sizeSol,priceSol:reference,floorPriceSol,binStep,shape,oneSided,solIsBase:pool.base?.address===SOL,...(anchor?{activeBinId:anchor.activeBinId,activeBinPriceSol:anchor.activeBinPriceSol}:{}),feeRateHourly:scenarioRate,exitCostFraction:exitFraction,fundingCostFraction:fundingFraction,networkSol,positionRentSol:rentSol,...scenarioTax});
-  if(anchor&&(range.lowerNativeBin<anchor.minNativeBinId||range.upperNativeBin>anchor.maxNativeBinId))throw Error('This range crosses the pool native bin limits. Choose a nearer floor.');
+ try{if(!validAmounts)throw Error('Enter a positive size and nonnegative network/rent assumptions.');if(rangeChosen)range=buildResearchRange({sizeSol,priceSol:reference,floorPriceSol,binStep,shape,oneSided,solIsBase:pool.base?.address===SOL,...(anchor?{activeBinId:anchor.activeBinId,activeBinPriceSol:anchor.activeBinPriceSol}:{}),feeRateHourly:scenarioRate,exitCostFraction:exitFraction,fundingCostFraction:fundingFraction,networkSol,positionRentSol:rentSol,...scenarioTax});
+  if(anchor&&range&&(range.lowerNativeBin<anchor.minNativeBinId||range.upperNativeBin>anchor.maxNativeBinId))throw Error('This range crosses the pool native bin limits. Choose a nearer floor.');
  }catch(e){range=null;error=e.message;}
- return {pool,anchor,reference,binStep,sizeSol,oneSided,shape,mode,supports,suggested,overnightSuggested,range,error,rate,feeWindowHours:4,feeCurrent,rpcCurrent:row.safety?.rpc?.status==='available'&&fresh(row.safety.rpc.asOf,300000,now),now,sale,fund,exitFraction,fundingFraction,saleAssumed,fundingAssumed,scenarioTax,taxAssumed,scenarioRate,scenarioCostLabel,scenarioFeeLabel,tax,net4h,exitHours,referenceCost,referenceExit,networkSol};
+ return {pool,anchor,reference,binStep,sizeSol,oneSided,shape,mode,supports,suggested,overnightSuggested,rangeChosen,range,error,rate,feeWindowHours:4,feeCurrent,rpcCurrent:row.safety?.rpc?.status==='available'&&fresh(row.safety.rpc.asOf,300000,now),now,sale,fund,exitFraction,fundingFraction,saleAssumed,fundingAssumed,scenarioTax,taxAssumed,scenarioRate,scenarioCostLabel,scenarioFeeLabel,tax,net4h,exitHours,referenceCost,referenceExit,networkSol};
 }
 
 function sectionHeading(title,asOf,tip=''){return '<div class="mpd-panel-head"><h3'+(tip?' title="'+esc(tip)+'" tabindex="0"':'')+'>'+esc(title)+'</h3>'+dated(asOf)+'</div>';}
@@ -120,7 +121,7 @@ function structureHtml(row,m){
  return sectionHeading('Price structure',s.asOf,'Observed hourly swing highs/lows. Partial windows only describe the available candles; past support is not guaranteed.')+'<div class="mpd-swings">'+[4,24,48].map(h=>{const w=s.windows?.find(w=>w.hours===h);return '<div title="'+esc(w?.complete?'Complete dated hourly window':(finite(w?.observations)?w.observations:0)+' observed hours; full window unavailable')+'"><b>'+h+'h'+(w?.complete?'':' · partial')+'</b><span>H '+price(w?.high)+'</span><span>L '+price(w?.low)+'</span></div>';}).join('')+'</div><div class="mpd-structure-foot"><span>'+esc(trend)+'</span>'+(m.supports.length?'<button type="button" data-mpd-support="'+m.supports[0]+'" title="Use the nearest observed support as your floor. It may exceed 69 bins.">Support '+price(m.supports[0])+' ↓</button>':'<span class="mpd-unknown">Support unavailable</span>')+'</div>';
 }
 function rangeHtml(row,m){
- const r=m.range;if(!r)return sectionHeading('Range scenario',m.anchor?.asOf??row.pool?.fetchedAt)+'<p class="mpd-bad" role="status">'+esc(m.error||'Choose a price and bin step with available data.')+'</p>';
+ const r=m.range;if(!r)return sectionHeading('Range scenario',m.anchor?.asOf??row.pool?.fetchedAt)+'<p class="'+(m.rangeChosen===false&&!m.error?'mpd-range-empty':'mpd-bad')+'" role="status">'+esc(m.rangeChosen===false&&!m.error?'Choose a range to see its bounds and bin count.':m.error||'Choose a price and bin step with available data.')+'</p>';
  const status=m.anchor?'RPC bin alignment':'Estimated grid',recovery=scenarioHours(r.selected.atFloor.exitRecoveryHours,m.scenarioRate);
  const tip='Human SOL per paired token. Native IDs are authoritative when RPC alignment is verified; pasted prices can snap to a neighbouring bin. '+(m.suggested?.capped?m.suggested.note+' ':'')+'Exit-fee hours cover withdrawal tax plus sale cost at the 4h-window pool fees/TVL per hour. This rough fee share excludes network allowance and conversion losses.';
  return sectionHeading('Range · '+r.binCount+' bins · '+pct(r.rangeDepthFraction)+' deep',m.anchor?.asOf??row.pool?.fetchedAt,tip)+'<div class="mpd-bounds"><label>Bottom · SOL/token<input readonly aria-label="Bottom SOL per token" value="'+exact(r.bottomPriceSol)+'"></label><label>Top · SOL/token<input readonly aria-label="Top SOL per token" value="'+exact(r.topPriceSol)+'"></label><button type="button" data-mpd-copy aria-label="'+(m.anchor?'Copy native bin bounds':'Copy estimated range bounds')+'" title="'+status+'">Copy</button></div>'+(r.exceedsSetupBins?'<p class="mpd-bad">Over 69 bins. Choose a nearer floor for this setup.</p>':'')+'<p class="mpd-micro mpd-range-recovery" title="'+esc(tip)+'">Exit fees: <b>'+recovery+'</b> · rough fee share · '+(m.anchor?'RPC bins '+r.lowerNativeBin+' → '+r.upperNativeBin:'estimated grid')+'</p>';
@@ -132,6 +133,7 @@ function scenariosHtml(row,m){
  return sectionHeading('After conversion & costs · vs SOL',m.sale?.asOf??row.pool?.fetchedAt,assumption)+'<table class="mpd-comparison mpd-downside"><thead><tr><th>Shape</th><th>At floor</th><th>10% lower</th><th title="Rough fee hours needed before exit to offset the entire scenario loss. Actual time in range and fee share are unmeasured.">Fee h*</th></tr></thead><tbody>'+rows.map(c=>'<tr'+(c.shape===m.shape?' class="mpd-selected"':'')+'><td>'+({Spot:'Spot',BidAsk:'Bid-Ask',Curve:'Curve'})[c.shape]+'</td>'+cell(c.atFloor)+cell(c.belowFloor)+'<td title="'+esc(m.scenarioFeeLabel)+'" tabindex="0">'+(c.atFloor?scenarioHours(c.atFloor.scenarioBreakEvenHours,m.scenarioRate):'—')+'</td></tr>').join('')+'</tbody></table><p class="mpd-micro" title="'+esc(assumption)+'" tabindex="0">'+esc(m.scenarioCostLabel)+' · rough fee pace*</p>';
 }
 export function downsideSummaryHtml(row,m){
+ if(m.rangeChosen===false)return '<div class="mpd-panel-head"><h3>Your downside scenario</h3></div><p class="mpd-range-empty">Choose a range above to see what could remain at your floor and if price falls further. No range has been applied yet.</p>';
  const r=m.range,valid=r?.selected?.atFloor,scenario=(label,value)=>'<div><span>'+esc(label)+'</span><strong>'+esc(value&&finite(value.pnlSol)?sol(m.sizeSol+value.pnlSol)+' left':'Choose a valid range')+'</strong><small>'+esc(value&&finite(value.returnFraction)?pct(value.returnFraction)+' versus keeping SOL':'A dated price and valid floor are needed')+'</small></div>';
  const assumed=m.saleAssumed||m.fundingAssumed||m.taxAssumed,datedCost=m.sale?.retained;
  return '<div class="mpd-panel-head"><h3>Your downside scenario</h3></div><div class="mpd-downside-summary">'+scenario('At your floor',valid)+scenario('If price falls 10% below it',r?.selected?.belowFloor)+'</div><p class="mpd-micro">After conversion and modelled costs, before earned fees. '+(assumed?'Some costs are assumed; unverified token tax is excluded. ':datedCost?'Uses saved cost estimates. ':'')+'Price can fall further; the floor does not stop a loss.</p>';
@@ -149,7 +151,7 @@ function moreHtml(row,m){
 
 function readInput(controller){
  const field=name=>controller.dialog.querySelector('[data-mpd-field="'+name+'"]'),number=name=>{const v=field(name)?.value;return v===undefined||v.trim()===''?null:Number(v);};
- return {sizeSol:number('size'),shape:field('shape').value,oneSided:field('mix').value==='one',floorPriceSol:number('floor'),mode:controller.mode,saleCostFraction:number('sale')===null?null:number('sale')/100,fundingCostFraction:number('funding')===null?null:number('funding')/100,networkSol:field('network')?number('network'): .0001,positionRentSol:field('rent')?number('rent'):0};
+ return {rangeChosen:controller.rangeChosen!==false,sizeSol:number('size'),shape:field('shape').value,oneSided:field('mix').value==='one',floorPriceSol:number('floor'),mode:controller.mode,saleCostFraction:number('sale')===null?null:number('sale')/100,fundingCostFraction:number('funding')===null?null:number('funding')/100,networkSol:field('network')?number('network'): .0001,positionRentSol:field('rent')?number('rent'):0};
 }
 function update(controller){
  if(!controller.row||!controller.dialog.open)return;
@@ -171,6 +173,11 @@ function refreshAgedSources(controller){
  if(signature!==controller.signature){if(controller.autoFloor)setDefault(controller);update(controller);}
 }
 function setDefault(controller){
+ if(controller.rangeChosen===false){
+  const floor=controller.dialog.querySelector('[data-mpd-field="floor"]'),note=controller.dialog.querySelector('[data-mpd-default]');
+  floor.value='';floor.title='Choose a suggested range, a floor depth, or an exact floor price.';
+  if(note){note.textContent='No range chosen. Use the suggestion above or enter a floor depth.';note.hidden=false;}return;
+ }
  if(!controller.autoFloor)return;
  const mix=controller.dialog.querySelector('[data-mpd-field="mix"]').value==='one';
  const m=poolDrawerModel(controller.row,{sizeSol:controller.sizeSol,oneSided:mix,mode:controller.mode});
@@ -179,9 +186,15 @@ function setDefault(controller){
  const note=controller.dialog.querySelector('[data-mpd-default]');if(note){note.textContent=controller.defaultNote;note.hidden=!controller.defaultNote;}
  controller.dialog.querySelector('[data-mpd-field="floor"]').title=controller.defaultNote||'Choose your actual floor. Explicit floors are preserved even when they exceed the 69-bin setup.';
 }
+export function applyFloorPrice(controller,value,source='manual'){
+ controller.autoFloor=false;controller.rangeChosen=true;
+ controller.dialog.querySelector('[data-mpd-field="floor"]').value=String(value);
+ const note=controller.dialog.querySelector('[data-mpd-default]');note.textContent=source==='support'?'Observed support selected; check bin count.':'Custom floor selected; review its bin count and pre-flight checks.';note.hidden=false;
+ update(controller);
+}
 export function applyFloorDepth(controller,value){
  const text=String(value),depth=Number(text),reference=poolDrawerModel(controller.row,readInput(controller)).reference;
- controller.autoFloor=false;
+ controller.autoFloor=false;controller.rangeChosen=true;
  controller.dialog.querySelector('[data-mpd-field="floor"]').value=text.trim()!==''&&finite(depth)&&depth>0&&depth<100&&positive(reference)?String(reference*(1-depth/100)):'';
  const note=controller.dialog.querySelector('[data-mpd-default]');note.textContent='Your floor is fixed at the price chosen now. Review the updated checks.';note.hidden=false;
  update(controller);
@@ -189,7 +202,7 @@ export function applyFloorDepth(controller,value){
 export function applySuggestedRange(controller){
  const current=poolDrawerModel(controller.row||{},readInput(controller)),suggestion=current.overnightSuggested;
  if(suggestion?.status!=='ready'){update(controller);message(controller,suggestion?.reason||'A range suggestion is not available.');return false;}
- controller.autoFloor=false;
+ controller.autoFloor=false;controller.rangeChosen=true;
  controller.dialog.querySelector('[data-mpd-field="shape"]').value='BidAsk';
  controller.dialog.querySelector('[data-mpd-field="mix"]').value='one';
  controller.dialog.querySelector('[data-mpd-field="floor"]').value=String(suggestion.floorPriceSol);
@@ -203,10 +216,10 @@ export function applySuggestedRange(controller){
 }
 function fill(controller,row){
  controller.row=row;
- const m=poolDrawerModel(row,{sizeSol:controller.sizeSol,mode:controller.mode});
+ const m=poolDrawerModel(row,{sizeSol:controller.sizeSol,mode:controller.mode,rangeChosen:controller.rangeChosen!==false});
  controller.dialog.querySelector('[data-mpd-title]').textContent=m.pool.pair||'SOL pool';
  controller.dialog.querySelector('[data-mpd-source]').innerHTML=dated(m.pool.fetchedAt);
- if(!controller.initialized){controller.dialog.querySelector('[data-mpd-field="floor"]').value=m.suggested?String(m.suggested.floorPriceSol):'';controller.dialog.querySelector('[data-mpd-more]').innerHTML=moreHtml(row,m);controller.initialized=true;}
+ if(!controller.initialized){if(controller.rangeChosen===undefined)controller.dialog.querySelector('[data-mpd-field="floor"]').value=m.suggested?String(m.suggested.floorPriceSol):'';controller.dialog.querySelector('[data-mpd-more]').innerHTML=moreHtml(row,m);controller.initialized=true;}
  setDefault(controller);update(controller);
  document.dispatchEvent(new CustomEvent('lp:main-pool-data',{detail:row}));
 }
@@ -227,21 +240,21 @@ export async function openPoolDrawer(row,options={}){
  if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address||''))throw Error('Choose a valid catalogued Solana pool.');
  const dialog=document.createElement('dialog');dialog.id='mainPoolDrawer';dialog.className='mpd';dialog.setAttribute('aria-labelledby','mpdTitle');
  dialog.innerHTML='<header class="mpd-header"><div><h2 id="mpdTitle" data-mpd-title>'+esc(pool.pair||'SOL pool')+'</h2><div data-mpd-source>'+dated(pool.fetchedAt)+'</div></div><button type="button" data-mpd-refresh aria-label="Refresh pool sources" title="Refresh pool evidence">↻</button><button type="button" data-mpd-close aria-label="Close pool detail">×</button></header><div class="mpd-body"><section data-mpd-panel="preflight" aria-label="Paper pre-flight summary"><h3>Pre-flight</h3><p role="status">Reading dated pool evidence…</p></section><section class="mpd-input-panel">'+sectionHeading('Try a range',pool.fetchedAt)+'<form class="mpd-form mpd-essential-controls"><label>Paper size · SOL<input data-mpd-field="size" type="number" min="0.000001" max="1000000" step="any" value="'+esc(options.sizeSol??.5)+'"></label><label>Floor below current price · %<input data-mpd-field="depth" type="number" min="0.01" max="99.99" step="any" placeholder="Use suggested range"></label></form><p class="mpd-micro">Paper scenario only. Changing these values does not open a position.</p><p data-mpd-default class="mpd-micro" hidden></p></section><section data-mpd-panel="downside"></section><details class="mpd-advanced"><summary>Advanced: range, costs &amp; evidence</summary><div class="mpd-advanced-body"><div class="mpd-form mpd-technical-controls"><label>Range shape<select data-mpd-field="shape"><option value="Spot">Spot</option><option value="BidAsk" selected>Bid-Ask</option><option value="Curve">Curve</option></select></label><label>Entry mix<select data-mpd-field="mix"><option value="one">SOL only</option><option value="two">Two-sided</option></select></label><label class="mpd-floor">Exact floor · SOL per token<input data-mpd-field="floor" type="number" min="0" step="any" placeholder="Choose a floor"></label><span data-mpd-reference class="mpd-reference"></span></div><section data-mpd-panel="range"></section><section data-mpd-panel="worth"></section><section data-mpd-panel="structure"></section><section data-mpd-panel="scenarios"></section><section data-mpd-panel="rule"></section><div data-mpd-more></div></div></details>'+skippedHtml()+'<p data-mpd-status class="mpd-status" role="status" aria-live="polite"></p></div>';
- const c={dialog,id,row:null,model:null,sizeSol:options.sizeSol??.5,mode:options.mode==='dlmm'?'dlmm':'best',autoFloor:true,initialized:false,sequence:0,abort:null,returnFocus:document.activeElement,previousOverflow:document.body.style.overflow,signature:''};active=c;
+ const c={dialog,id,row:null,model:null,sizeSol:options.sizeSol??.5,mode:options.mode==='dlmm'?'dlmm':'best',autoFloor:true,rangeChosen:false,initialized:false,sequence:0,abort:null,returnFocus:document.activeElement,previousOverflow:document.body.style.overflow,signature:''};active=c;
  document.body.append(dialog);document.body.style.overflow='hidden';dialog.showModal();dialog.querySelector('[data-mpd-close]').focus();
  dialog.addEventListener('cancel',e=>{e.preventDefault();closePoolDrawer();});dialog.addEventListener('close',()=>{if(active===c)closePoolDrawer();});
  dialog.addEventListener('click',async e=>{const button=e.target.closest('button');if(!button)return;
   if(button.hasAttribute('data-mpd-suggested'))return applySuggestedRange(c);
   if(button.hasAttribute('data-mpd-save-skip')){const reason=dialog.querySelector('input[name="mpdSkipReason"]:checked')?.value,result=recordSkippedPool(c.row?.pool||pool,reason);dialog.querySelector('[data-mpd-skip-status]').textContent=result.ok?'Saved to your recent skips.':result.error;if(result.ok)dialog.querySelector('[data-mpd-skipped-log]').innerHTML=skippedLogHtml(result.entries);return;}
   if(button.hasAttribute('data-mpd-close'))return closePoolDrawer();if(button.hasAttribute('data-mpd-refresh'))return load(c);
-  if(button.hasAttribute('data-mpd-support')){c.autoFloor=false;dialog.querySelector('[data-mpd-field="floor"]').value=button.dataset.mpdSupport;dialog.querySelector('[data-mpd-default]').textContent='Observed support selected; check bin count.';dialog.querySelector('[data-mpd-default]').hidden=false;update(c);return;}
+  if(button.hasAttribute('data-mpd-support'))return applyFloorPrice(c,button.dataset.mpdSupport,'support');
   if(button.hasAttribute('data-mpd-copy')){const prior=c.model,current=poolDrawerModel(c.row,readInput(c));if(prior?.anchor&&!current.anchor){button.textContent='Refresh data to copy';return;}const r=current.range;if(!r)return;if(r.exceedsSetupBins){button.textContent='Narrow to 69 bins';return;}
    const text='Bottom '+exact(r.copyPrices.bottom)+'\nTop '+exact(r.copyPrices.top)+'\n'+r.copyPrices.convention+'\nSOL/token bounds '+exact(r.bottomPriceSol)+' to '+exact(r.topPriceSol)+(current.anchor?'\nNative bins '+r.lowerNativeBin+' to '+r.upperNativeBin+'; active '+current.anchor.activeBinId+'; as of '+current.anchor.asOf+'\nConfirm these native bin IDs after pasting prices into Meteora.':'\nEstimated grid: confirm the pool active bin and bounds in Meteora.');
    try{await navigator.clipboard.writeText(text);if(button.isConnected)button.textContent='Copied';message(c,'Copied range prices'+(current.anchor?' and native bin IDs.':'; alignment is an estimate.'));}catch{message(c,'Clipboard unavailable. Select the displayed bound fields to copy.');}
   }
  });
  dialog.querySelector('form').addEventListener('submit',e=>e.preventDefault());
- dialog.addEventListener('input',e=>{if(!e.target.matches('[data-mpd-field]'))return;if(e.target.dataset.mpdField==='depth')return applyFloorDepth(c,e.target.value);if(e.target.dataset.mpdField==='floor'){c.autoFloor=false;const note=dialog.querySelector('[data-mpd-default]');note.textContent='Custom floor selected; review its bin count and pre-flight checks.';note.hidden=false;}if(e.target.dataset.mpdField==='size')c.sizeSol=Number(e.target.value);update(c);});
+ dialog.addEventListener('input',e=>{if(!e.target.matches('[data-mpd-field]'))return;if(e.target.dataset.mpdField==='depth')return applyFloorDepth(c,e.target.value);if(e.target.dataset.mpdField==='floor')return applyFloorPrice(c,e.target.value);if(e.target.dataset.mpdField==='size')c.sizeSol=Number(e.target.value);update(c);});
  dialog.addEventListener('change',e=>{if(!e.target.matches('select[data-mpd-field]'))return;if(e.target.dataset.mpdField==='mix')setDefault(c);update(c);});
  if(row?.pool&&positive(row.priceSol))fill(c,row);
  document.dispatchEvent(new CustomEvent('lp:main-pool-open',{detail:{pool:id,sizeSol:c.sizeSol,mode:c.mode}}));

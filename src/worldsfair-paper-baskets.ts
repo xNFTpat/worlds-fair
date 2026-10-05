@@ -1,6 +1,7 @@
 import type {Env} from './env';
 import {allocations} from './cesto';
 import {reserveResearchJupiter, noteResearchJupiterRateLimit} from './research-quote-budget';
+import {solanaReadFetch} from './solana-read-rpc';
 import {BASKET_SOL, MAX_BASKET_LEGS, basketMint, basketRaw, splitBasketLamports, type BasketSplit, basketUnitValue, basketPerformance} from './worldsfair-basket-math';
 
 const FIVE_MINUTES = 300000, QUOTE_TTL = 45000, DEADLINE = 25000;
@@ -31,9 +32,10 @@ function remaining(deadline: number) {
   if (ms <= 0) throw new PaperBasketError('Paper basket sources took too long. No purchase was saved.', 503, 'basket_provider_timeout');
   return Math.max(1, Math.min(8000, ms));
 }
-async function requestJson(url: string, init: RequestInit, deadline: number): Promise<any> {
+async function requestJson(url: string, init: RequestInit, deadline: number, rpc = false): Promise<any> {
   try {
-    const response = await fetch(url, {...init, signal: AbortSignal.timeout(remaining(deadline))});
+    const request = {...init, signal: AbortSignal.timeout(remaining(deadline))};
+    const response = rpc ? await solanaReadFetch(url, request, {deadline}) : await fetch(url, request);
     if (!response.ok) {await response.body?.cancel(); throw new PaperBasketError('A basket data source is unavailable. Please retry.', 503, 'basket_provider_unavailable');}
     const result = await response.json(); remaining(deadline); return result;
   } catch (error) {
@@ -93,7 +95,7 @@ async function mintDecimals(env: Env, mints: string[], deadline: number) {
   const out = new Map<string, number>([[BASKET_SOL, 9]]), wanted = mints.filter(mint => mint !== BASKET_SOL);
   if (!wanted.length) return out;
   if (!env.SOLANA_RPC) throw new PaperBasketError('A read-only Solana RPC is needed to verify basket token units.', 503, 'basket_mint_unavailable');
-  const body = await requestJson(env.SOLANA_RPC, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({jsonrpc: '2.0', id: 1, method: 'getMultipleAccounts', params: [wanted, {encoding: 'jsonParsed', commitment: 'confirmed'}]})}, deadline);
+  const body = await requestJson(env.SOLANA_RPC, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({jsonrpc: '2.0', id: 1, method: 'getMultipleAccounts', params: [wanted, {encoding: 'jsonParsed', commitment: 'confirmed'}]})}, deadline, true);
   const values = body?.result?.value;
   if (body?.error || !Array.isArray(values) || values.length !== wanted.length) throw new PaperBasketError('Basket mint records could not be verified.', 503, 'basket_mint_unavailable');
   values.forEach((account: any, i: number) => {
@@ -124,7 +126,7 @@ export async function readPaperTokenPrices(env: Env, mints: string[], deadline: 
   if (!slots.length) return out;
   const requests = slots.map((slot, i) => ({jsonrpc: '2.0', id: i + 1, method: 'getBlockTime', params: [slot]})), batches: (typeof requests)[] = [];
   for (let i = 0; i < requests.length; i += 50) batches.push(requests.slice(i, i + 50));
-  const timeResponses = await mapBounded(batches, 3, async batch => {try {const body = await requestJson(rpcUrl, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(batch)}, deadline); return Array.isArray(body) ? body : [];} catch {return [];}});
+  const timeResponses = await mapBounded(batches, 3, async batch => {try {const body = await requestJson(rpcUrl, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(batch)}, deadline, true); return Array.isArray(body) ? body : [];} catch {return [];}});
   const times = timeResponses.flat();
   for (const {mint, row} of candidates) {
     const matching = times.filter(value => value?.id === slots.indexOf(row.blockId) + 1), time = matching.length === 1 && !matching[0].error ? matching[0].result : null;
@@ -149,7 +151,7 @@ export async function preparePaperTokenQuotes(env: Env, inputLegs: readonly Bask
   const quoteSlots = [...new Set(legs.flatMap(leg => leg.contextSlot === null ? [] : [leg.contextSlot]))];
   if (quoteSlots.length) {
     if (!env.SOLANA_RPC) throw new PaperBasketError('Quote timestamps need the read-only Solana RPC.', 503, 'basket_quote_unavailable');
-    const times = await requestJson(env.SOLANA_RPC, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(quoteSlots.map((slot, i) => ({jsonrpc: '2.0', id: i + 1, method: 'getBlockTime', params: [slot]})))}, deadline);
+    const times = await requestJson(env.SOLANA_RPC, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(quoteSlots.map((slot, i) => ({jsonrpc: '2.0', id: i + 1, method: 'getBlockTime', params: [slot]})))}, deadline, true);
     for (const leg of legs) {
       if (leg.contextSlot === null) continue;
       const matching = Array.isArray(times) ? times.filter(value => value?.id === quoteSlots.indexOf(leg.contextSlot!) + 1) : [], timestamp = matching.length === 1 && !matching[0].error ? matching[0].result : null;

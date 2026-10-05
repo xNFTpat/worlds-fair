@@ -84,12 +84,34 @@ assert.equal(reloadClient().pending.length,1);
 await reloadClient().write('seed',{amountSol:'2'});assert.equal(reloadBalance,3);assert.equal(reloadClient().pending.length,0);
 const metadata=JSON.parse(reloadStorage.getItem('worldsfair:paper-pending:v1'));assert.deepEqual(metadata,[]);
 
-const rejectedStorage=memoryStorage();const rejected=createClient({storage:rejectedStorage,fetch:async path=>path==='/api/paper/account'?Response.json(account()):Response.json({error:'Amount rejected'},{status:400})});
-await assert.rejects(rejected.write('seed',{amountSol:'bad'}),/Amount rejected/);assert.equal(rejected.pending.length,0,'Definitive client rejection clears pending metadata');
+const rejectedStorage=memoryStorage();const rejected=createClient({storage:rejectedStorage,fetch:async path=>path==='/api/paper/account'?Response.json(account()):Response.json({error:'Insufficient paper balance',code:'paper_cash_unavailable'},{status:409})});
+await assert.rejects(rejected.write('basket',{slug:'synthetic',amountSol:'3'}),/Insufficient paper balance/);assert.equal(rejected.pending.length,0,'A known pre-commit ledger rejection clears pending metadata');
 const temporary=createClient({storage:rejectedStorage,fetch:async path=>path==='/api/paper/account'?Response.json(account()):Response.json({error:'Temporary outage'},{status:503})});
 await assert.rejects(temporary.write('seed',{amountSol:'3'}),/Temporary outage/);assert.equal(temporary.pending.length,1,'A server error preserves the same retry ID');
 const savedIntent=JSON.parse(rejectedStorage.getItem('worldsfair:paper-pending:v1'))[0];
 assert.deepEqual(Object.keys(savedIntent).sort(),['action','payload','requestId']);assert.doesNotMatch(JSON.stringify(savedIntent),/balanceSol|history|holdings|revision/);
+
+// A committed basket with a lost response can meet an edge denial on its next
+// retry. Neither an HTML 4xx nor an unrecognized JSON 4xx proves no earlier save.
+for(const edgeResponse of [()=>new Response('<html>Temporary denial</html>',{status:403}),()=>Response.json({error:'Unrecognized edge response',code:'unknown_edge_code'},{status:429})]){
+  const edgeStorage=memoryStorage(),ledger=new Map(),seenIds=[];let attempts=0,ids=0,paperBalance=2;
+  const edgeClient=()=>createClient({storage:edgeStorage,uuid:()=>`edge-retry-${++ids}`,fetch:async(path,init)=>{
+    if(path==='/api/paper/account')return Response.json({account:{balanceSol:paperBalance,revision:ledger.size}});
+    const body=JSON.parse(init.body);seenIds.push(body.requestId);attempts++;
+    if(attempts===2)return edgeResponse();
+    if(!ledger.has(body.requestId)){paperBalance-=Number(body.amountSol);ledger.set(body.requestId,{account:{balanceSol:paperBalance,revision:ledger.size+1},receipt:{id:body.requestId,kind:'basket'}});}
+    if(attempts===1)throw Error('Response lost after the basket was saved');
+    return Response.json(ledger.get(body.requestId));
+  }});
+  const payload={slug:'synthetic',amountSol:'1'};
+  await assert.rejects(edgeClient().write('basket',payload),/Response lost/);
+  assert.equal(paperBalance,1);assert.equal(edgeClient().pending.length,1);
+  await assert.rejects(edgeClient().write('basket',payload));
+  assert.equal(edgeClient().pending.length,1,'An ambiguous 4xx preserves the unresolved ID across reload');
+  const recovered=await edgeClient().write('basket',payload);
+  assert.equal(recovered.account.balanceSol,1);assert.equal(paperBalance,1,'The third attempt recovers the first receipt, without another debit');
+  assert.equal(ids,1);assert.equal(new Set(seenIds).size,1);assert.equal(edgeClient().pending.length,0,'A confirmed success clears the recovered pending action');
+}
 let unavailablePosts=0;const noStorage=createClient({storage:null,fetch:async()=>{unavailablePosts++;return Response.json(account());}});
 await assert.rejects(noStorage.write('seed',{amountSol:'1'}),/session storage/);assert.equal(unavailablePosts,0,'A request is not dispatched when its retry ID cannot survive a reload');
 const bounded=createClient({fetch:async path=>path==='/api/paper/account'?Response.json(account()):Promise.reject(Error('offline'))});

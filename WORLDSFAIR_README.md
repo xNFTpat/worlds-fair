@@ -82,6 +82,10 @@ Paper-source caches last 15 seconds for quotes and 30 seconds for prices. Hits s
 
 Optional local credentials belong only in ignored `.dev.vars`. The safe `.dev.vars.example` has no owner credential. A dedicated read-only `SOLANA_RPC` may improve reliability. Do not copy another Worker's credentials or supply wallet private keys. Configure an optional demo-only Jupiter key with `npx wrangler secret put JUPITER_API_KEY --config wrangler.worldsfair.toml`.
 
+`src/solana-read-rpc.ts` provides one fixed, documented [PublicNode mainnet fallback](https://solana.publicnode.com/) for the exact public Solana Labs URLs. Custom URLs, query credentials and authentication headers never cross providers. A strict method allowlist excludes all signing and transaction submission. The public adapter verifies the mainnet genesis hash, limits concurrent reads and HTTP attempts, retains caller deadlines, and observes failure/429 cooldowns. A 429 does not trigger provider hopping. Its bounded 60-second cache stores only positive immutable block timestamps, preserving their original values; account balances, authorities and pool anchors are not cached there. Existing 45-second quote and five-minute valuation limits remain unchanged.
+
+Shared PublicNode holder enumeration is deliberately unavailable after probe rejection; independent mint/epoch reads can still succeed and holder checks stay cautious. Public services offer no availability guarantee. On 5 October 2026, local Worker probes verified SOL/USDC mint units and a block timestamp, but a real Cesto basket preparation was safely rejected by an HTTP 403 during its multi-mint read. No purchase, ledger debit or transaction resulted. This is provider-read evidence, not a claim that the full live basket journey has passed.
+
 ## Optional devnet Memo receipts
 
 Stamp controls apply to authoritative saved shared-strategy opens/closes and this browser's saved profit rolls. Shared strategy stamps explicitly describe an observation. Preparing or confirming a stamp does not change paper cash, holdings, claims or revisions, and a failed stamp does not undo the paper action.

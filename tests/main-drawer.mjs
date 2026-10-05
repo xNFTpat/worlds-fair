@@ -8,8 +8,8 @@ import {resolve,join} from 'node:path';
 // production. No wallet provider, network request or browser signing is loaded.
 const dir=await mkdtemp(join(tmpdir(),'lp-main-drawer-'));
 const source=await readFile('public/main-pool-drawer.js','utf8');
-await build({stdin:{contents:source+'\nexport {moreHtml,scenariosHtml,comparisonHtml,rangeHtml,modelSignature,setDefault,update,refreshAgedSources};',resolveDir:resolve('public'),sourcefile:'main-pool-drawer.js'},outfile:join(dir,'drawer.mjs'),bundle:true,platform:'node',format:'esm',plugins:[{name:'source-range',setup(b){b.onResolve({filter:/^\.\/research-range\.js$/},()=>({path:resolve('src/research-range.ts')}));}}]});
-const {poolDrawerModel,applySuggestedRange,applyFloorDepth,moreHtml,scenariosHtml,comparisonHtml,rangeHtml,modelSignature,setDefault,update,refreshAgedSources}=await import(join(dir,'drawer.mjs'));
+await build({stdin:{contents:source+'\nexport {moreHtml,scenariosHtml,comparisonHtml,rangeHtml,modelSignature,setDefault,update,refreshAgedSources,fill,scorePreflight};',resolveDir:resolve('public'),sourcefile:'main-pool-drawer.js'},outfile:join(dir,'drawer.mjs'),bundle:true,platform:'node',format:'esm',plugins:[{name:'source-range',setup(b){b.onResolve({filter:/^\.\/research-range\.js$/},()=>({path:resolve('src/research-range.ts')}));}}]});
+const {poolDrawerModel,applySuggestedRange,applyFloorDepth,applyFloorPrice,moreHtml,scenariosHtml,comparisonHtml,rangeHtml,downsideSummaryHtml,modelSignature,setDefault,update,refreshAgedSources,fill,scorePreflight}=await import(join(dir,'drawer.mjs'));
 const now=Date.UTC(2026,8,30,12),iso=t=>new Date(t).toISOString();
 const SOL='So11111111111111111111111111111111111111112';
 function fixture(){return {pool:{id:'solana:4fvH46ajCnwsDxcdr9LWMMB4BfPnxtk8KLof9bTrBp9K',pair:'e/acc-SOL',fetchedAt:iso(now),base:{address:'paired'},quote:{address:SOL},tvlUsd:100000},priceSol:1.09212e-4,config:{binStep:50},feeRates:{asOf:iso(now),h1:.02,h4:.001,h12:.003},safety:{rpc:{status:'available',asOf:iso(now),decimals:6,mintAuthority:null,freezeAuthority:null,transferFeeStatus:'none',concentration:{holders:{status:'available',asOf:iso(now),top10Fraction:.7,top1Fraction:.2,label:'Sampled owner concentration'}}},flags:[]},structure:{asOf:iso(now),supportLevels:[],windows:[]},quotes:[]};}
@@ -152,16 +152,49 @@ row.rangeAnchor.maxNativeBinId=-440;assert.equal(poolDrawerModel(row,input,now).
 // only the automatic default is recalculated. User and support floors survive.
 const OriginalDate=globalThis.Date;let clock=now;
 globalThis.Date=class extends OriginalDate{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
-function controller(autoFloor=true){
+function controller(autoFloor=true,rangeChosen){
  const data=fixture();data.priceSol*=1.05;data.structure.supportLevels=[data.priceSol/1.05*.6];data.rangeAnchor={status:'available',asOf:iso(now),activeBinId:-450,activeBinPriceSol:data.priceSol/1.05,binStep:50,minNativeBinId:-2000,maxNativeBinId:2000};
  const nodes=new Map(),node=(value='')=>({value,innerHTML:'',textContent:'',title:''});
  for(const [field,value]of Object.entries({size:'.5',shape:'BidAsk',mix:'one',floor:'',sale:'',funding:'',network:'0',rent:'0'}))nodes.set('[data-mpd-field="'+field+'"]',node(value));
- for(const panel of ['preflight','worth','structure','range','scenarios','rule'])nodes.set('[data-mpd-panel="'+panel+'"]',node());
- for(const selector of ['[data-mpd-default]','[data-mpd-reference]','[data-mpd-status]','.mpd-input-panel .mpd-panel-head'])nodes.set(selector,node());
- const c={row:data,mode:'best',sizeSol:.5,autoFloor,signature:'',dialog:{open:true,querySelector:s=>nodes.get(s)||null}};
+ for(const panel of ['preflight','downside','worth','structure','range','scenarios','rule'])nodes.set('[data-mpd-panel="'+panel+'"]',node());
+ for(const selector of ['[data-mpd-default]','[data-mpd-reference]','[data-mpd-status]','[data-mpd-more]','[data-mpd-title]','[data-mpd-source]','.mpd-input-panel .mpd-panel-head'])nodes.set(selector,node());
+ const c={row:data,mode:'best',sizeSol:.5,autoFloor,rangeChosen,signature:'',dialog:{open:true,querySelector:s=>nodes.get(s)||null}};
  return {c,field:name=>nodes.get('[data-mpd-field="'+name+'"]'),panel:name=>nodes.get('[data-mpd-panel="'+name+'"]')};
 }
 try{
+ // The mounted public drawer has no range until a deliberate floor action.
+ // Cost/token checks still run, and changing other settings never seeds one.
+ const initial=controller(true,false);setDefault(initial.c);update(initial.c);
+ assert.equal(initial.field('floor').value,'');assert.equal(initial.c.model.range,null);assert.equal(initial.c.model.error,null);
+ assert.match(initial.panel('downside').innerHTML,/No range has been applied yet/);
+ assert.doesNotMatch(initial.panel('range').innerHTML,/mpd-bad|must be finite/);
+ for(const [field,value]of [['size','1'],['shape','Curve'],['mix','two']]){initial.field(field).value=value;setDefault(initial.c);update(initial.c);assert.equal(initial.field('floor').value,'');assert.equal(initial.c.model.range,null,field+' alone cannot choose a range');}
+ const unchosen=poolDrawerModel(fixture(),{rangeChosen:false},now);assert.equal(unchosen.error,null);assert.equal(unchosen.range,null);
+ assert.match(downsideSummaryHtml(fixture(),unchosen),/Choose a range above/);
+ const tokenFailure=fixture();Object.assign(tokenFailure.safety.rpc,{transferFeeStatus:'known',transferFee:{bps:100,configAuthority:'active-authority'}});
+ tokenFailure.preflightEvidence={holders:{status:'available',asOf:iso(now),topFraction:.2,complete:true}};
+ const waitingScore=scorePreflight(tokenFailure,poolDrawerModel(tokenFailure,{rangeChosen:false},now),now);
+ assert.equal(waitingScore.lines.length,8);for(const id of ['floor','worst']){const line=waitingScore.lines.find(line=>line.id===id);assert.equal(line.status,'caution');assert.equal(line.value,'Choose a range');}
+ assert.equal(waitingScore.lines.find(line=>line.id==='tax').status,'fail');assert.equal(waitingScore.status,'fail','a missing selection never hides a real token failure');
+ assert.equal(waitingScore.lines.find(line=>line.id==='holders').status,'fail');
+ const withRange=scorePreflight(tokenFailure,poolDrawerModel(tokenFailure,{},now),now),independent=score=>score.lines.filter(line=>!['floor','worst'].includes(line.id));
+ assert.deepEqual(independent(waitingScore),independent(withRange),'all six independent checks retain their exact evidence and verdicts before range selection');
+ const documentBefore=globalThis.document,customEventBefore=globalThis.CustomEvent;
+ globalThis.document={dispatchEvent(){},activeElement:null};globalThis.CustomEvent=class{constructor(type,options){this.type=type;this.detail=options?.detail;}};
+ try{
+  const firstRead=controller(true,false);fill(firstRead.c,firstRead.c.row);assert.equal(firstRead.field('floor').value,'');assert.equal(firstRead.c.model.range,null,'initial fetched data leaves the public range unchosen');
+  clock=now+60001;refreshAgedSources(firstRead.c);assert.equal(firstRead.field('floor').value,'');assert.equal(firstRead.c.model.range,null,'anchor expiry cannot apply a default');
+  fill(firstRead.c,{...firstRead.c.row,priceSol:firstRead.c.row.priceSol*1.1});assert.equal(firstRead.field('floor').value,'');assert.equal(firstRead.c.model.range,null,'explicit refresh also leaves the range unchosen');
+  clock=now;
+  for(const source of ['manual','support']){
+   const selected=controller(true,false);applyFloorPrice(selected.c,'0.00008',source);assert.equal(selected.c.rangeChosen,true);assert.equal(selected.c.autoFloor,false);assert(selected.c.model.range);
+   assert.equal(scorePreflight(selected.c.row,selected.c.model,clock).lines.find(line=>line.id==='floor').status,'fail','a deliberately shallow '+source+' floor still fails the overnight depth screen');
+   fill(selected.c,{...selected.c.row,priceSol:selected.c.row.priceSol*1.1});assert.equal(selected.field('floor').value,'0.00008','first data fill preserves an already chosen '+source+' floor');
+   clock=now+60001;refreshAgedSources(selected.c);assert.equal(selected.field('floor').value,'0.00008','source expiry preserves the '+source+' floor');clock=now;
+  }
+ }finally{if(documentBefore===undefined)delete globalThis.document;else globalThis.document=documentBefore;if(customEventBefore===undefined)delete globalThis.CustomEvent;else globalThis.CustomEvent=customEventBefore;}
+ const newSuggestion=controller(true,false);newSuggestion.c.row.config.binStep=100;newSuggestion.c.row.rangeAnchor.binStep=100;assert.equal(applySuggestedRange(newSuggestion.c),true);assert.equal(newSuggestion.c.rangeChosen,true);assert(newSuggestion.c.model.range);
+ const newDepth=controller(true,false);applyFloorDepth(newDepth.c,'45');assert.equal(newDepth.c.rangeChosen,true);assert(newDepth.c.model.range);
  const suggested=controller(false);suggested.c.row.config.binStep=100;suggested.c.row.rangeAnchor.binStep=100;
  suggested.field('shape').value='Curve';suggested.field('mix').value='two';suggested.field('floor').value='0.00001';suggested.field('sale').value='1';
  assert.equal(applySuggestedRange(suggested.c),true);assert.equal(suggested.field('shape').value,'BidAsk');assert.equal(suggested.field('mix').value,'one');assert.equal(suggested.field('sale').value,'1','keeps explicit cost assumptions');assert.equal(suggested.field('size').value,'.5');assert.equal(suggested.c.autoFloor,false);

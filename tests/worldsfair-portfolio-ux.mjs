@@ -5,10 +5,12 @@ const [paper,longGame,baskets]=await Promise.all(['public/worldsfair-paper.js','
 const markup=paper.match(/host.innerHTML='([^]*?);\n  document.dispatchEvent\(new CustomEvent\('worldsfair:paper-ready'\)/)?.[1];assert(markup);
 assert(markup.indexOf('data-paper-balance')<markup.indexOf('data-paper-seed'));
 assert(markup.indexOf('data-paper-seed')<markup.indexOf('data-paper-choices'));
-assert(markup.indexOf('data-paper-choices')<markup.indexOf('data-paper-holdings'));
+assert(markup.indexOf('data-paper-choices')<markup.indexOf('data-paper-explore'));
+assert(markup.indexOf('data-paper-show-holdings')<markup.indexOf('data-paper-explore'),'existing holdings have a direct jump before exploration');
+assert(markup.indexOf('data-paper-explore')<markup.indexOf('data-paper-holdings'),'exploration immediately follows choices, before a growing holdings list');
 assert(markup.indexOf('data-paper-holdings')<markup.indexOf('data-paper-history'));
 assert.doesNotMatch(markup,/<details[^>]*\sopen(?:[\s>])/,'history, rule and account details start closed');
-assert.match(markup,/<section class="wf-paper-holdings">/,'holdings themselves stay visible');
+assert.match(markup,/<section class="wf-paper-holdings" tabindex="-1">/,'holdings themselves stay visible');
 assert.match(markup,/data-paper-allocation-detail hidden/);
 assert.match(paper,/\[data-paper-allocation-detail\]'\)\.hidden=allocationSeries\(events\)\.length===0/,'no empty allocation chart crowds the first screen');
 assert.doesNotMatch(markup,/Seed paper|Paper Long Game|Fleet profits/);
@@ -17,27 +19,34 @@ assert.match(paper,/data-paper-stamp="'\+esc\(JSON.stringify\(\{kind:'pot-roll',
 assert.match(paper,/WorldsfairDevnet\?\.mount\(host.querySelector\('\[data-paper-history\]'\)\)/);
 assert.match(paper,/worldsfair:devnet-ready/);
 // Navigation is bound before the later paper script creates its choice slot.
-const events={},nodes=new Map(),scrolls=[];let choiceTarget=null;
-const node=(extra={})=>({value:'',hidden:false,innerHTML:'',textContent:'',disabled:false,options:[{value:''}],checked:false,setAttribute(name,value){this[name]=value;},scrollIntoView(options){scrolls.push(options);},...extra});
+const events={},nodes=new Map(),scrolls=[];let choiceTarget=null,exploreTarget=null;
+const node=(extra={})=>({value:'',hidden:false,innerHTML:'',textContent:'',disabled:false,options:[{value:''}],checked:false,setAttribute(name,value){this[name]=value;},insertAdjacentHTML(_where,html){this.innerHTML+=html;},scrollIntoView(options){scrolls.push(options);},...extra});
 for(const id of ['yieldAsset','yieldSort','yieldSaved','yieldMore','yieldStatus','yieldCards','refreshYields','longBasketPanel','longYieldPanel','refreshBaskets','longYieldTitle','longYieldIntro'])nodes.set('#'+id,node());
 const buttons=['baskets','staking','vault'].map(value=>node({dataset:{longView:value}}));
 const nav=node({classList:{add(){}},querySelectorAll:()=>buttons});nodes.set('.long-nav',nav);
-const document={querySelector:selector=>selector==='[data-paper-choices]'?choiceTarget:nodes.get(selector),querySelectorAll:selector=>selector==='[data-long-view]'?buttons:[],addEventListener:(name,callback)=>events[name]=callback};
+const document={querySelector:selector=>selector==='[data-paper-choices]'?choiceTarget:selector==='[data-paper-explore]'?exploreTarget:nodes.get(selector),querySelectorAll:selector=>selector==='[data-long-view]'?buttons:[],addEventListener:(name,callback)=>events[name]=callback};
 const window={matchMedia:()=>({matches:true}),WorldsFair:{dataUrl:value=>value,filterResponse:(_path,value)=>value},WorldsFairPaper:{setYieldIdeas(){}}};
 vm.runInNewContext(longGame,{document,window,localStorage:{getItem:()=>null},AbortSignal,fetch:async()=>({ok:true,json:async()=>({items:[],errors:[]})})});
 assert.equal(typeof buttons[0].onclick,'function');
-choiceTarget=node({append(element){this.child=element;}});events['worldsfair:paper-ready']();assert.equal(choiceTarget.child,nav,'the existing navigation is moved, not duplicated');assert.match(buttons[0].innerHTML,/Baskets.*A mix of tokens/);assert.match(buttons[1].innerHTML,/Staking.*rewards on SOL/);
+choiceTarget=node({append(element){this.child=element;}});exploreTarget=node({children:[],append(element){this.children.push(element);}});events['worldsfair:paper-ready']();assert.equal(choiceTarget.child,nav,'the existing navigation is moved, not duplicated');assert.deepEqual(exploreTarget.children,[nodes.get('#longBasketPanel'),nodes.get('#longYieldPanel')],'original panels move beside choices without losing handlers');assert.match(buttons[0].innerHTML,/Baskets.*A mix of tokens/);assert.match(buttons[1].innerHTML,/Staking.*rewards on SOL/);
 buttons[1].onclick();await new Promise(resolve=>setTimeout(resolve,0));assert.equal(nodes.get('#longYieldPanel').hidden,false);assert.equal(nodes.get('#longBasketPanel').hidden,true);assert.equal(nodes.get('#longYieldTitle').textContent,'Try paper staking');assert.equal(buttons[1]['aria-pressed'],'true');assert.equal(scrolls.at(-1).behavior,'auto','navigation respects reduced motion');
+assert.match(nodes.get('#longYieldIntro').innerHTML,/data-paper-home/,'a scrolled staking view can return to the paper balance');
 buttons[0].onclick();assert.equal(nodes.get('#longBasketPanel').hidden,false);assert.equal(nodes.get('#longYieldPanel').hidden,true);
 // Eight catalogue cards are revealed at a time; expanding is local and keeps
 // catalogue filters intact, rather than making another provider request.
-const basketEvents={},basketNodes=new Map();let calls=0;
-for(const id of ['basketSearch','basketCategory','basketSaved','basketList','basketSource','basketDetail','view-baskets','refreshBaskets'])basketNodes.set('#'+id,node({addEventListener:(event,fn)=>basketEvents[id+':'+event]=fn}));
+const basketEvents={},basketNodes=new Map();let calls=0,failDetail=false,mountedBasket=null;
+for(const id of ['basketSearch','basketCategory','basketSaved','basketList','basketSource','basketDetail','view-baskets','refreshBaskets','basketRefresh','basketNotes'])basketNodes.set('#'+id,node({addEventListener:(event,fn)=>basketEvents[id+':'+event]=fn,querySelector:()=>node()}));
 const catalog={baskets:Array.from({length:19},(_,i)=>({slug:'basket-'+i,name:'Basket '+i,categories:['crypto'],thirtyDay:i})),readAt:'2026-10-05T12:00:00Z'};
-const basketWindow={innerWidth:390,matchMedia:()=>({matches:true})};
-vm.runInNewContext(baskets,{document:{querySelector:selector=>basketNodes.get(selector)||null},window:basketWindow,URL,localStorage:{getItem:()=>null,setItem(){}},fetch:async()=>{calls++;return {ok:true,json:async()=>catalog};}});
+const detail={...catalog.baskets[0],description:'A synthetic basket',allocation:{complete:true,rows:[{symbol:'SYN',name:'Synthetic',weight:100,mint:'synthetic'}]},readAt:catalog.readAt};
+const basketWindow={innerWidth:390,matchMedia:()=>({matches:true}),WorldsFairPaper:{mountBasket(_host,basket){mountedBasket=basket;}}};
+vm.runInNewContext(baskets,{document:{querySelector:selector=>basketNodes.get(selector)||null},window:basketWindow,URL,AbortSignal,localStorage:{getItem:()=>null,setItem(){}},fetch:async path=>{calls++;if(path.includes('basket=')){if(failDetail)throw Error('Raw upstream RPC error');return {ok:true,json:async()=>detail};}return {ok:true,json:async()=>catalog};}});
 await basketWindow.loadBaskets();const list=basketNodes.get('#basketList');assert.equal((list.innerHTML.match(/class="basket-row"/g)||[]).length,8);assert.match(list.innerHTML,/Show more baskets/);
 basketEvents['view-baskets:click']({target:{closest:selector=>selector==='[data-basket-more]'?{}:null}});assert.equal((list.innerHTML.match(/class="basket-row"/g)||[]).length,16);assert.equal(calls,1);
 basketEvents['basketSearch:input']();assert.equal((list.innerHTML.match(/class="basket-row"/g)||[]).length,8,'new filters reset the visible card limit');
 assert.match(baskets,/<details class="basket-history"><summary>Past model returns/);assert.match(baskets,/<details class="basket-history"><summary>Historical model chart/);assert.match(baskets,/data-paper-basket/);
-console.log('Paper portfolio UX passed: balance-first layout, preserved action/devnet hooks, collapsed secondary details, live three-way navigation, reduced motion and local basket pagination.');
+const clickBasket=selector=>basketEvents['view-baskets:click']({target:{closest:query=>query===selector?{dataset:{basket:'basket-0',basketRetry:'basket-0'}}:null}});
+clickBasket('[data-basket]');await new Promise(setImmediate);
+const detailNode=basketNodes.get('#basketDetail');assert.equal(mountedBasket.slug,'basket-0');assert(detailNode.innerHTML.indexOf('data-paper-basket')<detailNode.innerHTML.indexOf('What’s inside'),'paper amount/action is not buried below token allocations');assert.match(detailNode.innerHTML,/data-paper-home/);assert.equal(detailNode['aria-busy'],'false');
+failDetail=true;clickBasket('[data-basket]');await new Promise(setImmediate);assert.match(detailNode.innerHTML,/Try loading this basket again/);assert.match(detailNode.innerHTML,/data-basket-back/);assert.doesNotMatch(detailNode.innerHTML,/Raw upstream|RPC/);
+failDetail=false;clickBasket('[data-basket-retry]');await new Promise(setImmediate);assert.match(detailNode.innerHTML,/What’s inside/,'the same selected basket can retry without returning through the catalogue');
+console.log('Paper portfolio UX passed: balance-first layout, exploration before holdings, preserved action/devnet hooks, three-way navigation, reduced motion, local pagination and selected basket failure/retry.');

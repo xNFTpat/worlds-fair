@@ -9,6 +9,17 @@
   const signedUsd=value=>finite(value)?(value>0?'+':'')+usd(value):'Unavailable';
   const ratePublicationText=value=>Number.isFinite(Date.parse(value))?'Provider rate dated '+stamp(value):'Provider publication time unavailable';
   const paperActions=['seed','roll','basket','refresh','deposit','rule'];
+  // These ledger/provider rejections occur before a new commit, after any
+  // matching saved receipt is checked. An unknown HTTP error is not proof:
+  // an earlier attempt may have committed before its response was lost.
+  const definitivePaperRejections=new Set([
+    'paper_cash_unavailable','paper_holdings_full','paper_account_full',
+    'paper_quote_expired','paper_quote_incomplete','paper_vault_quote_invalid',
+    'paper_rate_limit','paper_provider_rate_limit','paper_rule_changed',
+    'paper_close_changed','paper_profit_claimed','paper_close_unavailable',
+    'paper_source_stale','paper_source_incomplete',
+    'basket_invalid','basket_unavailable','basket_allocation_incomplete','vault_invalid','vault_unavailable',
+  ]);
   const valuationMaxAgeMs=5*60*1000;
   const fundedArms=new Set(['farmer','scalp','wide','steady']);
   function previewProfit(pnlSol,percent){
@@ -102,10 +113,19 @@
   }
   function basketReceiptHtml(receipt){
     if(receipt?.kind!=='basket'||!Array.isArray(receipt.legs))return '';
-    return '<div class="wf-basket-receipt"><span class="eyebrow">PAPER QUOTE RECEIPT</span><h4>'+esc(receipt.name||receipt.slug||'Basket')+'</h4><p>'+esc(sol(receipt.amountSol))+' paper SOL allocated · '+esc(stamp(receipt.quoteAsOf))+'. Quotes only; no swaps were sent.</p>'+basketLegsHtml(receipt.legs)+'</div>';
+    return '<div class="wf-basket-receipt"><button type="button" class="text-button wf-paper-return" data-paper-show-holdings>View my paper holdings ↓</button><span class="eyebrow">PAPER QUOTE RECEIPT</span><h4>'+esc(receipt.name||receipt.slug||'Basket')+'</h4><p>'+esc(sol(receipt.amountSol))+' paper SOL allocated · '+esc(stamp(receipt.quoteAsOf))+'. Quotes only; no swaps were sent.</p>'+basketLegsHtml(receipt.legs)+'</div>';
   }
   function basketFailureMessage(error){
-    return error?.code==='basket_quotes_unconfigured'||/api.?key|credentials?|not configured/i.test(error?.message||'')?'Jupiter quote access is unavailable. No paper SOL was debited.':(error?.message||'The paper basket request could not be confirmed.')+' Use the same amount to safely retry this request.';
+    const code=error?.code||'',provider=code.replace(/^vault_/,'basket_');
+    if(provider==='basket_quotes_unconfigured')return 'Live quotes are unavailable on this demo right now. No paper SOL was debited. Try another option or come back later.';
+    if(['basket_quote_budget','basket_quote_rate_limited','paper_provider_rate_limit','paper_rate_limit'].includes(provider))return 'Live quote requests are busy. Wait a minute, then retry the same paper amount. No paper SOL was debited.';
+    if(['basket_provider_timeout','basket_quote_expired','paper_quote_expired'].includes(provider))return 'Fresh quotes did not arrive in time. No paper SOL was debited. Retry the same amount.';
+    if(['basket_provider_unavailable','basket_quote_unavailable','basket_quote_invalid','basket_mint_unavailable','basket_mint_mismatch','paper_quote_incomplete','paper_vault_quote_invalid'].includes(provider))return 'We could not verify every asset and quote. No paper SOL was debited. Try again later or choose another option.';
+    if(['basket_unavailable','basket_allocation_incomplete','basket_allocation_unavailable','basket_identity_mismatch'].includes(provider))return 'This option cannot be verified for a paper purchase right now. No paper SOL was debited. Choose another option.';
+    if(code==='paper_cash_unavailable')return 'There is not enough available paper SOL. Return to your paper balance to add more, or choose a smaller amount.';
+    if(code==='paper_holdings_full')return 'This paper portfolio has reached its 40-holding limit. Existing holdings are still saved.';
+    if(['basket_invalid','vault_invalid','invalid_paper_amount'].includes(code))return 'Enter a valid paper SOL amount within your available balance, then retry.';
+    return 'We could not confirm the paper request. Retry the same amount to check it safely without making a second purchase.';
   }
   function createClient(options={}){
     const fetcher=options.fetch||globalThis.fetch.bind(globalThis),uuid=options.uuid||(()=>crypto.randomUUID());
@@ -160,7 +180,7 @@
         const result=await request('/api/paper/'+action,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...payload,requestId})});
         pending.delete(fingerprint);try{persist();}catch{/* A retained ID is safe to replay; the server returns its receipt. */}return result;
       })();
-      try{return await mutation;}catch(error){if(error.status>=400&&error.status<500){pending.delete(fingerprint);try{persist();}catch{}}throw error;}finally{mutation=null;}
+      try{return await mutation;}catch(error){if(error.status>=400&&error.status<500&&definitivePaperRejections.has(error.code)){pending.delete(fingerprint);try{persist();}catch{}}throw error;}finally{mutation=null;}
     }
     return {account,write,history:cursor=>request('/api/paper/history'+(cursor?'?cursor='+encodeURIComponent(cursor):'')),get pending(){return [...pending.values()].map(item=>({...item,payload:{...item.payload}}));},get busy(){return mutation!==null;}};
   }
@@ -255,7 +275,7 @@
     finally{loading=false;button.disabled=false;renderPending();}
   }
   host.setAttribute('aria-label','Your paper portfolio');
-  host.innerHTML='<div class="wf-paper-start"><div class="section-heading"><div><span class="eyebrow">PAPER PRACTICE</span><h2>Your paper portfolio</h2></div><button type="button" class="outline" data-paper-refresh aria-label="Refresh paper balance">↻</button></div><p class="note">Try a holding with practice SOL. No real funds move.</p><div class="wf-paper-balances"><div><span>Available paper SOL</span><strong data-paper-balance>Loading…</strong></div></div><form class="wf-paper-seed" data-paper-seed><label>Amount to add · paper SOL<input name="amountSol" type="number" min="0.000000001" max="1000" step="any" inputmode="decimal" value="1" required></label><button type="submit" class="primary" data-paper-seed-submit disabled>Add paper SOL</button></form><p class="wf-paper-status" role="status" aria-live="polite" data-paper-status>Loading your paper balance…</p><div class="wf-paper-pending" data-paper-pending hidden></div></div><section class="wf-paper-choices" data-paper-choices><h3>Choose what to try</h3></section><section class="wf-paper-holdings"><h3>Your paper holdings</h3><div data-paper-holdings><p class="note">Reading paper holdings…</p></div></section><details class="wf-paper-account-details"><summary>Where this paper balance came from</summary><div class="wf-paper-balances"><div><span>Paper SOL added</span><b data-paper-seeded>Loading…</b></div><div><span>Paper profit transferred in</span><b data-paper-rolled>Loading…</b></div></div><p class="note">This browser has its own paper balance. Strategy profits come from a shared demo balance. Each closed position can fund one profit transfer across the whole demo.</p><p class="note" data-paper-updated></p></details><details class="wf-paper-journal"><summary>Paper activity</summary><ol data-paper-history><li>Reading saved paper moves…</li></ol><button type="button" class="text-button" data-paper-more hidden>Show older paper moves</button></details><details class="wf-paper-allocation-detail" data-paper-allocation-detail hidden><summary>Where paper SOL has been placed</summary><section class="wf-paper-overview" data-paper-overview><p class="note">Reading saved allocation records…</p></section></details><details class="wf-profit-rule" data-paper-rule><summary>How to split future paper profit</summary><p class="note" data-paper-rule-summary>Reading your saved rule…</p><form data-paper-rule-form><label class="wf-rule-enable"><input name="enabled" type="checkbox"> Apply a rule when I roll paper profit</label><p class="note">Choose a split for the whole verified profit when you transfer it. The LP share stays in shared demo strategies; other shares become your paper holdings. Your available balance is unchanged.</p><div class="wf-rule-grid"><label>Stays as LP capital · %<input name="lpPercent" type="number" min="0" max="100" step="1" value="50" required></label><label>Vault / staking · %<input name="vaultPercent" type="number" min="0" max="100" step="1" value="25" required></label><label>Basket · %<input name="basketPercent" type="number" min="0" max="100" step="1" value="25" required></label></div><div class="wf-rule-destinations"><label for="wfProfitVault">Solana vault / staking<select id="wfProfitVault" name="vaultId" aria-label="Solana vault / staking"><option value="">Reading options…</option></select></label><label for="wfProfitBasket">Basket<select id="wfProfitBasket" name="basketSlug" aria-label="Basket"><option value="">Reading options…</option></select></label></div><p class="note" data-paper-rule-total>Total 100% · rule is off</p><button type="submit" class="outline" disabled>Save paper profit rule</button><p class="wf-paper-status" role="status" aria-live="polite" data-paper-rule-status></p></form></details>';
+  host.innerHTML='<div class="wf-paper-start" tabindex="-1"><div class="section-heading"><div><span class="eyebrow">PAPER PRACTICE</span><h2>Your paper portfolio</h2></div><button type="button" class="outline" data-paper-refresh aria-label="Refresh paper balance">↻</button></div><p class="note">Try a holding with practice SOL. No real funds move.</p><div class="wf-paper-balances"><div><span>Available paper SOL</span><strong data-paper-balance>Loading…</strong></div></div><form class="wf-paper-seed" data-paper-seed><label>Amount to add · paper SOL<input name="amountSol" type="number" min="0.000000001" max="1000" step="any" inputmode="decimal" value="1" required></label><button type="submit" class="primary" data-paper-seed-submit disabled>Add paper SOL</button></form><p class="wf-paper-status" role="status" aria-live="polite" data-paper-status>Loading your paper balance…</p><div class="wf-paper-pending" data-paper-pending hidden></div></div><section class="wf-paper-choices" data-paper-choices><h3>Choose what to try</h3><button type="button" class="text-button wf-paper-return" data-paper-show-holdings>View my paper holdings ↓</button></section><div class="wf-paper-explore" data-paper-explore></div><section class="wf-paper-holdings" tabindex="-1"><h3>Your paper holdings</h3><div data-paper-holdings><p class="note">Reading paper holdings…</p></div></section><details class="wf-paper-account-details"><summary>Where this paper balance came from</summary><div class="wf-paper-balances"><div><span>Paper SOL added</span><b data-paper-seeded>Loading…</b></div><div><span>Paper profit transferred in</span><b data-paper-rolled>Loading…</b></div></div><p class="note">This browser has its own paper balance. Strategy profits come from a shared demo balance. Each closed position can fund one profit transfer across the whole demo.</p><p class="note" data-paper-updated></p></details><details class="wf-paper-journal"><summary>Paper activity</summary><ol data-paper-history><li>Reading saved paper moves…</li></ol><button type="button" class="text-button" data-paper-more hidden>Show older paper moves</button></details><details class="wf-paper-allocation-detail" data-paper-allocation-detail hidden><summary>Where paper SOL has been placed</summary><section class="wf-paper-overview" data-paper-overview><p class="note">Reading saved allocation records…</p></section></details><details class="wf-profit-rule" data-paper-rule><summary>How to split future paper profit</summary><p class="note" data-paper-rule-summary>Reading your saved rule…</p><form data-paper-rule-form><label class="wf-rule-enable"><input name="enabled" type="checkbox"> Apply a rule when I roll paper profit</label><p class="note">Choose a split for the whole verified profit when you transfer it. The LP share stays in shared demo strategies; other shares become your paper holdings. Your available balance is unchanged.</p><div class="wf-rule-grid"><label>Stays as LP capital · %<input name="lpPercent" type="number" min="0" max="100" step="1" value="50" required></label><label>Vault / staking · %<input name="vaultPercent" type="number" min="0" max="100" step="1" value="25" required></label><label>Basket · %<input name="basketPercent" type="number" min="0" max="100" step="1" value="25" required></label></div><div class="wf-rule-destinations"><label for="wfProfitVault">Solana vault / staking<select id="wfProfitVault" name="vaultId" aria-label="Solana vault / staking"><option value="">Reading options…</option></select></label><label for="wfProfitBasket">Basket<select id="wfProfitBasket" name="basketSlug" aria-label="Basket"><option value="">Reading options…</option></select></label></div><p class="note" data-paper-rule-total>Total 100% · rule is off</p><button type="submit" class="outline" disabled>Save paper profit rule</button><p class="wf-paper-status" role="status" aria-live="polite" data-paper-rule-status></p></form></details>';
   document.dispatchEvent(new CustomEvent('worldsfair:paper-ready'));
   host.querySelector('[data-paper-refresh]').onclick=()=>load(true);
   host.querySelector('[data-paper-rule]').ontoggle=event=>{if(event.currentTarget.open)loadRuleSources();};
@@ -290,7 +310,7 @@
     input.max=String(finite(balance)?Math.min(1000,Math.max(0,balance)):1000);
     submit.disabled=mounted.busy||client.busy||!mounted.basket.allocation?.complete||!finite(balance)||balance<=0;
     const status=node.querySelector('[data-paper-basket-status]');
-    if(!mounted.busy&&mounted.basket.allocation?.complete&&finite(balance)&&balance<=0&&!node.querySelector('[data-paper-basket-receipt]').textContent){status.textContent='Add paper SOL above to try this basket.';status.dataset.emptyBalance='true';}
+    if(!mounted.busy&&mounted.basket.allocation?.complete&&finite(balance)&&balance<=0&&!node.querySelector('[data-paper-basket-receipt]').textContent){status.textContent='Add paper SOL to your balance to try this basket.';status.dataset.emptyBalance='true';}
     else if(status.dataset.emptyBalance==='true'&&balance>0){status.textContent='';delete status.dataset.emptyBalance;}
   }
   api.mountBasket=(node,basket)=>{
@@ -302,7 +322,7 @@
     form.onsubmit=async event=>{
       event.preventDefault();const mounted=basketMounts.get(node),submit=form.querySelector('button'),status=node.querySelector('[data-paper-basket-status]');
       if(!mounted||mounted.busy||client.busy||submit.disabled||!form.reportValidity())return;
-      mounted.busy=true;submit.disabled=true;submit.textContent='Quoting every paper leg…';status.dataset.error='false';delete status.dataset.emptyBalance;status.textContent='Checking the allocation and every quote before moving paper SOL…';
+      mounted.busy=true;submit.disabled=true;submit.textContent='Checking paper purchase…';status.dataset.error='false';delete status.dataset.emptyBalance;status.textContent='Getting live quotes for this basket. This may take a minute. Keep this tab open; there is no need to submit again.';
       try{
         const data=await client.write('basket',{slug:basket.slug,amountSol:form.elements.amountSol.value});accept(data);
         if(node.isConnected){node.querySelector('[data-paper-basket-receipt]').innerHTML=basketReceiptHtml(data.receipt);status.textContent='Paper basket saved. Refresh your paper portfolio to value it at current prices.';}
@@ -377,7 +397,15 @@
     try{const data=await client.write(item.action,item.payload);accept(data);if(data.receipt?.kind==='basket')for(const [node,mounted]of basketMounts)if(node.isConnected&&mounted.basket.slug===data.receipt.slug)node.querySelector('[data-paper-basket-receipt]').innerHTML=basketReceiptHtml(data.receipt);say('The earlier paper request is confirmed. Its original request ID prevented a second move.');document.dispatchEvent(new CustomEvent('worldsfair:paper-change'));}
     catch(error){say(error.message,true);}finally{renderPending();}
   });
-  document.addEventListener('click',event=>{const button=event.target.closest('[data-paper-roll]');if(button&&!button.disabled)openRoll(trades.get(button.dataset.paperRoll));});
+  document.addEventListener('click',event=>{
+    const destination=event.target.closest('[data-paper-home]')?'.wf-paper-start':event.target.closest('[data-paper-show-holdings]')?'.wf-paper-holdings':null;
+    if(destination){
+      const section=host.querySelector(destination);
+      section.scrollIntoView({behavior:globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
+      section.focus({preventScroll:true});return;
+    }
+    const button=event.target.closest('[data-paper-roll]');if(button&&!button.disabled)openRoll(trades.get(button.dataset.paperRoll));
+  });
   setInterval(()=>{if(!document.hidden&&accountData?.account?.holdings?.length)render();},60000);
   load();
 })();

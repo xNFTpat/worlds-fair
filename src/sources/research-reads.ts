@@ -2,6 +2,7 @@ import type {Env} from '../env';
 import type {Pool} from '../schema';
 import type {Candle} from '../suggest';
 import {reserveResearchJupiter,noteResearchJupiterRateLimit} from '../research-quote-budget';
+import {solanaReadFetch} from '../solana-read-rpc';
 
 // Research reads only. No swap construction, transaction signing or broadcasting.
 // Jupiter: https://dev.jup.ag/api-reference/swap/quote
@@ -60,10 +61,11 @@ async function readJson<T>(context:ResearchReadContext,options:{name:string;prov
    }
    if(Date.now()>=context.deadline)return unknown('Research request deadline reached before provider request.');
   }finally{context.pendingRequests--;}
-  context.requests++;
   const timeout=Math.max(1,Math.min(RESEARCH_READ_LIMITS.requestMs,context.deadline-Date.now()));
   try{
-   const response=await globalThis.fetch(options.url,{...options.init,signal:AbortSignal.timeout(timeout)});
+   const countRequest=()=>{if(context.requests>=context.maxRequests)throw Error('Research request budget reached.');context.requests++;};
+   const init={...options.init,signal:AbortSignal.timeout(timeout)};
+   const response=options.provider==='Solana RPC'?await solanaReadFetch(options.url,init,{deadline:Math.min(context.deadline,Date.now()+timeout),onRequest:countRequest}):await (countRequest(),globalThis.fetch(options.url,init));
    if(!response.ok){
     let ttl=60000,status:ResearchReadStatus='unavailable';
     if(response.status===429){status='rate-limited';const backoff=researchBackoff(cooldown,response.headers);ttl=backoff.until-Date.now();if(options.provider==='Jupiter'){const shared=await noteResearchJupiterRateLimit(context.env,response.headers);context.jupiterRetryAt=Math.max(context.jupiterRetryAt||0,backoff.until,shared.retryAt||0);}try{await context.env.LP_CACHE.put(key('backoff:'+options.provider),JSON.stringify(backoff),{expirationTtl:86400});}catch{}}

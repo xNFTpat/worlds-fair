@@ -42,10 +42,11 @@ export function scorePreflight(row={},m={},now=Date.now(),config=defaults){
   else add('costs','Exit / round-trip cost','pass',costValue,'Jupiter reference + withdrawal tax + network · '+date(sale.asOf)+'.');
 
   const floor=m.range?.selected?.atFloor;
-  const scenarioValid=size!==null&&finite(floor?.returnFraction)&&finite(floor?.pnlSol)&&nonnegative(size+floor.pnlSol)&&(floor.unavailableReasons||[]).length===0;
+  const scenarioValid=m.rangeChosen!==false&&size!==null&&finite(floor?.returnFraction)&&finite(floor?.pnlSol)&&nonnegative(size+floor.pnlSol)&&(floor.unavailableReasons||[]).length===0;
   const scenarioCurrent=scenarioValid&&marketCurrent&&costsCurrent&&!m.saleAssumed&&!m.fundingAssumed&&!m.taxAssumed;
   const floorValue=scenarioValid?signed(floor.returnFraction)+' · '+sol(size+floor.pnlSol)+' left':'Choose a valid range';
-  if(!scenarioValid)add('worst','At your chosen floor','caution',floorValue,'Complete range and cost evidence is needed for this scenario.');
+  if(m.rangeChosen===false)add('worst','At your chosen floor','caution','Choose a range','No range has been applied. Choose one to calculate the downside scenario.');
+  else if(!scenarioValid)add('worst','At your chosen floor','caution',floorValue,'Complete range and cost evidence is needed for this scenario.');
   else if(!scenarioCurrent)add('worst','At your chosen floor','caution',floorValue,'Scenario includes dated or assumed costs; earned fees are excluded.');
   else if(floor.returnFraction<=-c.failFloorLossFraction)add('worst','At your chosen floor','fail',floorValue,'Loss reaches the '+pct(c.failFloorLossFraction)+' floor-loss screen; price can fall further.');
   else add('worst','At your chosen floor',floor.returnFraction<0?'caution':'pass',floorValue,'After conversion and costs, before earned fees; price can fall further.');
@@ -76,8 +77,9 @@ export function scorePreflight(row={},m={},now=Date.now(),config=defaults){
   else if(!spikeKnown)add('age','Token age / launch spike','caution',ageText,'A complete, current 24h low is needed to rule out a launch spike.');
   else add('age','Token age / launch spike','pass',ageText+' · '+spike.toFixed(2)+'× low','Minimum age clears '+c.minTokenAgeHours+'h; no >'+c.launchSpikeMultiple+'× spike in the complete 24h window.');
 
-  const lower=m.range?.bottomPriceSol,distance=positive(lower)&&positive(m.reference)?1-lower/m.reference:null;
-  if(!finite(distance)||distance<0||distance>=1)add('floor','Floor distance','caution','Choose a valid floor','A current price and a lower range bound are needed.');
+  const lower=m.rangeChosen===false?null:m.range?.bottomPriceSol,distance=positive(lower)&&positive(m.reference)?1-lower/m.reference:null;
+  if(m.rangeChosen===false)add('floor','Floor distance','caution','Choose a range','Use the suggestion or choose your own floor before checking its depth.');
+  else if(!finite(distance)||distance<0||distance>=1)add('floor','Floor distance','caution','Choose a valid floor','A current price and a lower range bound are needed.');
   else if(!marketCurrent)add('floor','Floor distance','caution',pct(distance)+' below price','The reference price is saved or undated; refresh before screening.');
   else if(distance+Number.EPSILON<c.minFloorDistanceFraction)add('floor','Floor distance','fail',pct(distance)+' below price','The overnight screen requires at least '+pct(c.minFloorDistanceFraction)+' below price.');
   else if(m.range.exceedsSetupBins)add('floor','Floor distance','fail',pct(distance)+' below price','This range exceeds the supported setup bin count.');
