@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
+const [paper,longGame,baskets]=await Promise.all(['public/worldsfair-paper.js','public/long-game.js','public/baskets.js'].map(path=>readFile(path,'utf8')));
+const markup=paper.match(/host.innerHTML='([^]*?);\n  document.dispatchEvent\(new CustomEvent\('worldsfair:paper-ready'\)/)?.[1];assert(markup);
+assert(markup.indexOf('data-paper-balance')<markup.indexOf('data-paper-seed'));
+assert(markup.indexOf('data-paper-seed')<markup.indexOf('data-paper-choices'));
+assert(markup.indexOf('data-paper-choices')<markup.indexOf('data-paper-holdings'));
+assert(markup.indexOf('data-paper-holdings')<markup.indexOf('data-paper-history'));
+assert.doesNotMatch(markup,/<details[^>]*\sopen(?:[\s>])/,'history, rule and account details start closed');
+assert.match(markup,/<section class="wf-paper-holdings">/,'holdings themselves stay visible');
+assert.match(markup,/data-paper-allocation-detail hidden/);
+assert.match(paper,/\[data-paper-allocation-detail\]'\)\.hidden=allocationSeries\(events\)\.length===0/,'no empty allocation chart crowds the first screen');
+assert.doesNotMatch(markup,/Seed paper|Paper Long Game|Fleet profits/);
+assert.match(markup,/Each closed position can fund one profit transfer across the whole demo/);
+assert.match(paper,/data-paper-stamp="'\+esc\(JSON.stringify\(\{kind:'pot-roll',eventId:event.id\}\)\)/,'saved roll receipts still expose escaped devnet metadata');
+assert.match(paper,/WorldsfairDevnet\?\.mount\(host.querySelector\('\[data-paper-history\]'\)\)/);
+assert.match(paper,/worldsfair:devnet-ready/);
+// Navigation is bound before the later paper script creates its choice slot.
+const events={},nodes=new Map(),scrolls=[];let choiceTarget=null;
+const node=(extra={})=>({value:'',hidden:false,innerHTML:'',textContent:'',disabled:false,options:[{value:''}],checked:false,setAttribute(name,value){this[name]=value;},scrollIntoView(options){scrolls.push(options);},...extra});
+for(const id of ['yieldAsset','yieldSort','yieldSaved','yieldMore','yieldStatus','yieldCards','refreshYields','longBasketPanel','longYieldPanel','refreshBaskets','longYieldTitle','longYieldIntro'])nodes.set('#'+id,node());
+const buttons=['baskets','staking','vault'].map(value=>node({dataset:{longView:value}}));
+const nav=node({classList:{add(){}},querySelectorAll:()=>buttons});nodes.set('.long-nav',nav);
+const document={querySelector:selector=>selector==='[data-paper-choices]'?choiceTarget:nodes.get(selector),querySelectorAll:selector=>selector==='[data-long-view]'?buttons:[],addEventListener:(name,callback)=>events[name]=callback};
+const window={matchMedia:()=>({matches:true}),WorldsFair:{dataUrl:value=>value,filterResponse:(_path,value)=>value},WorldsFairPaper:{setYieldIdeas(){}}};
+vm.runInNewContext(longGame,{document,window,localStorage:{getItem:()=>null},AbortSignal,fetch:async()=>({ok:true,json:async()=>({items:[],errors:[]})})});
+assert.equal(typeof buttons[0].onclick,'function');
+choiceTarget=node({append(element){this.child=element;}});events['worldsfair:paper-ready']();assert.equal(choiceTarget.child,nav,'the existing navigation is moved, not duplicated');assert.match(buttons[0].innerHTML,/Baskets.*A mix of tokens/);assert.match(buttons[1].innerHTML,/Staking.*rewards on SOL/);
+buttons[1].onclick();await new Promise(resolve=>setTimeout(resolve,0));assert.equal(nodes.get('#longYieldPanel').hidden,false);assert.equal(nodes.get('#longBasketPanel').hidden,true);assert.equal(nodes.get('#longYieldTitle').textContent,'Try paper staking');assert.equal(buttons[1]['aria-pressed'],'true');assert.equal(scrolls.at(-1).behavior,'auto','navigation respects reduced motion');
+buttons[0].onclick();assert.equal(nodes.get('#longBasketPanel').hidden,false);assert.equal(nodes.get('#longYieldPanel').hidden,true);
+// Eight catalogue cards are revealed at a time; expanding is local and keeps
+// catalogue filters intact, rather than making another provider request.
+const basketEvents={},basketNodes=new Map();let calls=0;
+for(const id of ['basketSearch','basketCategory','basketSaved','basketList','basketSource','basketDetail','view-baskets','refreshBaskets'])basketNodes.set('#'+id,node({addEventListener:(event,fn)=>basketEvents[id+':'+event]=fn}));
+const catalog={baskets:Array.from({length:19},(_,i)=>({slug:'basket-'+i,name:'Basket '+i,categories:['crypto'],thirtyDay:i})),readAt:'2026-10-05T12:00:00Z'};
+const basketWindow={innerWidth:390,matchMedia:()=>({matches:true})};
+vm.runInNewContext(baskets,{document:{querySelector:selector=>basketNodes.get(selector)||null},window:basketWindow,URL,localStorage:{getItem:()=>null,setItem(){}},fetch:async()=>{calls++;return {ok:true,json:async()=>catalog};}});
+await basketWindow.loadBaskets();const list=basketNodes.get('#basketList');assert.equal((list.innerHTML.match(/class="basket-row"/g)||[]).length,8);assert.match(list.innerHTML,/Show more baskets/);
+basketEvents['view-baskets:click']({target:{closest:selector=>selector==='[data-basket-more]'?{}:null}});assert.equal((list.innerHTML.match(/class="basket-row"/g)||[]).length,16);assert.equal(calls,1);
+basketEvents['basketSearch:input']();assert.equal((list.innerHTML.match(/class="basket-row"/g)||[]).length,8,'new filters reset the visible card limit');
+assert.match(baskets,/<details class="basket-history"><summary>Past model returns/);assert.match(baskets,/<details class="basket-history"><summary>Historical model chart/);assert.match(baskets,/data-paper-basket/);
+console.log('Paper portfolio UX passed: balance-first layout, preserved action/devnet hooks, collapsed secondary details, live three-way navigation, reduced motion and local basket pagination.');

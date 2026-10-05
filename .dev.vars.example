@@ -1,0 +1,5 @@
+# Optional local read-only data settings. Never add wallet private keys.
+# Local development: copy this example to ignored .dev.vars.
+SOLANA_RPC=https://api.mainnet-beta.solana.com
+# Jupiter keyless reads work; a dedicated key is optional.
+# JUPITER_API_KEY=YOUR_DEMO_ONLY_API_KEY

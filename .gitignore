@@ -1,0 +1,12 @@
+node_modules/
+execution/node_modules/
+.wrangler/
+.dev.vars*
+.env*
+*.log
+.DS_Store
+src/build-version.ts
+validation/
+node_modules
+execution/node_modules
+!.dev.vars.example

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en" data-show-robinhood="false">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Advanced research · Still</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/still-mark.svg">
+  <link rel="stylesheet" href="/lp-research.css">
+  <link rel="stylesheet" href="/research-tools.css">
+  <link rel="stylesheet" href="/owner-access.css">
+  <link rel="stylesheet" href="/worldsfair.css">
+  <script src="/worldsfair.js"></script>
+  <link rel="stylesheet" href="/product.css">
+  <script defer src="/product-brand.js"></script>
+  <script defer src="/execution-link.js"></script>
+  <script defer src="/lp-research.js"></script>
+  <script type="module" src="/research-tools.js"></script>
+  <script type="module" src="/research-bots.js"></script>
+  <script type="module" src="/research-manual.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#researchResults">Skip to pools</a>
+  <main id="researchApp">
+    <header class="research-header">
+      <div><a class="brand product-brand" href="/"><img class="product-mark" src="/brand/still-mark.svg" alt="" width="32" height="32"><span data-product-name>Still</span><small>/ Advanced research</small></a><h1>LP research</h1><p>Compare activity, fee density, quoted costs and price structure before choosing a range.</p></div>
+      <div><span class="worldsfair-badge">Paper demo · Solana</span><a class="back-link" href="/#alpha">Back to pools ↗</a></div>
+    </header>
+    <section class="research-intro" aria-label="How to read this screen">
+      <p><b>Four-hour fee proxy.</b> Net compares pool fee density with size-specific swap costs, a reference withdrawal transfer tax and stated network allowance. Price changes, range occupancy and future fees remain unverified.</p>
+      <p>Catalogue rows show cached quote and safety checks. Open a pool to request bounded checks; missing values are shown as <b>unavailable</b>.</p>
+    </section>
+    <form id="researchFilters" class="research-filters" aria-label="Research filters">
+      <label class="search-field">Pool or token <input id="researchSearch" name="search" type="search" placeholder="Pair, mint or pool address" autocomplete="off"></label>
+      <label>Min liquidity · USD <input id="researchMinTvl" name="minTvl" type="number" min="0" step="1000" value="15000" inputmode="numeric"></label>
+      <label>Min volume · 4h USD <input id="researchMinVolume" name="minVolume4h" type="number" min="0" step="1000" value="10000" inputmode="numeric"></label>
+      <label>Max pool age · hours <input id="researchMaxAge" name="maxAge" type="number" min="0" step="1" placeholder="Any age" inputmode="numeric"></label>
+      <label>Age group <select id="researchAgeGroup" name="ageGroup"><option value="all">All ages</option><option value="fresh">Fresh pools</option><option value="established">Established pools</option></select></label>
+      <label>Order <select id="researchSort" name="sort"><option value="net">Net fee proxy · 4h</option><option value="fees">Fee density</option><option value="volume">Volume · 4h</option></select></label>
+      <label>Comparison size <select id="researchSize" name="size"><option value="1">1 SOL</option><option value="0.5">0.5 SOL</option></select></label>
+      <label>Comparison quote <select id="researchMode" name="mode"><option value="best">Best available route</option><option value="dlmm">DLMM routes only</option></select></label>
+      <label class="check-field"><input id="researchHideFlagged" name="hideFlagged" type="checkbox"> Hide known flags</label>
+      <button type="submit" id="researchRefresh">Refresh catalogue</button>
+    </form>
+    <p id="researchQuoteStatus" class="detail-notice" role="status"></p>
+    <div class="research-toolbar"><p id="researchStatus" role="status">Reading cached pool research…</p><p id="researchAsOf"></p></div>
+    <details class="coverage-panel"><summary>Coverage &amp; calculations</summary><div id="researchCoverage">Source coverage will appear after the first read.</div></details>
+    <section id="researchResults" tabindex="-1" aria-label="Pool research results" aria-busy="true">
+      <div id="researchTableWrap" class="research-table-wrap"><table class="research-table"><thead><tr>
+        <th scope="col">Pool</th><th scope="col">Liquidity</th><th scope="col" title="Reported fees divided by current TVL and window length. A pool-level hourly proxy, not your position earnings.">Fee / TVL<br>1h · 4h · 12h / hour</th>
+        <th scope="col" title="Four hours of measured fee-density proxy minus quoted round-trip cost divided by the entry size. No price P&L or in-range forecast.">Net fee proxy<br>4h horizon</th>
+        <th scope="col" title="Size-specific quoted round-trip costs. Best uses the available route; DLMM limits routing to Meteora DLMM and can use other pools. Unconfigured or failed checks are unavailable.">Round trip<br>0.5 SOL · 1 SOL</th>
+        <th scope="col" title="Hours at the selected fee-density proxy to cover quoted costs. This is not a promise of break-even.">Fees cover costs<br>Round trip · exit</th>
+        <th scope="col" title="Current reported windows. Direction needs a measured preceding four-hour window; hourly volume is not its substitute.">Volume<br>1h · 4h · 24h / direction</th>
+        <th scope="col">Price structure</th><th scope="col">Safety checks</th><th scope="col">Pool config</th><th scope="col">Pool age</th>
+      </tr></thead><tbody id="researchRows"></tbody></table></div>
+      <div id="researchCards" class="research-cards"></div>
+      <div id="researchEmpty" class="empty-panel" hidden></div>
+    </section>
+    <footer class="worldsfair-footer"><p>Paper money actions · live market data · no mainnet transactions.</p><p id="worldsfairVersion" role="status">Checking build…</p></footer>
+  </main>
+  <dialog id="researchDrawer" class="research-drawer" aria-labelledby="researchDetailTitle">
+    <div class="drawer-toolbar"><span>POOL RESEARCH</span><button id="researchDrawerRefresh" type="button" title="Request bounded fresh pool research; checked manual inputs are saved on this device">Refresh pool data</button><button id="researchDrawerClose" type="button" aria-label="Close pool research">Close <span aria-hidden="true">×</span></button></div>
+    <div id="researchDetail" class="research-detail"><h2 id="researchDetailTitle">Pool research</h2></div>
+    <section id="researchRangeBuilder" class="research-extension" aria-label="Range builder"></section>
+    <section id="researchBots" class="research-extension" aria-label="Research bot comparison"></section>
+    <section id="researchManualCheck" class="research-extension" aria-label="Manual strategy check"></section>
+  </dialog>
+</body>
+</html>

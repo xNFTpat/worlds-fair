@@ -1,0 +1,95 @@
+import assert from 'node:assert/strict';
+import {checkRanges,validateSettings} from '../monitoring/range-engine.mjs';
+import '../public/range-alerts.js';
+import {build} from 'esbuild';
+import {mkdtemp} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const start=Date.parse('2026-09-07T12:00:00Z'),m=60000;
+const settings={wallets:['patsol'],defaultGraceMinutes:60,maxDataAgeMinutes:10,pools:{}};
+const row={id:'solana:pool:wallet',wallet:'patsol',chain:'solana',poolAddress:'pool',pair:'TEST/SOL',pnlUsd:-2};
+function payload(inRange,time=start){const at=new Date(time).toISOString();return {positions:[{...row,inRange,fetchedAt:at}],sources:{'positions:patsol':{status:'fresh',lastSuccessAt:at}}};}
+const run=(p,s,t=start,c=settings)=>checkRanges(p,s,c,t);
+let first=run(payload(false));
+assert.equal(first.events[0].kind,'range-exit');assert.equal(first.events[0].alreadyOutAtStart,true);
+assert.equal(run(payload(false,start+5*m),first.state,start+5*m).events.length,0);
+let regular=first;
+for(let t=5;t<=55;t+=5)regular=run(payload(false,start+t*m),regular.state,start+t*m);
+assert.equal(run(payload(false,start+59*m),regular.state,start+60*m).events.length,0,'deadline needs a new observation, not a merely recent old row');
+let due=run(payload(false,start+60*m),regular.state,start+60*m);assert.equal(due.events[0].kind,'grace-expired');
+assert.equal(run(payload(false,start+65*m),due.state,start+65*m).events.length,0);
+let back=run(payload(true,start+66*m),due.state,start+66*m);assert.equal(back.events[0].kind,'range-return');
+let again=run(payload(false,start+67*m),back.state,start+67*m);assert.equal(again.events[0].kind,'range-exit');assert.equal(again.state.positions[row.id].outSince,new Date(start+67*m).toISOString());
+const stale=run(payload(false,start),first.state,start+20*m);assert.equal(stale.events[0].kind,'data-unavailable');
+assert.equal(run(null,stale.state,start+30*m).events.length,0,'do not repeat outage warnings');
+const restored=run(payload(false,start+80*m),stale.state,start+80*m);assert.deepEqual(restored.events.map(e=>e.kind),['data-restored','grace-restarted']);
+assert.equal(restored.state.positions[row.id].dueAt,new Date(start+140*m).toISOString());
+assert.ok(!restored.events.some(e=>e.kind==='grace-expired'));
+const unknown=run(payload(null,start+15*m),first.state,start+15*m);assert.equal(unknown.events[0].kind,'range-unknown');
+const empty={...payload(true,start+20*m),positions:[]};
+assert.deepEqual(run(empty,first.state,start+20*m).events,[]);assert.deepEqual(run(empty,first.state,start+20*m).state.positions,{});
+const badEmpty={...empty,sources:{}};assert.ok(run(badEmpty,first.state,start+20*m).state.positions[row.id]);
+const custom={...settings,pools:{'solana:pool':{graceMinutes:15}}};
+const short=run(payload(false),null,start,custom),shortMid=run(payload(false,start+10*m),short.state,start+10*m,custom);assert.equal(run(payload(false,start+15*m),shortMid.state,start+15*m,custom).events[0].kind,'grace-expired');
+assert.equal(run(payload(false),null,start,{...custom,pools:{'solana:pool':{graceMinutes:15,enabled:false}}}).events.length,0);
+assert.equal(run(payload(true)).events.length,0,'starting in range is quiet');
+assert.throws(()=>validateSettings({...settings,defaultGraceMinutes:-1}));
+assert.throws(()=>validateSettings({...settings,pools:{x:{graceMinutes:1.5}}}));
+const gap=run(payload(false,start+70*m),first.state,start+70*m);
+assert.equal(gap.events[0].kind,'grace-restarted','a scheduler gap also breaks continuity');
+const older=run(payload(true,start+54*m),regular.state,start+56*m);
+assert.equal(older.state.positions[row.id].inRange,false,'an older snapshot cannot reverse the latest state');
+const mixed=payload(true);mixed.positions[0].rangeStatus={total:2,out:1};
+assert.equal(run(mixed).state.positions[row.id].inRange,false,'any NFT out of range should trigger the pool alert');
+mixed.positions[0].rangeStatus.out=null;
+assert.equal(run(mixed).events[0].kind,'range-unknown');
+const inbox=s=>({state:s,events:[]}),{inboxEvents,ruleFor,latestEvents}=globalThis.LPRangeAlerts;
+const badgeHistory=[
+  {id:'a-exit',positionId:'a',at:'2026-09-07T12:00:00Z'},
+  {id:'b-exit',positionId:'b',at:'2026-09-07T12:01:00Z'},
+  {id:'a-return',positionId:'a',at:'2026-09-07T12:02:00Z'},
+  {id:'wallet-outage',wallet:'patsol',at:'2026-09-07T12:03:00Z'},
+  {id:'wallet-restored',wallet:'patsol',at:'2026-09-07T12:04:00Z'}
+];
+assert.deepEqual(latestEvents(badgeHistory).map(e=>e.id),['wallet-restored','a-return','b-exit'],'badge groups repeated updates by position and wallet');
+assert.equal(badgeHistory.length,5,'grouping leaves the complete activity history intact');
+const readLatest=new Set(['wallet-restored','a-return']);
+assert.deepEqual(latestEvents(badgeHistory).filter(e=>!readLatest.has(e.id)).map(e=>e.id),['b-exit'],'older unread events do not reappear in the badge');
+assert.equal(inboxEvents(inbox(regular.state)).length,0);
+assert.equal(inboxEvents(inbox(due.state)).length,1);
+assert.equal(inboxEvents(inbox(regular.state),{'solana:pool':{graceMinutes:30}}).length,1);
+assert.equal(inboxEvents(inbox(restored.state)).length,0,'outages cannot manufacture a custom reminder');
+assert.equal(inboxEvents(inbox(gap.state)).length,0);
+assert.equal(inboxEvents(inbox(back.state)).length,1,'keep the due reminder after recovery');
+const closed=run({...payload(false,start+65*m),positions:[]},due.state,start+65*m);
+assert.equal(Object.keys(closed.state.positions).length,0);
+assert.equal(inboxEvents(inbox(closed.state)).length,1,'keep the due reminder after closing');
+assert.equal(inboxEvents(inbox(closed.state),{'solana:pool':{graceMinutes:60,enabled:false}}).length,0);
+assert.equal(inboxEvents(inbox(due.state))[0].id,inboxEvents(inbox(closed.state))[0].id,'stable reminder identity across reads and closure');
+assert.equal(ruleFor(row,{'solana:pool':{graceMinutes:'banana'}}).graceMinutes,60);
+const earlyBack=run(payload(true,start+5*m),first.state,start+5*m);
+assert.equal(inboxEvents(inbox(earlyBack.state)).length,0,'recovery before the deadline stays quiet');
+const dir=await mkdtemp(join(tmpdir(),'lp-range-tests-'));
+await build({entryPoints:['src/range-alerts.ts'],bundle:true,platform:'node',format:'esm',outfile:join(dir,'inbox.mjs')});
+const {RangeInbox}=await import(pathToFileURL(join(dir,'inbox.mjs')));
+const memory=new Map();let writes=0;
+const durable=new RangeInbox({storage:{get:async key=>structuredClone(memory.get(key)),put:async(key,value)=>{writes++;memory.set(key,structuredClone(value));}},blockConcurrencyWhile:async work=>work()});
+const get=()=>durable.fetch(new Request('https://inbox')).then(r=>r.json());
+assert.equal((await get()).state,null);
+const now=Date.now(),fresh=payload(false,now);fresh.updatedAt=new Date(now).toISOString();
+const observe=p=>durable.fetch(new Request('https://inbox',{method:'POST',body:JSON.stringify({payload:p,wallets:['patsol']})})).then(r=>r.json());
+await observe(fresh);assert.equal((await get()).events.length,1);
+assert.equal((await observe(fresh)).unchanged,true);assert.equal(writes,1);
+await observe({...fresh,updatedAt:new Date(now-1).toISOString()});assert.equal(writes,1,'ignore late concurrent refresh completion');
+await observe({...fresh,updatedAt:new Date(now+1).toISOString()});assert.equal(writes,2);assert.equal((await get()).events.length,1,'no repeated range exit');
+assert.equal((await durable.fetch(new Request('https://inbox',{method:'DELETE'}))).status,405);
+console.log('PASS: range transitions, custom grace reminders, mixed pools, fresh confirmations, data gaps, closed/recovered history and durable duplicate suppression');
+
+const {actionablePositions}=globalThis.LPRangeAlerts;
+assert.equal(actionablePositions(inbox(first.state),{},start).length,1);
+assert.equal(actionablePositions(inbox(back.state),{},start+66*m).length,0,'recovery clears attention on every device without local read state');
+assert.equal(actionablePositions(inbox(stale.state),{},start+20*m).length,0,'stale observations are not fresh review alerts');
+assert.equal(actionablePositions(inbox(closed.state),{},start+65*m).length,0,'closed positions clear attention');
+assert.equal(actionablePositions(inbox(first.state),{'solana:pool':{enabled:false}},start).length,0);
+console.log('PASS: quiet actionable-only range watch and automatic recovery on all devices');

@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {createPhantomSession} from './fixtures/legacy-phantom.mjs';
+let current;const updates=[];const report=s=>{current=s;updates.push(s);};
+await createPhantomSession(()=>null,report).connect();assert.match(current.message,/not available/);
+const events={};let calls=0;
+const provider={isPhantom:true,on:(e,f)=>events[e]=f,connect:async()=>{calls++;return {publicKey:{toString:()=> 'sol-address'}}},disconnect:async()=>events.disconnect()};
+const session=createPhantomSession(()=>provider,report);
+await session.connect();assert.equal(current.address,'sol-address');assert.equal(calls,1);
+events.accountChanged({toString:()=> 'other-address'});assert.equal(current.address,'other-address');
+events.accountChanged(null);assert.equal(current.address,null);
+await session.connect();await session.disconnect();assert.equal(current.address,null);
+provider.connect=async()=>{throw {code:4001}};await session.connect();assert.ok(updates.some(s=>s.message==='Connection cancelled.'));assert.equal(current.pending,false);
+let resolve;provider.connect=()=>new Promise(r=>resolve=r);const attempt=session.connect();await session.connect();events.disconnect();resolve({publicKey:{toString:()=> 'stale-address'}});await attempt;assert.equal(current.address,null);
+console.log('PASS: Phantom missing/rejected/connected/account-change/disconnect and pending-request races');

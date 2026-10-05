@@ -1,0 +1,37 @@
+name = "lp-terminal-worldsfair"
+main = "src/worldsfair.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[assets]
+binding = "ASSETS"
+directory = "./public"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[durable_objects.bindings]]
+name = "RANGE_ALERTS"
+class_name = "RangeInbox"
+[[durable_objects.bindings]]
+name = "BACKGROUND_SCANNER"
+class_name = "BackgroundScanner"
+[[migrations]]
+tag = "worldsfair-v1"
+new_sqlite_classes = ["RangeInbox", "BackgroundScanner"]
+
+[vars]
+MIN_TVL_USD = "5000"
+ROBINHOOD_CHAIN_ID = "4663"
+WALLETS = ""
+SOLANA_RPC = "https://api.mainnet-beta.solana.com"
+
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[kv_namespaces]]
+binding = "LP_CACHE"
+id = "1ed8d4f36c51431c89e04cb97c178ca1"

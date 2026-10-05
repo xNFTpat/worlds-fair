@@ -1,0 +1,57 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {mkdtemp,readFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const dir=await mkdtemp(join(tmpdir(),'lp-break-even-'));
+for(const [name,entry] of [['model','src/break-even.ts'],['adapter','execution/position-analysis.ts']])await build({entryPoints:[entry],bundle:true,platform:'node',mainFields:['main'],format:'esm',banner:{js:"import {createRequire} from 'node:module';const require=createRequire(import.meta.url);"},outfile:join(dir,name+'.mjs')});
+const {valueAtPrice,estimateBreakEven}=await import(pathToFileURL(join(dir,'model.mjs')));
+const {modelFromRecords,checkModelToken}=await import(pathToFileURL(join(dir,'adapter.mjs')));
+const close=(a,b)=>assert.ok(Math.abs(a-b)<1e-9,`${a} != ${b}`);
+const m={bins:[{price:2,baseAmount:10,quoteAmount:0}],baseFees:0,quoteFees:0,quoteUsd:1,netCostUsd:15,currentPrice:1};
+close(valueAtPrice(m,1),-5);close(valueAtPrice(m,2),5);close(valueAtPrice(m,3),5);
+close(estimateBreakEven(m).price,1.5);
+close(estimateBreakEven({...m,currentPrice:1.8}).changePct,-100/6);
+assert.equal(estimateBreakEven({...m,netCostUsd:21}).status,'unreachable');
+assert.equal(estimateBreakEven({...m,netCostUsd:-5}).status,'no-loss-crossing');
+assert.equal(estimateBreakEven({...m,quoteFees:16}).status,'no-loss-crossing');
+close(estimateBreakEven({...m,netCostUsd:30,baseFees:1,quoteFees:3}).price,7,'base-token fee price exposure continues above the LP range');
+const multi={...m,bins:[{price:1,baseAmount:0,quoteAmount:10},{price:2,baseAmount:5,quoteAmount:0}],netCostUsd:17};
+close(estimateBreakEven(multi).price,1.4);
+for(const price of [0.25,0.9,1,1.1,1.4,2,5])assert.ok(valueAtPrice(multi,price)<=valueAtPrice(multi,price+0.01));
+for(const invalid of [{...m,quoteUsd:0},{...m,bins:[]},{...m,baseFees:-1},{...m,bins:[{price:0,baseAmount:1,quoteAmount:0}]}])assert.throws(()=>estimateBreakEven(invalid));
+console.log('PASS: bin-by-bin conversion, profit cushion, partial quote holdings, unclaimed fee exposure, plateaus and no-loss cases');
+
+const n=v=>({toString:()=>String(v),isZero:()=>v===0});
+const history={hasNext:false,tokenXPrice:'1',tokenYPrice:'100',positions:[{positionAddress:'a',isClosed:false,allTimeDeposits:{total:{usd:'120'}},allTimeWithdrawals:{total:{usd:'20'}},allTimeFees:{total:{usd:'10'},tokenX:{amount:'1'},tokenY:{amount:'0.001'}}}]};
+const data={totalXAmount:'100000000',totalYAmount:'0',feeX:n(5000000),feeY:n(10000000),totalClaimedFeeXAmount:n(1000000),totalClaimedFeeYAmount:n(1000000),rewardOne:n(0),rewardTwo:n(0),positionBinData:[{pricePerToken:'0.01',positionXAmount:'100000000',positionYAmount:'0'}]};
+const records=[{publicKey:{toBase58:()=>'a'},positionData:data}];
+const config={solX:false,decX:6,decY:9,priceYX:0.01};
+const decoded=modelFromRecords(history,records,config);
+close(decoded.netCostUsd,90);close(decoded.baseFees,5);close(decoded.quoteFees,0.01);close(valueAtPrice(decoded,.01),16);
+close(estimateBreakEven(decoded).price,(.9-.01)/105);
+const reverseHistory=structuredClone(history);reverseHistory.tokenXPrice='100';reverseHistory.tokenYPrice='1';reverseHistory.positions[0].allTimeFees.tokenX.amount='.001';reverseHistory.positions[0].allTimeFees.tokenY.amount='1';
+const reverseData={...data,totalXAmount:'0',totalYAmount:'100000000',feeX:data.feeY,feeY:data.feeX,positionBinData:[{pricePerToken:'100',positionXAmount:'0',positionYAmount:'100000000'}]};
+const reverse=modelFromRecords(reverseHistory,[{...records[0],positionData:reverseData}],{solX:true,decX:9,decY:6,priceYX:100});
+assert.deepEqual(reverse,decoded,'SOL as token X must produce the same token/SOL model');
+assert.throws(()=>modelFromRecords({...history,hasNext:true},records,config));
+assert.throws(()=>modelFromRecords(history,[{...records[0],positionData:{...data,totalClaimedFeeXAmount:n(2000000)}}],config),/catching up/);
+assert.throws(()=>modelFromRecords(history,[{...records[0],positionData:{...data,rewardOne:n(1)}}],config),/reward/);
+assert.throws(()=>modelFromRecords(history,records,{...config,priceYX:.02}),/moved/);
+const tokenWithExtension=type=>{const tlv=Buffer.alloc(4);tlv.writeUInt16LE(type);return {owner:{equals:k=>k.toBase58()==='TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'},mint:{tlvData:tlv}};};
+checkModelToken(tokenWithExtension(1)); // TransferFeeConfig: gross marked value, explicitly before exit costs.
+checkModelToken(tokenWithExtension(18)); // MetadataPointer does not change token quantities.
+assert.throws(()=>checkModelToken(tokenWithExtension(10)),/InterestBearingConfig/);
+assert.throws(()=>checkModelToken(tokenWithExtension(14)),/TransferHook/);
+console.log('PASS: decimals, reversed token ordering, deposits/withdrawals/claims, claim-index lag, reward and inconsistent-read guards');
+
+await import(pathToFileURL(join(process.cwd(),'public/candle-charts.js')));
+const {cleanCandles,orientEstimate}=globalThis.LPCandles;
+assert.deepEqual(cleanCandles([{t:2,o:2,h:3,l:1,c:2},{t:1,o:1,h:2,l:1,c:2},{t:2,o:2,h:4,l:2,c:3},{t:3,o:1,h:1,l:1,c:3},{t:4,o:0,h:1,l:0,c:1}]).map(c=>[c.time,c.close]),[[1,2],[2,3]],'sort, deduplicate and reject malformed OHLC without synthesizing data');
+const e={status:'estimated',baseAddress:'token',quoteAddress:'sol',price:2,currentPrice:1,changePct:100};
+const reversed=orientEstimate(e,{baseAddress:'sol',quoteAddress:'token'});
+close(reversed.price,0.5);close(reversed.currentPrice,1);close(reversed.changePct,-50);
+assert.equal(orientEstimate(e,{baseAddress:'other',quoteAddress:'sol'}).status,'unavailable');
+new Function(await readFile('public/candle-charts.js','utf8'));
+console.log('PASS: candle integrity, chart/model mint matching and reciprocal price-line orientation');

@@ -1,0 +1,1152 @@
+<!doctype html>
+<html lang="en" data-show-robinhood="false">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Still · A clearer way to LP</title>
+<meta name="description" content="Check Solana liquidity pools before your next move. Understand fees, exit costs and downside, then explore a paper portfolio.">
+<meta name="theme-color" content="#f7f6f0">
+<meta name="color-scheme" content="light">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Silkscreen:wght@400;700&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --drab: #1f2318;      /* base */
+    --drab-2: #2a2f20;    /* raised surfaces */
+    --moss: #5e6b36;      /* lines, quiet accents */
+    --moss-2: #3d4529;
+    --khaki: #a69c72;     /* secondary text */
+    --sand: #e9e2c6;      /* primary text */
+    --amber: #e0913a;     /* fee heat — the one loud colour */
+    --sol: #9fb35a;
+    --rh: #d9a05b;
+    --red: #c9663f;
+    font-size: 15px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--drab); color: var(--sand);
+    font-family: "Instrument Sans", system-ui, sans-serif; font-feature-settings: "tnum" 1; }
+  a { color: inherit; }
+  main { max-width: 1280px; margin: 0 auto; padding: 22px 20px 80px; }
+  .px { font-family: "Silkscreen", monospace; letter-spacing: 0; }
+
+  /* header */
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .brand:empty { display: none; }
+  #wallets { display: flex; gap: 14px; font-size: .9rem; color: var(--khaki); flex-wrap: wrap; }
+  #wallets b { color: var(--sand); font-weight: 600; }
+  #meta { font-size: .85rem; color: var(--khaki); }
+  #meta .err { color: var(--red); }
+
+  /* stats strip */
+  .strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .tile { background: var(--drab-2); border: 1px solid var(--moss-2); border-radius: 6px; padding: 12px 14px; min-height: 84px; }
+  .tile small { display: block; color: var(--khaki); font-size: .8rem; margin-bottom: 6px; }
+  .tile .v { font-size: 1.45rem; font-weight: 600; line-height: 1.1; }
+  .tile .sub { color: var(--khaki); font-size: .82rem; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile.hot .v { color: var(--amber); }
+
+  /* tabs */
+  nav { display: flex; gap: 4px; border-bottom: 1px solid var(--moss-2); margin-bottom: 12px; overflow-x: auto; }
+  nav button { font-family: "Silkscreen", monospace; font-size: .78rem; background: none; border: 0; color: var(--khaki);
+    padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+  nav button[aria-selected="true"] { color: var(--sand); border-bottom-color: var(--amber); }
+  nav button:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
+
+  /* filters */
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 8px 0 12px; }
+  .filters label { display: flex; align-items: center; gap: 6px; font-size: .86rem; color: var(--khaki); }
+  .filters input, .filters select { font: inherit; padding: 5px 8px; border: 1px solid var(--moss-2); border-radius: 4px;
+    background: var(--drab-2); color: var(--sand); width: 105px; }
+  .filters select { width: auto; }
+  .filters button { font: inherit; padding: 6px 12px; border: 1px solid var(--moss); border-radius: 4px; background: var(--moss-2); color: var(--sand); cursor: pointer; }
+  .pool-scroll { max-width:100%; overflow-x:auto; }
+  .custom-filters { font-size:.85rem; }
+  .custom-filters summary { cursor:pointer; }
+  .token-identity { overflow-wrap:anywhere; font-size:.8rem; }
+  .seg { display: inline-flex; border: 1px solid var(--moss-2); border-radius: 4px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: var(--drab-2); color: var(--khaki); padding: 6px 12px; }
+  .seg button[aria-pressed="true"] { background: var(--moss); color: var(--sand); }
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+
+  /* table */
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { padding: 9px 10px; text-align: right; border-bottom: 1px solid var(--moss-2); white-space: nowrap; }
+  th { font-weight: 500; color: var(--khaki); cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--drab); }
+  th[aria-sort="descending"] { color: var(--sand); }
+  th:first-child, td:first-child { text-align: left; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover td { background: var(--drab-2); }
+  td.pair a { text-decoration: none; font-weight: 600; }
+  td.pair a:hover { text-decoration: underline; }
+  td.pair small { display: block; color: var(--khaki); font-weight: 400; font-size: .78rem; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .dot.solana { background: var(--sol); } .dot.robinhood { background: var(--rh); }
+  .tag { display: inline-block; font-size: .7rem; padding: 1px 6px; border: 1px solid var(--moss-2); border-radius: 3px; margin-left: 4px; color: var(--khaki); }
+  .tag.stock-token { border-color: var(--rh); color: var(--rh); }
+  .tag.new { border-color: var(--sol); color: var(--sol); }
+  .tag.trending { border-color: var(--amber); color: var(--amber); }
+  .tag.suspect { border-color: var(--red); color: var(--red); }
+  td.heat { position: relative; min-width: 110px; }
+  td.heat span { position: relative; z-index: 1; }
+  td.heat i { position: absolute; left: 6px; top: 7px; bottom: 7px; background: var(--amber); opacity: .28; border-radius: 2px; }
+  td.na { color: var(--moss); }
+  .pos { color: var(--sol); } .neg { color: var(--red); }
+  #empty { padding: 36px 0; color: var(--khaki); }
+
+  /* positions */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .card { background: var(--drab-2); border: 1px solid var(--moss-2); border-radius: 6px; padding: 12px 14px; }
+  .card h3 { margin: 0 0 6px; font-size: 1rem; }
+  .card .row { display: flex; justify-content: space-between; font-size: .9rem; color: var(--khaki); padding: 3px 0; }
+  .card .row b { color: var(--sand); font-weight: 600; }
+  .note { color: var(--khaki); font-size: .82rem; margin-top: 10px; max-width: 70ch; }
+
+  /* drawer */
+  #drawer { position: fixed; top: 0; right: 0; height: 100%; width: min(520px, 100%); background: var(--drab-2);
+    border-left: 1px solid var(--moss); transform: translateX(100%); transition: transform .22s; overflow-y: auto; padding: 20px; z-index: 10; }
+  #drawer.open { transform: none; }
+  #drawer h2 { margin: 0 0 4px; font-size: 1.3rem; }
+  #drawer .close { position: absolute; top: 14px; right: 14px; background: none; border: 1px solid var(--moss-2); color: var(--khaki); border-radius: 4px; padding: 4px 9px; cursor: pointer; }
+  .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; font-size: .9rem; margin: 12px 0; }
+  .kv div { display: flex; justify-content: space-between; border-bottom: 1px solid var(--moss-2); padding: 4px 0; }
+  .kv span:first-child { color: var(--khaki); }
+  .actions { display: flex; gap: 8px; align-items: center; margin: 14px 0; flex-wrap: wrap; }
+  .actions input { font: inherit; width: 90px; padding: 6px 8px; border: 1px solid var(--moss-2); background: var(--drab); color: var(--sand); border-radius: 4px; }
+  .actions button { font: inherit; padding: 7px 14px; border-radius: 4px; cursor: pointer; border: 1px solid var(--moss); background: var(--moss-2); color: var(--sand); }
+  .actions button.primary { background: var(--amber); border-color: var(--amber); color: var(--drab); font-weight: 600; }
+  .actions button[disabled] { opacity: .3; cursor: not-allowed; filter: grayscale(1); }
+  .ranges td, .ranges th { padding: 7px 8px; font-size: .85rem; }
+  .ranges tr.pick td { background: rgba(224,145,58,.14); }
+  .flag { display: block; color: var(--rh); font-size: .85rem; margin: 3px 0; }
+  tr.grp td { background: var(--drab-2); font-weight: 600; }
+  tr.sub td { font-size: .86rem; color: var(--khaki); border-bottom-color: transparent; }
+  tr.sub td.pos, tr.sub td.neg { color: inherit; }
+  tr.sub td.pos { color: var(--sol); } tr.sub td.neg { color: var(--red); }
+  .strategy { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--moss-2); border-radius: 6px; background: var(--drab); }
+  .verdict { font-weight: 700; margin: 10px 0 6px; font-size: 1rem; }
+  .verdict.ok { color: var(--sol); } .verdict.warn { color: var(--amber); } .verdict.bad { color: var(--red); } .verdict.info { color: var(--khaki); }
+  .finding { display: grid; gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--moss-2); font-size: .86rem; }
+  .finding span { color: var(--khaki); }
+  .finding.ok b { color: var(--sol); } .finding.warn b { color: var(--amber); } .finding.bad b { color: var(--red); } .finding.info b { color: var(--khaki); }
+  .caveat { color: var(--khaki); font-size: .8rem; margin-top: 10px; line-height: 1.4; }
+
+  /* learn */
+  dl { max-width: 72ch; }
+  dt { font-weight: 600; margin-top: 14px; }
+  dd { margin: 4px 0 0; color: var(--khaki); line-height: 1.5; }
+
+  @media (max-width: 760px) {
+    :root { font-size: 14px; }
+    .hide-m { display: none; }
+    #grid td.pair { min-width: 145px; max-width: 165px; white-space: normal; }
+    #grid td.pair small { max-width: 165px; white-space: normal; line-height: 1.5; }
+  }
+  @media (prefers-reduced-motion: reduce) { #drawer { transition: none; } }
+</style>
+<link rel="icon" type="image/svg+xml" href="/brand/still-mark.svg">
+
+<link rel="stylesheet" href="/hub.css">
+<link rel="stylesheet" href="/sunday.css">
+<link rel="stylesheet" href="/range-alerts.css">
+<link rel="stylesheet" href="/paper-bot.css">
+<link rel="stylesheet" href="/terminal.css">
+<link rel="stylesheet" href="/experience.css">
+<link rel="stylesheet" href="/execution.css">
+<link rel="stylesheet" href="/owner-access.css">
+<link rel="stylesheet" href="/main-pools.css">
+<link rel="stylesheet" href="/main-pool-drawer.css">
+<link rel="stylesheet" href="/worldsfair.css">
+<script src="/worldsfair.js"></script>
+<link rel="stylesheet" href="/product.css">
+<script defer src="/product-brand.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#mainResearchMount">Skip to content</a>
+<main><p id="operationNotice" class="attention-item" hidden role="status"></p><p id="refreshResult" role="status" class="note"></p>
+  <header class="masthead">
+    <a class="brand-lockup product-brand" href="/#alpha" aria-label="Still home"><img class="product-mark" src="/brand/still-mark.svg" alt="" width="38" height="38"><span class="wordmark" data-product-name>Still</span><span class="product-brand-caption">Clarity before capital.</span></a>
+    <div class="mast-right"><span class="worldsfair-badge">Paper demo · Solana</span><button type="button" id="ownerAccessTop" class="quiet" data-mainnet-controls hidden inert>Unlock controls</button><button id="refresh" class="quiet">Refresh ↻</button></div>
+  </header>
+
+  <nav role="tablist" aria-label="Still sections" id="tabs">
+    <button role="tab" data-tab="alpha" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v5H4zM14 15h6v5h-6z"/></svg><span>Pools</span></button>
+    <button role="tab" data-tab="baskets" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16v12H4zM9 8V5h6v3M4 13h16"/></svg><span>Paper portfolio</span></button>
+    <button role="tab" data-tab="bot" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V9m7 11V4m7 16v-7M2 9h6m1-5h6m1 9h6"/></svg><span>Strategies</span></button>
+  </nav>
+  <div class="utility-nav"><span class="product-mode"><i aria-hidden="true"></i>Paper practice. Real market data.</span><div><button class="text-button" data-go="learn">How it works <span aria-hidden="true">↗</span></button><details class="product-more"><summary aria-label="More research options">More <span aria-hidden="true">⌄</span></summary><a href="/research.html">Advanced research ↗</a><button class="text-button" data-go="settings" data-robinhood-only>Other-chain reference</button><button class="text-button" data-go="alerts" data-robinhood-only>Range watch <span id="alertBadge" hidden></span></button></details></div></div>
+  <div class="statusline"><span id="meta" role="status" aria-live="polite">Reading market data…</span><span id="today"></span></div>
+  <section id="view-home">
+    <div class="home-heading"><div><span class="eyebrow px">PAPER / OVERVIEW</span><h1>A little more<br><em>on-chain.</em></h1></div><button class="outline" data-go="top">Explore pools <span>↗</span></button></div>
+    <div class="portfolio-shortcuts"><button data-jump="homePositions">Open positions ↓</button><button data-jump="homeWallets">Wallets ↓</button><button data-go="history">Your history ↗</button></div>
+    <div class="overview" id="homeMetrics" aria-live="polite"></div><section class="capital-map" id="capitalMap" aria-label="Current LP allocation"></section>
+    <div class="home-columns">
+      <div>
+        <div class="section-heading"><h2>Your wallets</h2><button class="text-button" id="refreshWallets">Refresh wallets ↻</button></div>
+        <div id="homeWallets" class="wallet-grid"><p class="muted">Loading your wallets…</p></div>
+        <div class="section-heading"><h2>Open positions</h2><button class="text-button" data-go="positions">All positions ↗</button></div>
+        <div id="homePositions"></div><section id="homeFleet"></section><div id="homeBot" class="bot-home"></div><div id="homeLab" class="bot-home"></div>
+      </div>
+      <aside class="home-aside">
+        <div class="section-heading"><h2>Needs a look</h2><button class="text-button" data-go="alerts" id="homeAlertLink">Alerts ↗</button></div><div id="attention"></div>
+        <details class="source-details"><summary>Data status <span id="sourceSummary"></span></summary><div id="sourceHealth"></div><p class="footnote">Saved readings stay labelled when a source is unavailable.</p></details>
+      </aside>
+    </div>
+    <div class="closing-note"><span class="px">THE NORTH STAR</span><p>Understand the pool. Explore the range. Keep the longer view.</p><button class="text-button" data-go="learn">LP guide ↗</button></div>
+  </section>
+  <div id="portfolioToolbar" hidden><div id="wallets"></div><button class="outline" id="refreshPositions">Refresh wallets & positions ↻</button></div>
+  <section id="view-bot" hidden>
+    <div class="section-heading"><div><span class="eyebrow px">SHARED PAPER EXPERIMENTS</span><h1 class="page-title">Watch. Compare. Learn.</h1><p>Four shared strategies practise with paper funds. Follow their decisions and move eligible profits into your paper portfolio.</p></div><button id="refreshFleet" class="outline">Refresh results ↻</button></div>
+    <p id="fleetStatus" role="status">Reading paper wallet activity…</p><div id="fleetWallets" class="fleet-wallets"></div><section id="fleetDetail"></section>
+    <details class="alert-fold" open><summary>Closed trades</summary><label class="fleet-trial-filter">Show <select id="fleetTrial"><option value="all">All trials</option><option value="current">Current strategy trial</option></select></label><p class="note">The rows below show loaded records. Load complete history to review earlier closes.</p><div id="fleetHistory"></div><button class="text-button" id="fleetMore">Load complete trade history</button></details>
+    <details class="alert-fold"><summary>Decisions</summary><div id="fleetDecisions"></div></details>
+    <details class="alert-fold"><summary>Unscorable outcomes</summary><div id="fleetUnknown"></div></details>
+    <details class="alert-fold product-research-fold"><summary>Strategy research and methodology</summary><section id="fleetReview"></section><section id="fleetResearch"></section></details><details class="alert-fold" data-internal-controls hidden inert><summary>Paper wallet controls</summary><div class="bot-controls"><button class="outline" data-fleet-action="pause">Pause entries</button><button class="outline" data-fleet-action="resume">Resume entries</button><button class="outline" data-fleet-action="stop">Stop & close paper positions</button></div><p id="fleetControlStatus" role="status"></p><form id="fleetKeyForm"><label>Terminal key <input id="fleetKey" type="password" autocomplete="off" required></label><button>Unlock controls</button></form></details>
+    <p class="note">Counterfactual wallets, not funded accounts. Gross fees, token inventory, transfer taxes and exit quotes are measured separately. A missing outcome stays unavailable. These trials run Meteora DLMM only; discovery also covers other venues.</p>
+    <details id="oldTrials" class="alert-fold"><summary>Earlier trials & retained results</summary><p>New entries have moved to the four wallets above. Earlier open positions continue under their original exit rules.</p>
+    <div class="section-heading"><div><span class="eyebrow px">SHARED PAPER EXPERIMENTS</span><h2>Earlier paper trials</h2><p>Compare decisions, time in range and net results.</p></div><button id="refreshBot" class="outline">Refresh results ↻</button></div>
+    <div id="botStyleNav" class="bot-style-nav" role="group" aria-label="Paper strategy"><button data-bot-style="active" aria-pressed="true"><small>01 / ACTIVE LP</small><b>Active LP</b><span>Two-sided · sustained volume</span></button><button data-bot-style="scalp" aria-pressed="false"><small>02 / LAUNCHES</small><b>Launch scalp</b><span>Short bids · short holds</span></button><button data-bot-style="hold" aria-pressed="false"><small>03 / PATIENCE</small><b>Longer hold</b><span>Established pools · up to 48h</span></button><button data-bot-style="pullback" aria-pressed="false"><small>04 / PULLBACKS</small><b>Pullback bids</b><span>Buy below · wait for recovery</span></button></div>
+    <p class="note">All four styles scan SOL-paired DLMM pools, including supported Token-2022 mints. Each keeps its own entry and exit rules; transfer fees are included in paper estimates.</p>
+    <section id="activeBotPanel"><h2>Active LP</h2>
+    <div id="botStatus" class="bot-status-panel" role="status">Reading the paper trial…</div>
+    <div id="botMetrics" class="overview"></div>
+    <section class="bot-chart"><div class="section-heading"><h2 id="botChartTitle">Outcomes</h2><span id="botChartNote" class="note">Last 7 UTC days · completed samples</span></div><div id="botChart"></div></section>
+    <div class="bot-columns"><section><div class="section-heading"><h2>Paper positions</h2><span id="botPositionCount" class="note"></span></div><div id="botPositions"></div></section><section><div class="section-heading"><h2>Watching · no entry yet</h2><span class="note">Up to 3 ideas</span></div><div id="botWatching"></div></section></div>
+    <details class="alert-fold"><summary>Why pools were skipped</summary><div id="botSkips"></div></details>
+    <details class="alert-fold"><summary>Decisions & closed trades</summary><div id="botJournal"></div><div id="botClosed"></div><button id="botMoreTrades" class="text-button">Load older trades</button></details>
+    <details class="alert-fold"><summary>Unscorable attempts <span id="botUnknownCount"></span></summary><div id="botUnknown"></div><button id="botMoreUnknown" class="text-button" hidden>Load older unscorable attempts</button></details>
+    <details id="botBaselineFold" class="alert-fold"><summary>Original paper wallet · retained results</summary><div id="botBaseline">Reading the original wallet…</div><button id="botBaselineMore" class="text-button" hidden>Load older original trades</button></details>
+    <details class="alert-fold"><summary>Active LP controls</summary>
+      <div class="bot-controls"><button data-bot-action="resume" class="outline">Resume entries</button><button data-bot-action="pause" class="outline">Pause entries</button><button data-bot-action="stop" class="outline">Stop & close paper positions</button></div>
+      <p id="botControlStatus" class="note" role="status"></p>
+      <details id="botUnlock" class="alert-fold"><summary>Unlock controls</summary><form id="botKeyForm" class="filters"><label>Terminal key<input type="password" id="botKey" autocomplete="off" required></label><button>Unlock controls</button></form><p class="note">Uses your existing terminal key on this device. No wallet connection or signing key is needed for the paper trial.</p></details>
+    </details>
+    <details class="alert-fold"><summary>How Active LP works</summary><div id="botRules"></div></details>
+    </section>
+    <section id="paperLab" class="paper-lab" aria-labelledby="labTitle">
+      <div class="section-heading"><div><span class="eyebrow px">TRY IT. MEASURE IT.</span><h2 id="labTitle">Paper experiments</h2></div><button id="refreshLab" class="outline">Refresh lab ↻</button></div>
+      <p class="note">Independent 0.2 SOL trials. Every entry, exit and unscorable outcome stays in the record.</p>
+      <p id="labStatus" class="note" role="status">Reading the experiments…</p>
+      <div id="labArms"></div>
+      <details class="alert-fold"><summary>Pool checks & decisions</summary><div id="labChecks"></div></details>
+      <details class="alert-fold"><summary>Lab trade history</summary><div id="labTrades"></div><button id="labMoreTrades" class="text-button" hidden>Load older lab trades</button></details>
+      <details class="alert-fold"><summary>Lab rules & controls</summary>
+        <div id="labRules"></div>
+        <div class="bot-controls"><button class="outline" data-lab-action="resume">Resume lab entries</button><button class="outline" data-lab-action="pause">Pause lab entries</button><button class="outline" data-lab-action="stop">Stop & close lab positions</button></div>
+        <p id="labControlStatus" class="note" role="status">These controls apply to the three experiment series and any still-open archived paper positions.</p>
+      </details>
+    </section>
+    </details>
+  </section>
+  <section id="view-alerts" hidden>
+    <div class="section-heading"><div><span class="eyebrow px">KEEP AN EYE ON IT</span><h1 class="page-title">Range watch</h1></div><button id="refreshAlerts" class="outline">Check now ↻</button></div>
+    <p id="alertMonitorStatus" role="status">Reading your range monitor…</p>
+    <p class="note">Only positions needing a range review appear here. Resolved alerts clear automatically. Clear notifications hides the current reminders and saved activity on this browser; a new range episode can alert again. Checked every five minutes; nothing closes automatically.</p>
+    <div class="section-heading"><h2>Needs a review</h2><div><button id="undoAlerts" class="text-button" hidden>Undo clear</button><button id="readAllAlerts" class="outline">Clear notifications</button></div></div>
+    <div id="alertWatches" class="alert-watches"></div><details class="alert-fold"><summary>Review timing & muted positions</summary><div id="alertSettings"></div><p class="note">Review timing is saved on this device.</p></details>
+    <details id="positionActivity" class="alert-fold">
+      <summary>Position activity <span id="positionActivityCount"></span></summary>
+      <div class="section-heading"><span class="note">Quiet history · no unread count</span></div>
+      <div id="alertInbox"></div><button id="morePositionActivity" class="text-button" hidden>Show more activity</button>
+    </details>
+
+  </section>
+  <section id="view-pools" hidden>
+    <section class="product-intro" aria-labelledby="productHeadline">
+      <div class="product-intro-copy"><p class="product-eyebrow"><span></span> A LITTLE CLARITY GOES A LONG WAY</p><h1 id="productHeadline">A clearer way<br>to <em>LP.</em></h1><p class="product-intro-description">Check the costs. Understand the downside.<br>Try your next move with paper SOL.</p><a class="product-start" href="#mainResearchMount" data-product-explore>Find your next pool <span aria-hidden="true">↗</span></a></div>
+      <div class="product-illustration" aria-label="Check the pool, explore a range, build a paper portfolio"><div class="product-illustration-grid" aria-hidden="true"></div><div class="product-route"><div class="product-route-step"><span>01</span><div><strong>Check the pool</strong><small>Costs, concentration, exit conditions</small></div><i aria-hidden="true">↗</i></div><div class="product-route-bridge" aria-hidden="true"><i></i></div><div class="product-route-step product-route-focus"><span>02</span><div><strong>Find your range</strong><small>See what happens if price falls</small><div class="product-range-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div><i aria-hidden="true">↔</i></div><div class="product-route-bridge" aria-hidden="true"><i></i></div><div class="product-route-step"><span>03</span><div><strong>Build your long game</strong><small>Paper baskets, staking and vaults</small></div><i aria-hidden="true">↗</i></div></div></div>
+    </section><div class="product-process" aria-label="How to begin"><span><b>1</b> Open a pool</span><i aria-hidden="true">→</i><span><b>2</b> Read its pre-flight</span><i aria-hidden="true">→</i><span><b>3</b> Explore a paper range</span></div><div id="mainResearchMount"></div>
+    <details id="legacyPoolCatalogue" class="legacy-pool-catalogue" data-robinhood-only><summary>Other pools &amp; Robinhood</summary>
+    <div class="section-heading"><div><span class="eyebrow px">FIND YOUR NEXT POSITION</span><h1 class="page-title" id="poolTitle">Discover pools</h1></div><p class="muted">Find the flow. Understand the pair.</p></div>
+    <details id="marketTotals" class="market-totals"><summary>Market pulse <span>24h volume &amp; pool fees</span></summary><section class="strip" id="strip" hidden></section></details>
+
+    <div id="alphaModes" class="alpha-modes" role="group" aria-label="Pool selection" hidden>
+      <button type="button" data-alpha-mode="depth" aria-pressed="true"><b>More depth</b><small>$25k+ in pool · $50k+ daily volume</small></button>
+      <button type="button" data-alpha-mode="degen" aria-pressed="false"><b>Degen</b><small>$2.5k–$25k in pool · $25k+ daily volume</small></button>
+    </div>
+    <form class="filters" id="filters">
+      <div class="seg" role="group" aria-label="Chain">
+        <button type="button" data-chain="" aria-pressed="false" data-robinhood-only>Both</button>
+        <button type="button" data-chain="solana" aria-pressed="true">Solana</button>
+        <button type="button" data-chain="robinhood" aria-pressed="false" data-robinhood-only>Robinhood</button>
+      </div>
+      <label>Order <select id="poolOrder"><option value="volume30mUsd">Volume · 30m</option><option value="volumeAcceleration">Volume acceleration · 30m</option><option value="feeApr">Fee APR · annualised</option><option value="volume24hUsd">Volume · 24h</option><option value="fees1hUsd">Pool fees · 1h</option><option value="feeTvl1h">Fee / TVL · 1h</option><option value="fees24hUsd">Pool fees · 24h</option><option value="feeTvl24h">Fee / TVL · 24h</option><option value="tvlUsd">Pool size</option></select></label>
+      <label class="search-label">Search<input id="poolSearch" type="search" placeholder="Pair, token or address" aria-label="Search pools"></label>
+      <details class="custom-filters"><summary>Filters</summary><div class="filters">
+        <label>Age <select name="maxAgeH" id="poolAge"><option value="0">Any age</option><option value="96">Under 4 days</option><option value="24">Under 1 day</option></select></label>
+        <label>Type <select id="poolVenue" name="venue"><option value="">All covered types</option><option value="meteora-dlmm">Meteora DLMM</option><option value="uniswap-v2">Uniswap V2</option><option value="uniswap-v3">Uniswap V3</option><option value="uniswap-v4">Uniswap V4</option><option value="raydium-clmm">Raydium CLMM</option><option value="raydium-cpmm">Raydium CPMM</option><option value="raydium-amm">Raydium AMM</option><option value="orca-whirlpool">Orca</option><option value="meteora-damm-v2">Meteora DAMM v2</option></select></label>
+        <div id="poolSizeControls" class="filters">
+        <label>Pool size <select id="poolPreset"><option value="all">All sizes</option><option value="small">Small / degen · under $25k</option><option value="depth">More depth · $25k+</option><option value="custom">Custom</option></select></label>
+        <label>Min pool $<input name="minTvl" type="number" value="0" min="0" step="any"></label>
+        <label>Max pool $<input name="maxTvl" type="number" value="0" min="0" step="any"></label>
+        <label>Min 24h volume $<input name="minVol" type="number" value="0" min="0" step="any"></label>
+        <button type="submit">Apply</button><small>0 = no limit. Max excludes that boundary.</small>
+        </div>
+      </div></details>
+    </form>
+    <div id="discoveryBrief" class="decision-brief" aria-live="polite"></div>
+    <div class="pool-view-toolbar"><label class="saved-pools-filter"><input id="savedPoolsOnly" type="checkbox"> Saved pools</label><span id="poolSaveNotice" role="status"></span><div class="view-switch" role="group" aria-label="Pool display"><button data-pool-layout="cards" aria-pressed="false">Cards</button><button data-pool-layout="table" aria-pressed="true">Table</button></div></div>
+    <div id="poolCards" class="pool-cards" hidden></div><p class="pool-scroll-hint note">Swipe across for volume and fees →</p>
+    <div class="pool-scroll" role="region" aria-label="Pool comparison" tabindex="0"><table id="grid"><thead></thead><tbody></tbody></table></div>
+    <button id="moreAlphaPools" class="text-button" hidden>Show 20 more pools</button>
+    <div id="empty" hidden>No matches in this activity sample. Adjust the filters, try another address, or refresh.</div>
+    <div id="alphaTools" hidden>
+      <details class="alpha-tool"><summary>Volume radar</summary>
+      <div class="section-heading"><p class="note">Recent activity in this view</p><a class="text-button" href="#marketShortlist">Market shortlist ↓</a></div>
+      <div id="volumePulse" class="volume-pulse"></div>
+      </details>
+      <details class="alpha-tool"><summary>Pool types</summary>
+        <p><b>DLMM:</b> liquidity sits in price bins. You choose the range and a Spot, Curve or Bid-Ask distribution. Fees depend on swaps reaching your bins.</p>
+        <p><b>DAMM v2:</b> a different Meteora pool design. It can use a pool-wide price range or full-range/compounding liquidity. Launch fee schedules and liquidity locks matter; DLMM shape presets do not apply.</p>
+        <p><b>Raydium CPMM:</b> full-range liquidity, with LP tokens representing your share. No personal range or DLMM shape presets. <b>DBC / bonding curve:</b> a launch phase which can later migrate to an AMM pool; creating another pool does not prove a token has just launched.</p>
+        <p class="note"><a href="https://docs.meteora.ag/core-products/damm-v2/what-is-damm-v2" target="_blank" rel="noopener">Meteora pool designs ↗</a> · <a href="https://docs.raydium.io/products/cpmm" target="_blank" rel="noopener">Raydium CPMM ↗</a></p>
+      </details>
+      <details class="alpha-tool"><summary>Identify a pool</summary><form id="poolLookup"><label>Solana pool address<input name="address" required pattern="[1-9A-HJ-NP-Za-km-z]{32,44}" placeholder="Paste the pool address" autocomplete="off"></label><button type="submit">Identify pool</button></form><div id="poolLookupResult" aria-live="polite"></div><p class="note">Checks Meteora DLMM, DAMM v2 and Raydium CPMM. Use a pool address; a token mint or wallet is a different account.</p></details>
+    </div>
+    <details class="alert-fold"><summary>Coverage & data</summary><p>Totals cover the catalogued pools across the supported venues, before your filters. They are not whole-chain totals. Robinhood fees are estimates from volume and fee tiers; fees on other venues are provider-reported pool fees and may include protocol shares. APR stays an annualised comparison of past pool fees.</p><p>Meteora DLMM & DAMM v2, Raydium CLMM/CPMM/AMM, Orca Whirlpools; Robinhood Uniswap V2/V3/V4. Raydium and Orca catalogues update at most every ten minutes. HawkFi and Delta manage underlying pools, so their liquidity is counted once.</p><div class="coverage-links"><a href="https://hawkfi.ag" target="_blank" rel="noopener">Explore HawkFi ↗</a><a href="https://app.meteora.ag" target="_blank" rel="noopener">Meteora ↗</a><a href="https://raydium.io/liquidity-pools/" target="_blank" rel="noopener">Raydium ↗</a><a href="https://www.orca.so/pools" target="_blank" rel="noopener">Orca ↗</a></div><p id="dataBudget" class="note">Free sources first. CoinGecko fallback capped at 48 requests per UTC day.</p><p class="note">Data provided by <a href="https://www.coingecko.com/en/api" target="_blank" rel="noopener">CoinGecko</a>, GeckoTerminal and the listed venues.</p></details>
+    <details class="alert-fold" id="marketShortlist"><summary>Volume shortlist · recent changes</summary>    <section id="volumeAlerts" class="market-digest">
+      <div class="section-heading"><div><span class="eyebrow">WHEN YOU WANT TO EXPLORE</span><h2>Market shortlist</h2></div><button id="refreshVolumeAlerts" class="outline">Refresh ↻</button></div>
+      <div class="digest-controls"><div role="group" aria-label="Market shortlist detail"><button type="button" data-volume-mode="highlights" aria-pressed="true">Highlights</button><button type="button" data-volume-mode="explore" aria-pressed="false">Explore more</button></div><label><input id="hideVolumeShortlist" type="checkbox"> Hide market activity</label></div>
+      <p id="volumeDigestHint" class="note"></p>
+      <p id="volumeMonitorStatus" class="note" role="status">Reading the market shortlist…</p>
+      <div id="volumeAlertInbox"></div>
+      <details id="volumeArchive" class="alert-fold"><summary>Browse activity <span id="volumeAlertCount"></span></summary><div id="volumeArchiveRows"></div><button id="moreVolumeActivity" class="text-button" hidden>Show more tokens</button></details>
+      <details id="volumeOptions" class="alert-fold"><summary>Fine-tune</summary>
+        <form id="volumeAlertPreferences" class="filters"><label>Min pool balance $<input name="minTvl" type="number" min="0" step="any" required value="100"></label><label>Min 30m volume $<input name="minVolume" type="number" min="500" step="any" required value="5000"></label><label>Min acceleration ×<input name="minRatio" type="number" min="2" step="0.1" required value="3"></label><label><input name="newPools" type="checkbox"> Include new pools</label><label><input name="resumed" type="checkbox"> Include resumed volume</label><button type="submit">Apply</button></form>
+        <p class="note">Up to five tokens, grouped by mint, from the past two hours. Larger recent volume appears first. Figures belong to one pool; volumes across pools are not added together.</p>
+        <p class="note">Scans sampled Meteora pools every five minutes. These are past observations, not live trade notifications. New pools and resumed activity have no reliable acceleration multiple. Settings and hidden tokens stay on this device.</p>
+        <button id="resetHiddenVolume" class="text-button" hidden>Restore hidden tokens</button><span id="volumeStorageStatus" class="note"></span>
+      </details>
+    </section></details>
+    </details>
+  </section>
+
+  <section id="view-positions" hidden>
+    <div class="section-heading"><div><span class="eyebrow px">YOUR LIQUIDITY</span><h1 class="page-title">Positions</h1></div></div>
+    <div class="cards" id="posCards"></div>
+    <div id="positionList"></div>
+    <details class="alert-fold"><summary>Full position accounting</summary>
+    <div class="history-scroll" role="region" aria-label="Open positions" tabindex="0"><table id="posGrid"><thead>
+      <tr><th>Position</th><th>Wallet</th><th>Deposited</th><th>Value now</th><th>Price / LP P&amp;L<small>before fees</small></th><th>Claimed fees</th><th>Unclaimed fees</th><th>Total P&amp;L</th><th>Held</th><th>Range</th></tr>
+    </thead><tbody></tbody></table></div>
+    </details>
+    <div id="posEmpty" hidden>No open positions in either wallet yet. Pick a pool, test a range, and the first one goes here.</div>
+    <p class="note" id="posNote"></p>
+    <details class="alert-fold"><summary>Previously closed positions</summary><div id="posClosed"><div class="caveat">Loading…</div></div></details><button class="text-button" data-go="history">View your full history ↗</button>
+
+  </section>
+
+  <section id="view-history" hidden>
+    <div class="section-heading"><div><span class="eyebrow">PAPER / THE RECORD</span><h1 class="page-title">Your LP journey</h1></div><button id="refreshHistory" class="outline">Refresh history ↻</button></div>
+    <p class="note">Meteora results in USD. Robinhood records in the tokens deposited and collected.</p>
+    <div class="cards" id="histCards"></div>
+    <div id="weeklyWrap"></div><div class="history-tools"><label>Wallet <select id="journeyWallet"><option value="">All wallets</option></select></label><label>Find a position <input type="search" id="journeySearch" placeholder="Pool or token"></label></div><div id="journeyList" class="journey-list"></div><button id="journeyMore" class="text-button" hidden>Show older positions</button><details class="alert-fold"><summary>Full accounting table</summary><h2>One position at a time</h2><p class="note">One row per position, including its top-ups. Withdrawals exclude the fees shown separately. Reused capital is not a new wallet deposit.</p><p class="note" id="histCoverage"></p><details><summary>History coverage</summary><p class="note">Meteora: last 365 days, up to 100 pools and 50 positions per pool. Robinhood: wallet transactions and transfer receipts, including burned NFTs. Up to 40 NFTs and 150 receipts. Operator calls without wallet transfers may be absent; incomplete reads are labelled. Token amounts exclude gas and later swaps. Historical USD P&amp;L is unavailable.</p></details>
+    <div class="history-scroll" role="region" aria-label="Position history" tabindex="0"><table id="histGrid"><thead>
+      <tr><th>Position</th><th>Wallet</th><th>Deposited</th><th>Withdrawn</th><th>Price / LP P&amp;L<small>before fees</small></th><th>Claimed fees</th><th>Unclaimed fees</th><th>Total P&amp;L</th><th>Held</th><th>Closed</th></tr>
+    </thead><tbody></tbody></table></div>
+    </details><div id="histEmpty" hidden>No closed positions yet.</div>
+    <p class="note" id="histNote" role="status"></p>
+  </section>
+
+  <section id="view-wallets" data-robinhood-only hidden>
+    <div class="section-heading"><div><span class="eyebrow">ROBINHOOD CHAIN</span><h1 class="page-title" id="intelTitle">Reference wallet activity</h1></div><button id="refreshIntel" class="outline">Refresh activity ↻</button></div>
+    <form id="walletResearch" class="wallet-research"><label for="intelAddress">Explore another Robinhood wallet</label><div><input id="intelAddress" placeholder="Enter a 0x wallet address" spellcheck="false" autocomplete="off"><button type="submit">Look up wallet ↗</button></div></form>
+    <p id="intelStatus" class="note" role="status"></p><div id="intelOverview"></div><div id="intelRecords"></div>
+  </section>
+
+  <section id="view-baskets" hidden>
+    <div class="section-heading"><div><span class="eyebrow px">PAPER PORTFOLIO</span><h1 class="page-title">Try your next move.</h1><p>Try baskets, staking and vaults with paper SOL. Your practice balance stays separate from the shared strategies.</p></div></div>
+    <section id="worldsfairPaperPot" class="wf-paper-pot" aria-label="Your paper portfolio"><h2>Your paper portfolio</h2><p role="status">Opening your paper pot…</p></section>
+    <div class="long-nav" role="group" aria-label="Long Game view"><button data-long-view="baskets" aria-pressed="true">Baskets</button><button data-long-view="staking" aria-pressed="false">Liquid staking</button><button data-long-view="vault" aria-pressed="false">Vaults</button></div>
+    <section id="longYieldPanel" hidden><div class="long-intro"><span class="eyebrow">KEEP THE ASSET IN VIEW</span><h2 id="longYieldTitle">Earn while you hold.</h2><p id="longYieldIntro"></p></div><div class="yield-toolbar"><label>Asset <select id="yieldAsset"><option value="">All assets</option></select></label><label>Order <select id="yieldSort"><option value="name">Provider / name</option><option value="rate">Reported yield · highest first</option><option value="tvl">Underlying size</option></select></label><label><input type="checkbox" id="yieldSaved"> Saved ideas</label><button id="refreshYields" class="outline">Refresh yields ↻</button></div><p id="yieldStatus" class="note" role="status"></p><div id="yieldCards" class="yield-grid"></div><button id="yieldMore" class="text-button" hidden>Show more vaults</button></section>
+    <div id="longBasketPanel"><div class="section-heading"><h2>Explore baskets</h2><button id="refreshBaskets" class="outline">Refresh baskets ↻</button></div><p class="basket-holdings">Your long-term watchlist starts here. Saved ideas are separate from your holdings.</p>
+    <div class="filters"><label>Search baskets<input id="basketSearch" type="search" placeholder="Name or theme"></label><label>Theme<select id="basketCategory"><option value="">All themes</option></select></label><label><input id="basketSaved" type="checkbox"> My watchlist</label></div>
+    <p id="basketSource" class="note" role="status"></p>
+    <div class="basket-workspace"><div id="basketList"></div><article id="basketDetail"><div class="basket-intro"><span class="eyebrow">ROOM TO GROW</span><h2>A longer horizon.</h2><p>Open a basket to explore its tokens, historical model and the questions to ask before holding it.</p><span class="basket-orbit" aria-hidden="true">✳</span></div></article></div>
+    </div>
+  </section>
+
+  <section id="view-settings" data-robinhood-only hidden><h1 class="page-title">PayBox · read only</h1><p class="worldsfair-readonly">Paper actions do not move real funds. Optional Phantom signatures record receipts on Solana devnet only. Robinhood data is available here for reference only.</p><details class="wallet-connection" data-mainnet-controls hidden inert><summary>Wallet connection · PayBox / Phantom</summary><div id="payboxConnection"></div><hr><div class="actions"><button id="connectPhantom">Connect Phantom · Solana</button><button id="disconnectPhantom" hidden>Disconnect</button></div><p id="phantomStatus" role="status">Connect to approve reviewed Solana zaps. Your saved portfolio stays visible without a connection.</p><p class="note">Use PayBox for Robinhood Chain approvals. Connect separately on each device; saved drafts stay on that device. Phantom does not support connecting to external apps on Robinhood Chain. <a href="https://help.phantom.com/hc/en-us/articles/29995498642195-Connect-to-apps" target="_blank" rel="noopener">Phantom connection support ↗</a></p></details></section>
+  <section id="view-learn" hidden>
+    <span class="eyebrow px">A LITTLE CONTEXT</span><h1 class="page-title">Clarity before capital.</h1>
+    <p>Providing liquidity (LP) means making tokens available for other people to trade. You can earn a share of trading fees, but token prices, costs and your chosen range all affect the result. Still lets you check the evidence and practise first.</p>
+    <div class="product-learn-steps"><article><span>01 / LOOK</span><h2>Start with a pool</h2><p>Search for a token, then open its pre-flight. Each check says Pass, Caution or Fail. Open Why? for the evidence. A missing reading stays a caution.</p><button class="text-button" data-go="alpha">Explore pools ↗</button></article><article><span>02 / UNDERSTAND</span><h2>Try a range</h2><p>Use a suggested range when the pool supports it, or choose a floor below today’s price. See what your SOL could be worth at that floor. The floor does not stop a loss.</p></article><article><span>03 / PRACTISE</span><h2>Build a paper portfolio</h2><p>Add practice SOL and try a basket, staking option or vault. Shared paper strategies can also supply eligible profits to roll into your portfolio.</p><button class="text-button" data-go="baskets">Try paper funds ↗</button></article></div>
+    <details class="product-learn-detail"><summary>What do Pass, Caution and Fail mean?</summary><dl><dt>Pass</dt><dd>The available evidence meets this particular screening rule. It is not a promise of profit or a safety certification.</dd><dt>Caution</dt><dd>There is something to review: a missing reading, an older quote, incomplete holder coverage or a cost assumption. Read Why? before relying on the number.</dd><dt>Fail</dt><dd>At least one reading does not meet this screen. You can still inspect the pool and save why you skipped it.</dd></dl></details>
+    <details class="product-learn-detail"><summary>How do liquidity shapes work?</summary><p>Choose the range first. The shape decides where your liquidity sits inside it.</p>
+    <div class="guide-shapes"><article><div class="shape-bars spot" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><h2>Spot</h2><p>Spreads liquidity evenly across the selected bins. A straightforward starting point for comparing ranges.</p></article><article><div class="shape-bars curve" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><h2>Curve</h2><p>Concentrates more liquidity near the centre. More depends on price staying near those bins.</p></article><article><div class="shape-bars bidask" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><h2>Bid-Ask</h2><p>Weights the edges more heavily. One-sided bids below price buy as it falls; asks above price sell as it rises.</p></article></div>
+    <p class="note">These diagrams show relative weights, not returns. <a href="https://github.com/MeteoraAg/docs/blob/main/developer-guides/dlmm/typescript-sdk/reference.mdx" target="_blank" rel="noopener">Meteora strategy reference ↗</a></p>
+    <dl><dt>Price has to reach your bins</dt><dd>Resting bids below price earn no swap fees until swaps reach them. A wider range spreads your budget further; it cannot prevent losses.</dd><dt>Pool fees versus your fees</dt><dd>DLMM fees depend on your share of the bins used by swaps. Total TVL includes liquidity away from price. The pool’s fee APR is a past-data comparison, not your expected return.</dd></dl></details><details class="product-learn-detail"><summary>Fees, prices and token checks</summary><dl><dt>Price / LP P&amp;L + fees</dt><dd>The terminal separates changes in position value from claimed and unclaimed fees. Total P&amp;L combines them; network costs and incomplete history are labelled separately.</dd><dt>Reading volume</dt><dd>Compare recent windows and check whether the pool is old enough to fill those windows. Buying and selling both create volume; rising volume does not establish future price direction.</dd><dt>Check the token identity</dt><dd>A ticker, stock-themed name or Token-2022 program does not establish backing, leverage or a redemption right. Inspect the mint, issuer and transfer fees in the pool details.</dd></dl></details><details class="product-learn-detail"><summary>What is a devnet stamp?</summary><p>An optional public receipt of a saved paper event. Phantom signs a Memo on Solana devnet, using test SOL for the network fee. It does not create a real position or change your paper funds. Paper features work without a wallet.</p></details>
+
+
+  </section>
+  <footer class="worldsfair-footer"><div><a class="product-footer-brand" href="/#alpha"><img src="/brand/still-mark.svg" alt="" width="24" height="24"><span data-product-name>Still</span></a><p>Paper practice · live market data · no mainnet transactions. Not financial advice.</p><p id="worldsfairVersion" role="status">Checking build…</p></div><label class="worldsfair-toggle"><input type="checkbox" id="worldsfairRobinhood">Show Robinhood reference data · read only</label></footer>
+</main>
+
+<div id="drawerBackdrop" hidden></div>
+<aside id="drawer" role="dialog" aria-modal="true" aria-label="Pool and position details" aria-hidden="true" inert>
+  <div class="drawer-toolbar"><button id="drawerBack" class="text-button" hidden>← Back</button><span id="drawerLabel">Pool details</span><button class="close" id="drawerClose" aria-label="Close details">Close ×</button></div>
+  <div id="drawerBody"></div>
+</aside>
+
+<script src="/panel-dates.js"></script>
+<script src="/discovery.js"></script>
+<script src="/experience.js"></script>
+<script src="/vendor/lightweight-charts-5.2.1.js"></script>
+<script src="/candle-charts.js"></script>
+<script>
+  const $ = (s) => document.querySelector(s);
+  const state = { tab: "home", chain: "solana", sort: "volume24hUsd", alphaMode: "depth", alphaLimit: 20, snap: null, positions: null, current: null };
+  const poolViews = {};
+  $("#marketTotals").open=matchMedia("(min-width:701px)").matches;
+  let displayedPools=[];
+  let poolLayout=window.matchMedia("(max-width: 700px)").matches?"cards":"table";
+  try{const saved=localStorage.getItem("pat-pool-layout");if(["cards","table"].includes(saved))poolLayout=saved;}catch{}
+
+  const usd = n => !Number.isFinite(n) ? null : `${n < 0 ? "-" : ""}$${Math.abs(n) >= 1e9 ? (Math.abs(n)/1e9).toFixed(2)+"B" : Math.abs(n) >= 1e6 ? (Math.abs(n)/1e6).toFixed(2)+"M" : Math.abs(n) >= 1e3 ? (Math.abs(n)/1e3).toFixed(1)+"K" : Math.abs(n).toFixed(2)}`;
+  const pct = (f, d=1) => f == null ? null : `${(f*100).toFixed(d)}%`;
+  const age = (h) => h == null ? null : h < 48 ? `${Math.round(h)}h` : `${Math.round(h/24)}d`;
+  const num = (n, d=2) => n == null ? null : n.toLocaleString(undefined, { maximumFractionDigits: d });
+  const cell = (v, cls="") => v == null ? `<td class="na ${cls}">—</td>` : `<td class="${cls}">${v}</td>`;
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+
+  // Older saved reads have no fee split. In particular, Uniswap tokensOwed can
+  // contain withdrawn principal, so it must not become "unclaimed fees" here.
+  function pnlData(x) {
+    return x.pnlBreakdown || {positionPnlUsd:null, claimedFeesUsd:null,
+      unclaimedFeesUsd:x.chain==='solana'?x.feesEarnedUsd:null, unclaimedRewardsUsd:null,
+      totalPnlUsd:x.pnlUsd, status:'incomplete',
+      note:x.chain==='robinhood'?'Historical USD pricing is needed to separate P&L and fees.':'Refresh positions for the fee breakdown.'};
+  }
+  const pnlClass = v => !Number.isFinite(v) || Math.abs(v)<0.005 ? '' : v>0?'pos':'neg';
+  const signedUsd = v => !Number.isFinite(v) ? null : (v>=0.005?'+':'')+usd(Math.abs(v)<0.005?0:v);
+  function breakEvenData(total) {
+    if(!Number.isFinite(total))return null;
+    const distance=Math.abs(total), desired=Math.max(10,distance*1.35);
+    const step=10**Math.floor(Math.log10(desired)), limit=Math.ceil(desired/step)*step;
+    return {limit,point:50+total/limit*50,distance,
+      label:total===0?'At break-even':distance<0.01?'Within $0.01 of break-even':total<0?`${usd(distance)} below break-even`:`${usd(distance)} profit cushion`};
+  }
+  function breakEvenVisual(b) {
+    const v=breakEvenData(b.totalPnlUsd);if(!v)return '';
+    return `<div class="break-even ${pnlClass(b.totalPnlUsd)}" role="img" aria-label="${esc(v.label)}. Break-even is zero total P&L, including reported fees, before network costs. This is a dollar P&L scale, not a token-price target.">
+      <div class="be-heading"><b>${esc(v.label)}</b></div>
+      <div class="be-labels" aria-hidden="true"><span>Loss</span><span>Break-even</span><span>Profit</span></div>
+      <div class="be-track" aria-hidden="true"><i class="be-distance" style="left:${Math.min(50,v.point)}%;width:${Math.abs(v.point-50)}%"></i><i class="be-zero"></i><i class="be-point" style="left:${v.point}%"></i></div>
+      <div class="be-scale" aria-hidden="true"><span>−${usd(v.limit)}</span><span>$0</span><span>+${usd(v.limit)}</span></div>
+      <small class="pnl-footnote">Total P&amp;L · including reported fees</small>
+    </div>`;
+  }
+  function pnlBreakdown(x) {
+    const b=pnlData(x);
+    const row=(label,value,total=false)=>`<div class="pnl-line${total?' pnl-total':''}"><span>${label}</span><b class="${pnlClass(value)}">${signedUsd(value)??'Unavailable'}</b></div>`;
+    return `<div class="pnl-breakdown" aria-label="P&L breakdown">
+      ${row('Price / LP P&amp;L <small>before fees</small>',b.positionPnlUsd)}
+      ${row('Claimed fees',b.claimedFeesUsd)}${row('Unclaimed fees',b.unclaimedFeesUsd)}
+      ${b.unclaimedRewardsUsd>0?row('Unclaimed rewards',b.unclaimedRewardsUsd):''}
+      ${row('Total P&amp;L',b.totalPnlUsd,true)}
+      ${breakEvenVisual(b)}
+      <small class="pnl-footnote" title="${esc(b.note)}">${b.status==='reconciled'?'Before network costs':b.status==='mismatch'?'Total reported · breakdown differs':'Breakdown incomplete'}</small>
+      ${x.chain==='robinhood'&&Number.isFinite(x.feesEarnedUsd)?`<small class="pnl-footnote">${usd(x.feesEarnedUsd)} unclaimed amounts · may include withdrawn principal</small>`:''}
+    </div>`;
+  }
+  function pnlCells(x) {
+    const b=pnlData(x);
+    return cell(signedUsd(b.positionPnlUsd),pnlClass(b.positionPnlUsd))
+      +(x.feeTokens?`<td>${histTokens(x.feeTokens)}</td>`:cell(usd(b.claimedFeesUsd)))
+      +cell(usd(b.unclaimedFeesUsd))
+      +`<td class="${pnlClass(b.totalPnlUsd)}" title="${esc(b.note)}">${signedUsd(b.totalPnlUsd)??'—'}${b.status!=='reconciled'?`<small class="pnl-cell-note">${b.status==='mismatch'?'Breakdown differs':'Incomplete split'}</small>`:''}${b.unclaimedRewardsUsd>0?`<small class="pnl-cell-note">Unclaimed rewards ${usd(b.unclaimedRewardsUsd)}</small>`:''}</td>`;
+  }
+
+  // ---------- data ----------
+  const clientErrors = {};
+  const pending = {};
+  let poolRequest = 0;
+  async function api(url, init = {}) {
+    url = window.WorldsFair.dataUrl(url);
+    const response = await fetch(url, { ...init, signal: AbortSignal.timeout(90000) });
+    const data = await response.json();
+    if(response.status===401){
+      const path = new URL(url, location.origin).pathname;
+      const controls = !['GET','HEAD'].includes((init.method || 'GET').toUpperCase()) || /^\/api\/(?:paybox|solana|evm|tx|x|debug)(?:\/|$)/.test(path) || /\/control$/.test(path);
+      if(controls){document.dispatchEvent(new CustomEvent('lp:controls-locked'));throw new Error('Controls locked. Use Unlock controls, then try this action again.');}
+      throw new Error(data.error || 'Could not load this data. Try refreshing.');
+    }
+    window.LPPanelDates?.record(url,data);
+    if (!response.ok || data.error) throw new Error(data.error || `Request failed (${response.status})`);
+    return window.WorldsFair.filterResponse(url, data);
+  }
+  async function loadPools() {
+    const seq = ++poolRequest;
+    const f = new FormData($("#filters"));
+    const q = new URLSearchParams(LPDiscovery.queryFilters(state.tab,state.alphaMode,{ chain: window.WorldsFair.showRobinhood ? state.chain : "solana", sort: state.sort, minTvl: f.get("minTvl"), maxTvl: f.get("maxTvl"), minVol: f.get("minVol"), maxAgeH: f.get("maxAgeH"), venue:$("#poolVenue").value, search: $("#poolSearch").value.trim() }));
+
+    if($('#savedPoolsOnly').checked){q.set('watch',LPExperience.savedIds().join(',')||'__empty__');q.set('minTvl','0');q.set('maxTvl','0');q.set('minVol','0');}
+    state.alphaLimit=20;$('#moreAlphaPools').hidden=true;
+    $('#grid tbody').innerHTML='';$('#poolCards').innerHTML='<div class="pool-skeleton">Loading pools…</div>';$('#volumePulse').innerHTML='';$('#empty').hidden=true;displayedPools=[];
+    $('#discoveryBrief').textContent='Loading pools…';$('#grid').setAttribute('aria-busy','true');
+    try {
+      const data = await api(`/api/pools?${q}`);
+      if (seq !== poolRequest) return;
+      if (!Array.isArray(data.pools)) throw new Error("Pool data was incomplete.");
+      state.snap = data; delete clientErrors.pools;
+      renderStrip(); renderPools();
+    } catch (e) { if (seq === poolRequest) { clientErrors.pools = "Pool refresh failed. " + e.message; $('#discoveryBrief').textContent=clientErrors.pools; } }
+    if(seq===poolRequest)$('#grid').setAttribute('aria-busy','false');
+    renderMeta(); renderHome();
+  }
+  async function loadPositions(force=false) {
+    if (pending.positions) {
+      if (!force || pending.positionsForce) return pending.positions;
+      await pending.positions;
+    }
+    pending.positionsForce = force;
+    pending.positions = (async () => {
+      try {
+        const data = await api(`/api/positions${force ? "?refresh=1" : ""}`);
+        if (!Array.isArray(data.positions) || !Array.isArray(data.balances)) throw new Error("Wallet data was incomplete.");
+        state.positions = data; delete clientErrors.positions;
+        renderWallets(); if (state.tab === "positions") renderPositions();
+      } catch (e) { clientErrors.positions = "Wallet refresh failed. " + e.message; }
+      renderMeta(); renderHome();
+    })();
+    try { await pending.positions; } finally { pending.positions = null; pending.positionsForce = false; }
+  }
+  const timeText = t => t ? new Date(t).toLocaleString(undefined, { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) : "No successful read yet";
+  function sourceState(h) {
+    if (!h) return "unavailable";
+    if ((clientErrors.positions && Object.values(state.positions?.sources || {}).includes(h)) || (clientErrors.pools && Object.values(state.snap?.sources || {}).includes(h))) return h.lastSuccessAt ? "stale" : "unavailable";
+    if (h.status === "fresh" && (!h.lastSuccessAt || Date.now() - Date.parse(h.lastSuccessAt) > 10 * 60000)) return "stale";
+    return h.status;
+  }
+  function sources() { return {...state.snap?.sources, ...state.positions?.sources}; }
+  function renderMeta() {
+    const hs = Object.values(sources());
+    const failures = Object.values(clientErrors);
+    const degraded = hs.filter(h => sourceState(h) !== "fresh").length;
+    const legacyErrors = Object.keys(state.snap?.errors || {}).length + Object.keys(state.positions?.errors || {}).length;
+    $("#meta").textContent = failures.length ? failures.join(" · ") : !state.positions ? "Loading paper and market readings…" : !state.snap ? "Loading pool sources…" : !hs.length ? (state.positions || state.snap ? "Source freshness not verified yet · refresh to check" : "Reading market data…") : degraded ? `Some readings are saved · check the dates on each card` : legacyErrors ? "Some sources need another read · see individual cards" : "Market sources are up to date";
+    $("#meta").classList.toggle("has-issue", !!(degraded || failures.length || legacyErrors));
+  }
+  function renderWallets() {
+    const p = state.positions; if (!p) return;
+    $("#wallets").innerHTML = p.balances.map(b => `<span><b>${esc(b.wallet)}</b> ${Number.isFinite(b.native) ? `${num(b.native, 4)} ${esc(b.symbol)}` : "Unavailable"} <small>${sourceState(p.sources?.[`balance:${b.wallet}`]) === "fresh" ? "Updated" : "Saved / unavailable"}</small></span>`).join("");
+  }
+  function sumKnown(rows, field) {
+    const known = rows.filter(p => Number.isFinite(p[field]));
+    return { value: rows.length && !known.length ? null : known.reduce((n,p)=>n+p[field],0), partial: known.length !== rows.length };
+  }
+  function renderHome() {
+    const p = state.positions, rows = p?.positions || [];
+    const value = sumKnown(rows,"valueUsd"), fees = sumKnown(rows,"feesEarnedUsd");
+    const positionHealth = Object.entries(p?.sources || {}).filter(([k])=>k.startsWith("positions:"));
+    const incomplete = !p || !positionHealth.length || positionHealth.some(([,h])=>sourceState(h)!=="fresh");
+    const knownCount = p && (!incomplete || rows.length) ? rows.length : "—";
+    const metric = (label, val, note, cls="") => `<div class="overview-card ${cls}"><span class="metric-label">${label}</span><strong>${val ?? "—"}</strong><small>${note}</small></div>`;
+    $("#homeMetrics").innerHTML = metric("Capital in LPs", p && (rows.length || !incomplete) ? usd(value.value) : null, incomplete ? "Saved / incomplete portfolio" : value.partial ? "Partial value · some positions unpriced" : "Current value of tracked positions", "lead") +
+      metric("Unclaimed total", p && (rows.length || !incomplete) ? usd(fees.value) : null, `${incomplete || fees.partial ? "Saved / partial · " : ""}Accrued fees + stored amounts owed`, "fees") +
+      metric("Open LP groups",knownCount,incomplete ? "Count may be incomplete" : "Meteora grouped by pool") +
+      metric("In range",p && (rows.length || !incomplete) ? `${rows.filter(x=>x.inRange===true).length} / ${rows.length}` : null, incomplete ? "Based on saved readings" : rows.some(x=>x.inRange==null) ? "Some ranges are not verified" : "Tracked LP groups");
+    const priced=rows.filter(x=>Number.isFinite(x.valueUsd)&&x.valueUsd>0),total=priced.reduce((n,x)=>n+x.valueUsd,0);
+    let offset=0;
+    $("#capitalMap").innerHTML=total>0?`<div><h2>Breakdown</h2><p>LP positions${incomplete||value.partial?' · partial / saved readings':''} · excludes wallet cash.</p></div><div class="capital-visual"><svg viewBox="0 0 120 120" role="img" aria-label="Allocation of priced LP positions">${priced.map((x,i)=>{const size=x.valueUsd/total*100;const ring=`<circle cx="60" cy="60" r="44" pathLength="100" fill="none" stroke="hsl(${70+i*33} 24% ${36+i*8}%)" stroke-width="17" stroke-dasharray="${size} ${100-size}" stroke-dashoffset="${-offset}" transform="rotate(-90 60 60)"/>`;offset+=size;return ring;}).join('')}<text x="60" y="64" text-anchor="middle" fill="currentColor" font-size="14">${usd(total)}</text></svg><div>${priced.map((x,i)=>`<button data-position="${rows.indexOf(x)}"><i style="background:hsl(${70+i*33} 24% ${36+i*8}%)"></i>${esc(x.pair)}<b>${(x.valueUsd/total*100).toFixed(1)}%</b><span>↗</span></button>`).join('')}</div></div>`:'';
+    $("#homeWallets").innerHTML = p ? p.balances.map(b => {
+      const h=p.sources?.[`balance:${b.wallet}`], st=sourceState(h);
+      return `<article class="wallet-card"><div class="wallet-top"><span class="chain-mark ${b.chain}">${b.chain==='solana'?'S':'R'}</span><div><h3>${esc(b.wallet)}</h3><small>${b.chain==='solana'?'Solana':'Robinhood Chain'}</small></div><span class="health-pill ${st}">${st==='fresh'?'Updated':st==='stale'?'Saved':st==='partial'?'Partial':'Unavailable'}</span></div><div class="wallet-amount">${Number.isFinite(b.native)?num(b.native,4):'—'} <span>${esc(b.symbol)}</span></div><div class="wallet-bottom"><span>${b.stable!=null?`${num(b.stable,2)} USDC`:'Native balance'}</span><span>${esc(timeText(h?.lastSuccessAt))}</span></div>${b.chain==='robinhood'?'<button class="text-button" data-go="wallets">Wallet activity ↗</button>':''}</article>`;
+    }).join("") : `<div class="empty-card">${clientErrors.positions ? esc(clientErrors.positions) : 'Loading your wallets…'}</div>`;
+    const tokenLine = tokens => tokens?.length ? tokens.map(t=>`${num(t.amount,6)} ${esc(t.symbol)}`).join(' + ') : 'Token amounts unavailable';
+    $("#homePositions").innerHTML = rows.length ? rows.map((x,i)=>{const b=pnlData(x);return `<button class="position-card" data-position="${i}"><div class="position-summary"><span class="eyebrow">${esc(x.wallet)} / ${x.chain==='solana'?'METEORA':'UNISWAP'}</span><h3>${esc(x.pair)} <span>↗</span></h3>${window.rangeBadge?window.rangeBadge(x):`<span class="range-chip range-${x.inRange===false?'out':x.inRange===true?'in':'unknown'}">${x.inRange==null?'Range unavailable':x.inRange?'In range':'Out of range'}</span>`}${LPExperience.miniRange(x)}<div class="position-cost"><span>${x.chain==='solana'&&x.depositScope!=='open-positions'?'Pool deposits · includes earlier positions':'Deposited · includes top-ups'}</span><b>${usd(x.depositedUsd)??'—'}</b></div><small class="position-holding">${tokenLine(x.currentTokens)}</small></div><div class="position-value"><div class="position-headline"><span><small>Value now</small><strong>${usd(x.valueUsd)??'—'}</strong></span><span><small>Total P&amp;L</small><strong class="${pnlClass(b.totalPnlUsd)}">${signedUsd(b.totalPnlUsd)??'—'}</strong></span></div><div class="position-quick-split"><span>Price / LP <b class="${pnlClass(b.positionPnlUsd)}">${signedUsd(b.positionPnlUsd)??'—'}</b></span><span>Claimed fees <b>${usd(b.claimedFeesUsd)??'—'}</b></span><span>Unclaimed fees <b>${usd(b.unclaimedFeesUsd)??'—'}</b></span></div><small class="pnl-footnote">${b.status==='reconciled'?'Fees included · before network costs':'Incomplete breakdown · inspect details'}</small><span>Chart &amp; manage position ↗</span></div></button>`;}).join("") : `<div class="empty-card"><strong>${!p?'Loading positions…':incomplete?'Positions could not be fully verified':'No open positions'}</strong><p>${incomplete?'Refresh wallets to request a new reading.':'Explore a pool and test a range to get started.'}</p><button class="text-button" data-go="top">Explore pools ↗</button></div>`;
+    const alerts = rows.filter(x=>x.inRange===false&&!window.isRangeAcknowledged?.(x)).map(x=>`<div class="attention-item"><strong>${esc(x.pair)} is out of range</strong><p>${sourceState(p.sources?.[`positions:${x.wallet}`])!=='fresh'?'According to the saved reading. Refresh before acting.':'Review the position and its current price range.'}</p></div>`);
+
+    for (const e of Object.values(clientErrors)) alerts.push(`<div class="attention-item"><strong>Refresh interrupted</strong><p>${esc(e)}</p></div>`);
+    $("#attention").innerHTML = alerts.join("") || `<div class="calm-card"><span class="status-dot"></span>${p&&!incomplete?'No positions need a range review.':'Waiting for verified readings.'}</div>`;
+    $("#sourceSummary").textContent = Object.values(sources()).filter(h=>sourceState(h)!=="fresh").length ? "· some saved readings" : Object.keys(sources()).length?"· up to date":"· awaiting reads";
+    $("#sourceHealth").innerHTML = Object.values(sources()).map(h=>`<div class="source-row"><div><strong>${esc(h.label)}</strong><small>${esc(timeText(h.lastSuccessAt))}</small></div><span class="health-pill ${sourceState(h)}">${sourceState(h)==='fresh'?'Updated':sourceState(h)==='stale'?'Saved':sourceState(h)==='partial'?'Partial':'Unavailable'}</span></div>`).join("") || '<p class="muted">Refresh to establish source-by-source timestamps.</p>';
+  }
+  function tile(label, value, sub, hot=false) {
+    return `<div class="tile ${hot ? "hot" : ""}"><small>${label}</small><div class="v">${value ?? "—"}</div><div class="sub">${sub ?? ""}</div></div>`;
+  }
+  function renderStrip() {
+    const st = state.snap.stats; if (!st) return;
+    const coverage=c=>`${c.pools} catalogued pools${c.stalePools?' · '+c.stalePools+' saved':''}`;
+    $("#strip").innerHTML = tile("Solana · volume 24h",usd(st.solana.volume24h),coverage(st.solana))+tile("Solana · pool fees 24h",usd(st.solana.fees24h),`${st.solana.feesKnown??st.solana.pools} pools with fees`)+(window.WorldsFair.showRobinhood ? tile("Robinhood · volume 24h",usd(st.robinhood.volume24h),coverage(st.robinhood))+tile("Robinhood · estimated fees 24h",usd(st.robinhood.fees24h),`${st.robinhood.feesKnown??st.robinhood.pools} pools with a known fee tier`) : "");
+
+  }
+
+  const COLS = {
+    top:   [["pair","Pool"],["feeApr","Fee APR"],["tvlUsd","TVL"],["volume24hUsd","Vol 24h"],["fees24hUsd","Fees 24h"],["feeTier","Fee","hide-m"],["fees1hUsd","Fees 1h"],["feeTvl24h","Fee/TVL 24h","hide-m"],["ageHours","Age"]],
+    alpha: [["pair","Pool"],["feeApr","Fee APR"],["tvlUsd","In pool"],["volume24hUsd","Vol 24h"],["volume30mUsd","Vol 30m"],["fees1hUsd","Fees 1h"],["feeTvl1h","Fee/TVL 1h"],["ageHours","Age"]],
+    stock: [["pair","Pool"],["feeApr","Fee APR"],["tvlUsd","TVL"],["volume24hUsd","Vol 24h"],["fees24hUsd","Fees 24h"],["feeTier","Fee","hide-m"],["fees1hUsd","Fees 1h"],["txns24h","Txns 24h","hide-m"],["ageHours","Age"]],
+  };
+  const TITLES = {volume30mUsd:"Swap volume in the most recent 30 minutes, including buys and sells", volumeAcceleration:"Latest 30m volume / preceding 30m volume, only with at least $100 baseline and one hour of pool history. Ranking also requires $500 recent volume.",  fees1hUsd:"Fees earned by the whole pool in the last hour, shared by active liquidity", tvlUsd:"Total value in the pool", volume24hUsd:"Swap volume, last 24h", fees24hUsd:"Fees paid to LPs, last 24h",
+    feeTier:"What each swap pays the pool", feeApr:"Past 24h pool fees × 365 ÷ current TVL. Annualised comparison, not a forecast or your APR. Young pools have less than 24h of history.", feeTvl1h:"Past-hour pool fees divided by current TVL. A falling TVL can inflate the ratio; this is not your return.",
+    feeTvl4h:"Fees as a share of TVL over the mid window: 4h on Meteora, 6h on Robinhood", feeTvl24h:"Past-24-hour pool fees divided by current TVL. A falling TVL can inflate the ratio; this is not your return.", ageHours:"Time since pool creation", txns24h:"Swaps in the last 24h" };
+
+  const poolEvidence = p => LPDiscovery.evidence(p);
+  function strategyGuide(p) {
+    if(p.venue==='meteora-damm-v2')return `<div class="decision-brief"><h3>DAMM v2 setup</h3><p>${p.poolConfig?.concentrated===true?'This source reports a pool-wide concentrated range. Individual DLMM bin shapes do not apply.':p.poolConfig?.concentrated===false?'This source reports full-range liquidity. Spot, Curve and Bid-Ask are not options for this pool.':'The liquidity configuration is unavailable; check it on Meteora.'}</p><p>${p.poolConfig?.feeSchedulerActive===true?'A launch fee scheduler is active: the fee can change as trading continues.':p.poolConfig?.feeSchedulerActive===false?'No active launch fee scheduler reported at this read.':'Fee-scheduler status is not verified.'} Check liquidity locks, claimable versus compounded fees and token transfer fees before adding liquidity.</p><a href="https://docs.meteora.ag/core-products/damm-v2/what-is-damm-v2" target="_blank" rel="noopener">Understand DAMM v2 ↗</a></div>`;
+    if(p.venue!=="meteora-dlmm")return `<div class="decision-brief"><h3>Choose the range first</h3><p>Spot, Curve and Bid-Ask are Meteora DLMM liquidity distributions. This ${esc(p.venue)} pool does not expose those same presets here. A single V3 position uses a price range; copying a shaped distribution requires a different setup.</p></div>`;
+    return `<div class="decision-brief"><h3>What do you want this position to do?</h3><label>Your intent <select id="strategyIntent"><option value="even">Spread liquidity across a range</option><option value="centre">Concentrate near my chosen price</option><option value="ladder">Buy lower / sell higher gradually</option></select></label><div id="strategyExplanation" aria-live="polite"></div><p class="note">Shape decides where your liquidity sits. Range and token mix decide when it trades and what you can end up holding. A shape alone does not predict returns. Choose a two-sided range around price or SOL-only bids below price in the Trade tab.</p><a href="https://docs.meteora.ag/core-products/dlmm/strategies-and-use-cases" target="_blank" rel="noopener">Meteora strategy guide ↗</a></div>`;
+  }
+  function explainStrategy(apply=false) {
+    const key=$("#strategyIntent")?.value;if(!key)return;
+    const guide={even:["Spot","Even weight across the chosen bins.","Useful to compare first when you want exposure throughout your range without favouring the centre or edges.","Less concentrated near the centre than Curve. It still converts your holdings as price moves, and stops earning swap fees once price leaves the range.",[5,5,5,5,5,5,5,5,5]],centre:["Curve","More liquidity near the centre; less toward the edges.","Consider it when your thesis is trading around that centre and you can monitor whether the thesis holds.","A move away leaves less liquidity where trades occur. Quiet prices alone do not create fees: you still need swap flow.",[1,2,4,7,9,7,4,2,1]],ladder:["Bid-Ask","More liquidity toward the edges; less near the centre.","Consider it when you deliberately want to accumulate on falls or sell into rises. A one-sided range must be placed on the appropriate side of price.","You may earn less around the centre and finish holding more of a falling token. It is not automatically better in a volatile pool.",[9,7,5,3,1,3,5,7,9]]}[key];
+    if(apply&&state.current?.chain==='solana')window.LPExecution?.setStrategy(state.current.address,{even:'spot',centre:'curve',ladder:'bid-ask'}[key]);
+    $("#strategyExplanation").innerHTML=`<h4>${guide[0]}</h4><div class="shape-bars" role="img" aria-label="${guide[1]}">${guide[4].map(v=>`<i style="height:${v*6}px"></i>`).join("")}</div><p><b>What it means:</b> ${guide[1]}</p><p><b>Why consider it:</b> ${guide[2]}</p><p><b>The trade-off:</b> ${guide[3]}</p><small>Illustrative liquidity weights · lower price → higher price</small>`;
+  }
+  function renderPools() {
+    const cols = COLS[state.tab] || COLS.top;
+    $("#grid thead").innerHTML = `<tr>${cols.map(([k, l, c]) => `<th data-k="${k}" class="${c||""}" title="${TITLES[k]||""}" ${k===state.sort?'aria-sort="descending"':""}>${l}</th>`).join("")}</tr>`;
+    const allPools = $('#savedPoolsOnly').checked ? state.snap.pools.filter(p=>LPExperience.isSaved(p.id)) : state.snap.pools, pools = state.tab==='alpha' ? allPools.slice(0,state.alphaLimit) : allPools;
+    displayedPools=pools;
+    $('#moreAlphaPools').hidden=state.tab!=='alpha'||pools.length>=allPools.length;
+    const orderName=$('#poolOrder').selectedOptions[0]?.textContent || (cols.find(c=>c[0]===state.sort)?.[1] || state.sort);
+    const form=new URLSearchParams(LPDiscovery.queryFilters(state.tab,state.alphaMode,Object.fromEntries(new FormData($('#filters')))));
+    $('#discoveryBrief').innerHTML=`<h3>${state.tab==='alpha'?'What’s active now':'Find a pool worth a closer look'}</h3><p>${pools.length} of ${state.snap.matched ?? pools.length} matches · <b>${esc(orderName)}</b>, highest first. Pool fees are shared earnings, not your P&amp;L. Fee APR annualises the past day; it is not a promised return.</p><p class="note">${Number(form.get('minTvl'))===0?'No minimum pool size. ':''}TVL means money in the pool. More TVL is not proof of safety; a smaller pool can earn heavily and still be hard to exit.</p><details><summary>Scan coverage &amp; filters</summary><p class="note">${esc(state.snap.discoveryCoverage || 'Saved catalogue; refresh to update coverage.')}</p><p class="note">Pool size: ${usd(Number(form.get('minTvl')))} to ${Number(form.get('maxTvl')) ? 'under '+usd(Number(form.get('maxTvl'))) : 'no maximum'} · 24h volume at least ${usd(Number(form.get('minVol')))} · ${$('#poolAge').selectedOptions[0].textContent}. Search checks this catalogue before the 300-result display limit.</p></details>`;
+    if(state.tab==='alpha') {
+      $('#discoveryBrief').innerHTML=`<p><b>${pools.length} of ${state.snap.matched??allPools.length} pools</b> · ${esc(orderName)}, highest first.</p><p class="note">In pool = liquidity, not market cap. More depth is not a safety rating.</p><details><summary>About these figures</summary><p class="note">Fee APR annualises past-day pool fees against current liquidity. It is not a forecast or your return. Volume includes buying and selling. Bars use a compressed scale; each column is separate. Withdrawn liquidity or falling prices can inflate fee ratios.</p><p class="note">${esc(state.snap.discoveryCoverage||'Saved catalogue; refresh to update coverage.')} Search applies before the 300-result limit.</p><p class="note">${$('#poolAge').selectedOptions[0].textContent} · ${$('#poolVenue').selectedOptions[0].textContent}. Near-empty pools are excluded from these lists. An exact address search can inspect a pool outside these size presets.</p></details>`;
+      const active=pools.map((p,i)=>({p,i})).filter(({p})=>['surge','resumed','new-pool'].includes(p.volumeSignal?.kind)).slice(0,6);
+      $('#volumePulse').innerHTML=active.map(({p,i})=>`<article class="volume-card"><span class="eyebrow">${esc(p.venue.replace('meteora-','').toUpperCase())}</span><h3><button class="text-button" data-radar-pool="${i}">${esc(p.pair)} ↗</button></h3><b>${esc(p.volumeSignal.label)}</b><p>${esc(p.volumeSignal.note)}</p><small>${esc(timeText(p.fetchedAt))} · ${usd(p.tvlUsd)??'Unavailable'} in pool</small></article>`).join('')||'<p class="empty-card">No volume triggers among these displayed pools.</p>';
+    }
+    const maxHeat = key => Math.max(1e-9, ...pools.map(p => Number.isFinite(p.feeTvl?.[key]) ? Math.max(0,p.feeTvl[key]) : 0));
+    const maxHourHeat=maxHeat('h1'), maxDayHeat=maxHeat('h24');
+    const heatFraction=(raw,max)=>Number.isFinite(raw)&&raw>0 ? Math.log1p(raw*100)/Math.log1p(max*100) : 0;
+    if(state.tab==='top')$('#discoveryBrief').insertAdjacentHTML('beforeend','<p class="note">Bars compare Fee APR and past fee/TVL on a compressed scale so extreme values don’t hide the rest. Each column has its own scale; numbers show the exact ratio. Falling prices or withdrawn liquidity can inflate fee/TVL. A bigger bar does not mean a better return.</p>');
+    const val = (p, k) => {
+      switch (k) {
+        case "feeApr": return cell(pct(p.feeApr,1));
+        case "volume30mUsd": return cell(usd(p.activity?.volume30m));
+        case "volumeAcceleration": return `<td title="${esc(p.volumeSignal?.note||TITLES.volumeAcceleration)}">${p.volumeSignal?.ratio!=null?num(p.volumeSignal.ratio,1)+'×':p.volumeSignal?.kind==='new-pool'?'New pool':p.volumeSignal?.kind==='resumed'?'Resumed':'—'}</td>`;
+        case "fees1hUsd": return cell(usd(p.activity?.fees1h));
+        case "tvlUsd": return cell(p.tvlUsd>0&&p.tvlUsd<.01?"<$0.01":usd(p.tvlUsd));
+        case "volume24hUsd": return cell(usd(p.volume24hUsd));
+        case "fees24hUsd": return cell(usd(p.fees24hUsd));
+        case "feeTier": return cell(pct(p.feeTier, 2), "hide-m");
+        case "txns24h": return cell(num(p.txns24h, 0), "hide-m");
+        case "ageHours": return cell(age(p.ageHours));
+        case "feeTvl1h": return heat(p.feeTvl?.h1, pct(p.feeTvl?.h1, 3), heatFraction(p.feeTvl?.h1,maxHourHeat), '', TITLES.feeTvl1h);
+        case "feeTvl4h": return cell(pct(p.feeTvl?.mid, 3), "hide-m");
+        case "feeTvl24h": return heat(p.feeTvl?.h24, pct(p.feeTvl?.h24, 3), heatFraction(p.feeTvl?.h24,maxDayHeat), 'hide-m', TITLES.feeTvl24h);
+      }
+    };
+    const heat = (raw, text, frac, cls='', title='') => !Number.isFinite(raw) ? cell(null, 'heat '+cls) :
+      `<td class="heat ${cls}" title="${esc(title)}"><i aria-hidden="true" style="width:calc(${Math.min(1, Math.max(0, frac))} * (100% - 12px))"></i><span>${text}</span></td>`;
+    $("#grid tbody").innerHTML = pools.map((p, i) => `
+      <tr data-i="${i}">
+        <td class="pair"><button class="pool-open" data-pool="${i}"><span class="dot ${p.chain}"></span>${esc(p.pair)} <span>↗</span></button>
+          <small>${esc(p.venue)} · ${esc(p.address.slice(0,5)+"…"+p.address.slice(-4))} · ${esc(p.volumeSignal?.label||poolEvidence(p).signal)}${p.tags.filter(t => !t.startsWith("launchpad") && t !== "verified").map(t => `<span class="tag ${t}">${esc(t)}</span>`).join("")}</small></td>
+        ${cols.slice(1).map(([k]) => val(p, k)).join("")}
+      </tr>`).join("");
+    $('#poolCards').innerHTML=LPExperience.cards(pools);
+    setPoolLayout(poolLayout);
+    $("#empty").hidden = pools.length > 0;
+    $('#empty').textContent=$('#savedPoolsOnly').checked?'No saved pools match these filters. Uncheck Saved pools or adjust the view.':state.tab==='alpha'?'No pools match this Alpha view. Try the other view, clear search, or adjust the age/type filters.':'No matches in this activity sample. Adjust the filters, try another address, or refresh.';
+  }
+
+  function renderPositions() {
+    const p = state.positions; if (!p) return;
+    renderHome();$("#positionList").innerHTML=$("#homePositions").innerHTML;
+    const byWallet = {};
+    p.positions.forEach(x => { (byWallet[x.wallet] ||= []).push(x); });
+    const walletsAll = [...new Set([...p.balances.map(b => b.wallet), ...Object.keys(byWallet)])];
+    $("#posCards").innerHTML = walletsAll.map(w => {
+      const ps = byWallet[w] || [], b = p.balances.find(x => x.wallet === w);
+      const ph = p.sources?.[`positions:${w}`], bh = p.sources?.[`balance:${w}`];
+      const hasRead = !!ph?.lastSuccessAt || ps.length > 0;
+      const sum = (f) => !hasRead || (ps.length && ps.every(x=>f(x)==null)) ? null : ps.reduce((a, x) => a + (f(x) ?? 0), 0);
+      return `<div class="card"><h3>${esc(w)}</h3>
+        ${b ? `<div class="row"><span>Gas</span><b>${num(b.native, 4) ?? "Unavailable"} ${b.symbol}</b></div>` : ""}
+        <div class="row"><span>Open LP groups</span><b>${hasRead ? ps.length : "—"}</b></div>
+        <div class="row"><span>In positions</span><b>${usd(sum(x => x.valueUsd)) ?? "—"}</b></div>
+        <div class="row"><span>Unclaimed amounts</span><b class="pos">${usd(sum(x => x.feesEarnedUsd)) ?? "—"}</b></div><p class="caveat">Wallet: ${esc(timeText(bh?.lastSuccessAt))}<br>Positions: ${esc(timeText(ph?.lastSuccessAt))} · ${sourceState(ph)==="fresh"?"Updated":"Saved / unavailable"}</p></div>`;
+    }).join("");
+    const rows = p.positions.map((x, i) => `<tr data-pi="${i}">
+      <td class="pair"><button class="pool-open"><span class="dot ${x.chain}"></span>${esc(x.pair)} ↗</button><small>${esc(x.venue)} · ${sourceState(p.sources?.[`positions:${x.wallet}`])=== "fresh" ? "updated" : "saved / unverified"}</small></td>
+      <td>${esc(x.wallet)}</td>${cell(usd(x.depositedUsd))}${cell(usd(x.valueUsd))}${pnlCells(x)}
+      ${cell(x.openedAt ? held(x.openedAt, new Date().toISOString()) : null)}
+      ${window.rangeBadge?`<td>${window.rangeBadge(x)}</td>`:x.inRange == null ? cell(null) : `<td class="${x.inRange ? "pos" : "neg"}">${x.inRange ? "in range" : "out of range"}${x.lower != null ? ` · ${chartPrice(x.lower)}–${chartPrice(x.upper)}` : x.current != null ? ` · price ${num(x.current, 6)}` : ""}</td>`}
+    </tr>`).join("");
+    $("#posGrid tbody").innerHTML = rows;
+    $("#posGrid").hidden = !rows; $("#posEmpty").hidden = !!rows;
+    $("#posEmpty").textContent = Object.keys(p.errors || {}).length ? "Positions are unavailable or incomplete. Refresh wallets to try again." : "No open positions. Explore a pool and test a range to get started.";
+    const notes = [...new Set(p.positions.map(x => x.note).filter(Boolean))];
+    const errs = Object.entries(p.errors || {}).map(([k, v]) => `${k}: ${v}`);
+    $("#posNote").textContent = [...notes, ...errs].join(" · ");
+    // History is loaded only on its own tab, so wallet refresh stays lightweight.
+    $("#posClosed").innerHTML = `<button class="text-button" data-go="history">View closed positions in History ↗</button>`;
+  }
+
+  // ---------- history ----------
+  // One row per closed record. Group rows carry the pool's accurate totals; position rows only what's per-position.
+  function histTokens(tokens) {return tokens?.map(t=>`<span class="history-token">${esc(num(t.amount,7))} ${esc(t.symbol)}</span>`).join('')||'—';}
+  function histRow(x) {
+    return `<tr>
+      <td class="pair"><a href="${esc(x.url)}" target="_blank" rel="noopener"><span class="dot ${x.chain}"></span>${esc(x.pair)}</a><small title="${esc(x.positionAddress || "")}">${esc(x.wallet)} · ${x.positionAddress ? `${esc(x.chain==='robinhood'?String(x.positionAddress):String(x.positionAddress).slice(0,6)+'…'+String(x.positionAddress).slice(-4))}` : "ID unavailable"}</small></td>
+      <td>${esc(x.wallet)}</td>${x.depositedTokens?`<td>${histTokens(x.depositedTokens)}</td><td>${histTokens(x.withdrawnTokens)}</td>`:cell(usd(x.depositedUsd))+cell(usd(x.withdrawnUsd))}
+      ${pnlCells(x)}
+      ${cell(x.openedAt && x.closedAt ? held(x.openedAt, x.closedAt) : null)}
+      ${cell(x.closedAt ? new Date(x.closedAt).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : null)}</tr>`;
+  }
+  const held = (a, b) => { const h = (Date.parse(b) - Date.parse(a)) / 36e5; return h < 1 ? `${Math.round(h * 60)}m` : h < 48 ? `${h.toFixed(1)}h` : `${(h / 24).toFixed(1)}d`; };
+  async function loadHistory(intoPositions = false, force = false) {
+    if(state.history)renderHistory(state.history,intoPositions);
+    if(!force&&state.historyFetchedAt&&Date.now()-state.historyFetchedAt<15000)return;
+    if(!state.history)$("#histNote").textContent="Reading your journey…";
+    try {
+      pending.history??=api('/api/history'+(force?'?refresh=1':'')).finally(()=>{pending.history=null;});
+      const h=await pending.history;state.history=h;state.historyFetchedAt=Date.now();renderHistory(h,intoPositions);
+    }catch(e){$("#histNote").textContent='Could not update history. Saved records remain visible. '+e.message;}
+  }
+  function renderHistory(h,intoPositions=false) {
+    if (intoPositions) {
+      const rows = (h.closed || []).filter(x => !x.isGroup).slice(0, 24).map(histRow).join("");
+      $("#posClosed").innerHTML = rows ? `<table><thead><tr><th>Position</th><th>Wallet</th><th>Deposited</th><th>Withdrawn</th><th>Price / LP P&amp;L<small>before fees</small></th><th>Claimed fees</th><th>Unclaimed fees</th><th>Total P&amp;L</th><th>Held</th><th>Closed</th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="caveat">No closed positions yet.</div>`;
+      return;
+    }
+    const cards = Object.entries(h.totals || {}).map(([w, t]) => {
+      const rh=!!h.robinhood?.[w],source=h.historySources?.[w];
+      return `<article class="card history-total"><span class="eyebrow">${esc(w)} / ${rh?'ROBINHOOD':'SOLANA'}</span><h2>${rh?(t.positions??'—')+' closed':usd(t.pnl)??'Awaiting history'}</h2><p>${rh?'Token records indexed':(t.positions??'—')+' lifetime closed positions · total P&amp;L'}</p><details><summary>Source & coverage</summary><p class="note">${esc(t.note||'')}${source?' Read '+esc(timeText(source.readAt))+(source.stale?' · saved / partial':''):''}</p></details></article>`;
+    }).join("");
+    $("#histCards").innerHTML = cards;
+    window.renderJourney?.(h);
+    const individual = (h.closed || []).filter(x => !x.isGroup).sort((a,b) => (b.closedAt || "").localeCompare(a.closedAt || ""));
+    const rows = individual.map(histRow).join("");
+    const missing = (h.closed || []).filter(x => x.isGroup && !individual.some(p => p.wallet === x.wallet && p.poolAddress === x.poolAddress));
+    $("#histCoverage").textContent = missing.length ? `Individual records unavailable for ${missing.map(x => x.pair).join(", ")}. Pool totals are excluded to avoid presenting them as single deposits.` : "";
+    $("#histGrid tbody").innerHTML = rows; $("#histGrid").hidden = !rows; $("#histEmpty").hidden = !!rows;
+    $("#histNote").textContent = (h.refreshing?'Updating in the background… ':'') + (Object.entries(h.historySources||{}).map(([w,v])=>w+': '+timeText(v.readAt)+(v.stale?' · saved / partial':'')).join(' · ')||'Read '+timeText(h.updatedAt))+'. ' + Object.entries(h.errors || {}).map(([k, v]) => `${k}: ${v}`).join(" · ");
+  }
+
+  $("#refreshHistory").onclick = async () => {
+    const button = $("#refreshHistory"); button.disabled = true; button.textContent = "Refreshing…";
+    try { await loadHistory(false,true); } finally { button.disabled = false; button.textContent = "Refresh history"; }
+  };
+
+  // ---------- position chart ----------
+  async function openPosition(x) {
+    prepareDetail({kind:"position",item:x});$("#drawer").dataset.panel="position";
+    $("#drawerBody").innerHTML = `<h2><span class="dot ${x.chain}"></span>${esc(x.pair)}</h2>
+      <div style="color:var(--khaki);font-size:.88rem">${esc(x.venue)} · ${esc(x.wallet)} · <a href="${esc(x.url)}" target="_blank" rel="noopener">open on ${x.chain === "solana" ? "Meteora" : "Delta"}</a></div>
+      <div class="kv">
+        <div><span>Deposited</span><b>${usd(x.depositedUsd) ?? "—"}</b></div><div><span>Value now</span><b>${usd(x.valueUsd) ?? "—"}</b></div>
+        <div><span>Status</span><b class="${x.inRange == null ? "" : x.inRange ? "pos" : "neg"}">${x.inRange == null ? "—" : x.inRange ? "in range" : "out of range"}</b></div>
+        <div><span>Range</span><b>${x.lower != null ? `${chartPrice(x.lower)} – ${chartPrice(x.upper)}` : "—"}</b></div>
+      </div>
+      <div class="position-detail-result"><small>Total P&amp;L · fees included</small><strong class="${pnlClass(pnlData(x).totalPnlUsd)}">${signedUsd(pnlData(x).totalPnlUsd)??'Unavailable'}</strong>${window.rangeBadge?window.rangeBadge(x):''}</div>
+      <button class="outline explore-position-pool" data-explore-position-pool="${esc(x.chain+':'+x.poolAddress)}">Understand this pair &amp; other pools ↗</button>
+      <div id="posChart"><div class="caveat">Loading price history…</div></div>
+      <details class="position-accounting" open><summary>Breakdown</summary>${pnlBreakdown(x)}<p class="note">Price / LP P&amp;L = value now + principal withdrawn − deposits. Fees are added once. ${esc(pnlData(x).note)}</p></details>
+      <div class="caveat">Position read: ${esc(timeText(x.fetchedAt))} · ${sourceState(state.positions?.sources?.[`positions:${x.wallet}`])=== "fresh" ? "updated" : "saved / unverified"}</div>
+      <details class="card exit-fold" style="margin:20px 0"><summary>Manage / exit position</summary>
+      ${x.chain === 'robinhood' && x.venue === 'uniswap-v3' ? '<p>Preview withdrawing both tokens, with WETH returned as ETH.</p><button id="previewExit">Preview withdrawal</button><div id="exitReview" role="status" aria-live="polite"></div>' : '<section id="solanaExit"></section>'}
+      </details>
+      <div class="caveat">${esc(x.note ?? "")}</div>`;
+    showDrawer();
+    if(x.chain==='solana'&&window.mountSolana)window.mountSolana($("#solanaExit"),x.poolAddress||x.id.split(':')[1],true,x.walletAddress||'');
+    const previewButton = $("#previewExit"), review = $("#exitReview");
+    if (previewButton) previewButton.onclick = async () => {
+      previewButton.disabled = true; review.textContent = 'Simulating withdrawal and checking gas…';
+      try {
+        const d = await api(`/api/exit-preview?id=${encodeURIComponent(x.id)}`);
+        if (!review.isConnected) return;
+        review.innerHTML = `<div class="kv"><div><span>ETH returned · before gas</span><b>${chartPrice(d.proceeds.eth)}</b></div><div><span>${esc(d.proceeds.token.symbol)} returned</span><b>${chartPrice(d.proceeds.token.amount)}</b></div><div><span>Gas budget · ETH</span><b>${chartPrice(d.gasBudgetEth)}</b></div><div><span>ETH available for gas</span><b>${chartPrice(d.nativeBalanceEth)}</b></div></div><p class="note">Minimum liquidity returned: ${chartPrice(d.withdrawalMinimum.eth)} ETH + ${chartPrice(d.withdrawalMinimum.token)} ${esc(d.proceeds.token.symbol)}. Collected fees are additional.</p><p>${d.canCoverGas ? 'Your current ETH balance covers this gas budget.' : 'You need more ETH for gas before withdrawing.'}</p><p class="note">${esc(d.note)}</p><p class="note">Position #${esc(d.tokenId)} · Robinhood · ${esc(d.wallet)}<br>Simulated at block ${esc(d.block)} · ${esc(timeText(d.builtAt))} · refresh after ${esc(timeText(d.expiresAt))}<br>One withdrawal transaction · 1% tolerance on liquidity withdrawal · no swap included.</p><p><b>Preview only.</b> Signing from the terminal is not enabled yet.</p>`;
+      } catch (e) { if (review.isConnected) review.textContent = 'Preview unavailable: ' + e.message; }
+      finally { previewButton.disabled = false; previewButton.textContent = 'Refresh withdrawal preview'; }
+    };
+    const chart = $("#posChart");
+    const loadChart=async(force=false)=>{
+      const suffix=force?'&refresh=1':'';
+      const estimated=api(`/api/position-break-even?id=${encodeURIComponent(x.id)}${suffix}`).catch(e=>({status:'unavailable',price:null,note:e.message}));
+      let d;
+      try{d=await api(`/api/position-chart?id=${encodeURIComponent(x.id)}&days=7${suffix}`);}
+      catch(e){if(chart.isConnected)chart.textContent='Price history unavailable. '+e.message;return;}
+      if(!chart.isConnected)return;
+      const view=window.LPCandles.mount(chart,d.candles,{...d,...(d.bounds||{}),onRefresh:()=>loadChart(true)});
+      estimated.then(result=>{if(chart.isConnected)view?.setEstimate(result);});
+    };
+    await loadChart();
+  }
+  // Candle close line with high/low wicks, range band, current price marker. Pure SVG, no library.
+  const chartPrice = v => Number(v).toLocaleString(undefined,{maximumSignificantDigits:6});
+  function rangeChart(candles, x) {
+    const W = 480, H = 220, padL = 8, padR = 62, padT = 10, padB = 22;
+    const lo = Math.min(...candles.map(c => c.l), x.lower ?? Infinity), hi = Math.max(...candles.map(c => c.h), x.upper ?? -Infinity);
+    const span = (hi - lo) || 1, pad = span * 0.06;
+    const y = v => padT + (H - padT - padB) * (1 - (v - (lo - pad)) / (span + 2 * pad));
+    const xs = i => padL + (W - padL - padR) * ((candles[i].t-candles[0].t) / Math.max(1,candles[candles.length-1].t-candles[0].t));
+    const line = candles.map((c, i) => `${i ? "L" : "M"}${xs(i).toFixed(1)},${y(c.c).toFixed(1)}`).join(" ");
+    const wicks = candles.map((c, i) => `<line x1="${xs(i).toFixed(1)}" x2="${xs(i).toFixed(1)}" y1="${y(c.h).toFixed(1)}" y2="${y(c.l).toFixed(1)}" stroke="var(--moss)" stroke-width="1" opacity=".55"/>`).join("");
+    const band = x.lower != null ? `<rect x="${padL}" y="${y(x.upper).toFixed(1)}" width="${W - padL - padR}" height="${(y(x.lower) - y(x.upper)).toFixed(1)}" fill="var(--amber)" opacity=".13"/>
+      <line x1="${padL}" x2="${W - padR}" y1="${y(x.upper).toFixed(1)}" y2="${y(x.upper).toFixed(1)}" stroke="var(--amber)" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="${padL}" x2="${W - padR}" y1="${y(x.lower).toFixed(1)}" y2="${y(x.lower).toFixed(1)}" stroke="var(--amber)" stroke-width="1" stroke-dasharray="4 3"/>
+      <text x="${W - padR + 4}" y="${(y(x.upper) + 4).toFixed(1)}" fill="var(--amber)" font-size="10">${chartPrice(x.upper)}</text>
+      <text x="${W - padR + 4}" y="${(y(x.lower) + 4).toFixed(1)}" fill="var(--amber)" font-size="10">${chartPrice(x.lower)}</text>` : "";
+    const cur = candles[candles.length - 1].c;
+    const curLine = cur === x.lower || cur === x.upper ? "" : `<line x1="${padL}" x2="${W - padR}" y1="${y(cur).toFixed(1)}" y2="${y(cur).toFixed(1)}" stroke="var(--sand)" stroke-width="1" opacity=".7"/>
+      <text x="${W - padR + 4}" y="${(y(cur) + 4).toFixed(1)}" fill="var(--sand)" font-size="10" font-weight="600">${chartPrice(cur)}</text>`;
+    const t0 = new Date(candles[0].t * 1000), t1 = new Date(candles[candles.length - 1].t * 1000);
+    const fmtD = d => d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;margin:10px 0 4px" role="img" aria-label="Price history with your range">
+      ${band}${wicks}<path d="${line}" fill="none" stroke="var(--sol)" stroke-width="1.5"/>${curLine}
+      <text x="${padL}" y="${H - 6}" fill="var(--khaki)" font-size="10">${fmtD(t0)}</text>
+      <text x="${W - padR}" y="${H - 6}" fill="var(--khaki)" font-size="10" text-anchor="end">${fmtD(t1)}</text>
+    </svg><div class="caveat">${candles.length} candles · ${esc(x.chartUnit || ("price in " + x.pair?.split("/")[1] + " per " + x.pair?.split("/")[0]))}${x.lower == null ? " · position range overlay unavailable until price units are matched" : ""}</div>`;
+  }
+
+  // ---------- drawer / range test ----------
+  let executionChartController;
+  let executionInitialDraft=null;
+  function openDrawer(p) {
+    if(!p)return;
+    prepareDetail({kind:'pool',item:p});
+    state.current = p;
+    executionChartController?.abort(); executionChartController=new AbortController();
+    $('#drawer').dataset.panel='overview';
+    $("#drawerBody").innerHTML = `${LPExperience.header(p)}
+      <div class="pool-detail-actions"><button class="outline" data-save-pool="${esc(p.id)}" aria-pressed="${LPExperience.isSaved(p.id)}">${LPExperience.isSaved(p.id)?'★ Saved':'☆ Save pool'}</button><a class="text-button" href="${esc(p.url)}" target="_blank" rel="noopener">Open on ${esc(LPExperience.venue(p).split(' · ')[0])} ↗</a></div>
+      <div class="detail-tabs" role="tablist" aria-label="Pool details"><button role="tab" data-detail-tab="overview" aria-selected="true" aria-controls="detail-overview">Overview</button><button role="tab" data-detail-tab="chart" aria-selected="false" aria-controls="detail-chart">Chart &amp; range</button><button role="tab" data-detail-tab="trade" aria-selected="false" aria-controls="detail-trade">Trade</button></div>
+      <section id="detail-overview" role="tabpanel" aria-label="Pool overview">${LPExperience.brief(p)}<div id="poolContext" class="pool-context"></div><details class="alert-fold"><summary>More pool figures &amp; checks</summary><div class="kv"><div><span>Fees · 24h</span><b>${usd(p.fees24hUsd)??'—'}</b></div><div><span>Fee tier</span><b>${pct(p.feeTier,2)??'—'}</b></div><div><span>Fee/TVL · 1h</span><b>${pct(p.feeTvl?.h1,3)??'—'}</b></div><div><span>Fee/TVL · 24h</span><b>${pct(p.feeTvl?.h24,3)??'—'}</b></div></div><p class="token-identity">Pool: ${esc(p.address)}</p><p>${esc(poolEvidence(p).reason)}</p><ul>${poolEvidence(p).risks.map(r=>`<li>${esc(r)}</li>`).join('')}</ul></details><button class="primary next-step" data-detail-tab="chart">Explore the chart &amp; range →</button></section>
+      <div id="executionChartStage" class="decision-brief execution-chart" hidden><h3>${p.venue==='meteora-damm-v2'?'Price chart':'Chart &amp; your range'}</h3><div class="range-controls"><label>Place range <select id="previewSide"><option value="around">Around price</option><option value="below">Below price · bids</option>${p.chain==='solana'?'':'<option value="above">Above price</option>'}</select></label><label>Range width <input id="previewWidth" type="range" min="2" max="80" value="20"> <span id="previewWidthLabel">±20%</span></label></div><div id="executionRangeStrip" aria-live="polite"></div><p id="previewNumbers" class="note"></p><details id="executionHistory"><summary>Price history</summary><div id="poolPreview" aria-live="polite">Open this tab to load the chart.</div><p class="note">Chart prices are ${esc(p.quote.symbol)} per ${esc(p.base.symbol)}. Review shows the snapped on-chain bounds.</p></details></div>
+      <section id="detail-chart" role="tabpanel" aria-label="Chart and range" hidden>${strategyGuide(p)}<details class="alert-fold"><summary>Historical range comparison &amp; swap checks</summary>
+      <h3 class="flow-step"><span class="px">01</span> Research the pool</h3>
+      <div class="actions">
+        <label>Amount $ <input id="amt" type="number" value="40" step="5"></label>
+        <label>Days <input id="days" type="number" value="7" min="1" max="30" style="width:60px"></label>
+        <button id="runCheck">Swap check</button>
+        <button id="runTest">Compare historical ranges</button>
+      </div>
+      <div id="checkOut" aria-live="polite"></div>
+      <p class="note">This comparison tests standard ranges over the historical window. It does not simulate the custom range drawn above.</p><div id="testOut" aria-live="polite"></div>
+      </details><button class="primary next-step" data-detail-tab="trade">Prepare a position →</button></section>
+      <section id="detail-trade" role="tabpanel" aria-label="Prepare a position" data-mainnet-controls hidden inert>
+      <div class="actions">
+        <button class="primary" id="buyBtn" ${p.chain === "robinhood" && p.venue === "uniswap-v3" && [p.base.symbol,p.quote.symbol].includes("WETH") ? "" : "disabled"} title="${p.chain === "robinhood" && p.venue === "uniswap-v3" && [p.base.symbol,p.quote.symbol].includes("WETH") ? "Build a buy transaction for Paybox to sign" : "Buy builder covers Uniswap V3 pools paired with WETH for now — pick the V3 row"}">Buy with ETH</button>
+        <button class="primary" id="openBtn" ${p.chain === "robinhood" && p.venue === "uniswap-v3" && [p.base.symbol,p.quote.symbol].includes("WETH") ? "" : "disabled"} title="${p.chain === "robinhood" && p.venue === "uniswap-v3" && [p.base.symbol,p.quote.symbol].includes("WETH") ? "Build approve + mint for Paybox to sign" : "Opener covers Uniswap V3 WETH pairs on Robinhood for now"}">Open position</button>
+      </div>
+      <div id="txOut" aria-live="polite"></div><section id="solanaTrade"></section></section>`;
+    showDrawer();
+    let chartLoaded=false;
+    LPExperience.mountContext($('#poolContext'),p,openDrawer);
+    $('#drawerBody').querySelectorAll('[data-detail-tab]').forEach(b=>b.onclick=()=>{
+      const name=b.dataset.detailTab;if(name==='trade')return;$('#drawer').dataset.panel=name;
+      $('#drawerBody').querySelectorAll('[role="tabpanel"]').forEach(x=>x.hidden=x.id!=='detail-'+name);
+      $('#drawerBody').querySelectorAll('[role="tab"]').forEach(x=>{x.setAttribute('aria-selected',String(x.dataset.detailTab===name));x.tabIndex=x.dataset.detailTab===name?0:-1;});
+      $('#executionChartStage').hidden=name==='overview';
+      $('#executionHistory').open=name==='chart';
+      if(name==='trade'){const link=new URL(location.href);for(const key of ['floor','ceiling','size','shape','mix'])link.searchParams.delete(key);link.searchParams.set('compose',p.id);history.replaceState(history.state,'',link);}
+      if((name==='chart'||name==='trade')&&!chartLoaded){chartLoaded=true;loadPoolPreview(p,executionChartController.signal);}
+      $('#drawerBody').scrollTo({top:0,behavior:'instant'});
+    });
+    if(p.venue==='meteora-damm-v2'){$('#previewSide').closest('label').hidden=true;$('#previewWidth').closest('label').hidden=true;$('#runTest').disabled=true;$('#testOut').textContent='Historical DLMM shape comparisons do not apply to this DAMM v2 pool.';$('#solanaTrade').innerHTML='<p class="note">DAMM v2 is available for research here. Adding or removing liquidity uses Meteora; the terminal zap currently supports DLMM.</p>';}
+
+    if(p.chain==='solana'&&!p.venue.startsWith('meteora')){$('#runTest').disabled=true;$('#runCheck').disabled=true;$('#testOut').textContent='Venue-specific simulation is not available here yet.';$('#solanaTrade').innerHTML='<p class="note">Research this pool here; use its venue to manage liquidity.</p>';}
+    if(p.venue === "meteora-dlmm" && window.mountSolana) window.mountSolana($("#solanaTrade"),p.address || p.id.split(":").at(-1),false,'',{poolMeta:p,draft:executionInitialDraft?.pool===p.id?executionInitialDraft.draft:undefined});
+    if($('#strategyIntent')){const shape=window.LPExecution?.getDraft(p.address)?.strategy;$('#strategyIntent').value=({spot:'even',curve:'centre','bid-ask':'ladder'})[shape]||'even';$('#strategyIntent').onchange=()=>explainStrategy(true);explainStrategy();}
+    $("#runTest").addEventListener("click", e=>runAction(e.currentTarget, "#testOut", runTest));
+    $("#runCheck").addEventListener("click", e=>runAction(e.currentTarget, "#checkOut", runCheck));
+    if(p.chain==='solana'){$("#buyBtn").parentElement.hidden=true;}
+    $("#buyBtn").addEventListener("click", e=>runAction(e.currentTarget, "#txOut", buildBuy));
+    $("#openBtn").addEventListener("click", e=>runAction(e.currentTarget, "#txOut", buildOpen));
+    if(p.chain==='robinhood'&&p.venue==='uniswap-v3'&&window.mountEvm&&!$("#openBtn").disabled)window.mountEvm($("#txOut"),p,'open');
+  }
+  async function loadPoolPreview(p,signal) {
+    const host=$("#poolPreview"),slider=$("#previewWidth"),side=$("#previewSide"),numbers=$("#previewNumbers"),strip=$("#executionRangeStrip");
+    const native=p.chain==='solana'?'So11111111111111111111111111111111111111112':'0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73';
+    const same=(a,b)=>p.chain==='solana'?a===b:String(a).toLowerCase()===String(b).toLowerCase();
+    const direct=same(p.quote.address,native),reverse=same(p.base.address,native),key=p.chain==='solana'?p.address:p.id,family=p.chain==='solana'?'solana':'evm',unit=family==='solana'?'SOL':'ETH';
+    const executable=p.venue==='meteora-dlmm'&&p.chain==='solana'||p.venue==='uniswap-v3'&&p.chain==='robinhood';
+    let view=null,cs=[],meta={baseAddress:p.base.address,quoteAddress:p.quote.address,chartUnit:p.quote.symbol+' per '+p.base.symbol,fetchedAt:p.fetchedAt};
+    const sourcePrice=p.priceQuote>0?p.priceQuote:p.priceUsd>0&&p.quotePriceUsd>0?p.priceUsd/p.quotePriceUsd:null;
+    let reference=sourcePrice?(direct?sourcePrice:reverse?1/sourcePrice:null):null,referenceAt=p.fetchedAt;
+    const readRange=draft=>({lower:Number(draft?.[family==='solana'?'lowerPriceSol':'lowerPriceEth']),upper:Number(draft?.[family==='solana'?'upperPriceSol':'upperPriceEth'])});
+    const draw=(draft,label='Draft')=>{
+      const range=readRange(draft);if(!([range.lower,range.upper].every(Number.isFinite)&&range.lower>0&&range.upper>range.lower)){numbers.textContent='Enter a floor and ceiling to draw your range.';strip.innerHTML='';view?.setBounds({lower:null,upper:null});return;}
+      const bounds=window.LPExecutionLink.chartBounds(meta,native,range,family);if(!bounds)return;view?.setBounds(bounds);
+      const min=Math.min(range.lower,reference||range.lower),max=Math.max(range.upper,reference||range.upper),span=Math.log(max)-Math.log(min),x=v=>40+520*((Math.log(v)-Math.log(min))/span);
+      strip.innerHTML=`<svg viewBox="0 0 600 104" role="img" aria-label="${esc(label)} range from ${esc(range.lower)} to ${esc(range.upper)} ${unit} per token"><line x1="24" x2="576" y1="42" y2="42" stroke="#d8d9c9" stroke-width="8"/><line x1="${x(range.lower)}" x2="${x(range.upper)}" y1="42" y2="42" stroke="#728856" stroke-width="12"/><line x1="${x(range.lower)}" x2="${x(range.lower)}" y1="30" y2="54" stroke="#384c34" stroke-width="2"/><line x1="${x(range.upper)}" x2="${x(range.upper)}" y1="30" y2="54" stroke="#384c34" stroke-width="2"/>${reference?`<path d="M ${x(reference)-5} 20 L ${x(reference)+5} 20 L ${x(reference)} 29 Z" fill="#9c6a2f"/><text x="${Math.max(90,Math.min(510,x(reference)))}" y="12" text-anchor="middle" fill="currentColor" font-size="10">Pool reference ${esc(chartPrice(reference))}</text>`:''}<text x="24" y="77" fill="currentColor" font-size="12">Floor ${esc(chartPrice(range.lower))}</text><text x="576" y="77" text-anchor="end" fill="currentColor" font-size="12">Top ${esc(chartPrice(range.upper))}</text><text x="300" y="98" text-anchor="middle" fill="currentColor" font-size="10">${unit} per paired token · logarithmic price scale</text></svg>`;
+      const inside=cs.length?` · ${Math.round(cs.filter(c=>c.l>=bounds.lower&&c.h<=bounds.upper).length/cs.length*100)}% of recorded hourly candles fully inside`:'';
+      numbers.textContent=`${label}: ${chartPrice(bounds.lower)}–${chartPrice(bounds.upper)} ${meta.chartUnit}${inside}. Pool reference as of ${timeText(referenceAt)}; live review checks the current pool.`;
+    };
+    const choose=()=>{
+      if(!reference){numbers.textContent='No native price reference is available. Enter exact bounds below.';return;}
+      const width=Number(slider.value)/100,below=side.value==='below',lower=side.value==='above'?reference:reference*(1-width),upper=below?reference/(1+Number(p.poolConfig?.binStep||1)/10000):reference*(1+width);
+      const prices=family==='solana'?{lowerPriceSol:String(lower),upperPriceSol:String(upper),depositMode:below?'sol-only':'two-sided'}:{lowerPriceEth:String(lower),upperPriceEth:String(upper)};
+      $("#previewWidthLabel").textContent=`${side.value==='around'?'±':''}${slider.value}%`;
+      if(window.LPExecution?.setRange(key,prices)===false)return;draw(window.LPExecution?.getDraft(key)||prices);
+    };
+    if(executable&&(direct||reverse)){
+      slider.oninput=choose;side.onchange=choose;
+      document.addEventListener('lp:execution-draft',event=>{if(event.detail.pool!==key||event.detail.locked)return;draw(event.detail.review||event.detail.draft,event.detail.review?'Simulated range':'Draft');},{signal});
+      document.addEventListener('lp:execution-review',event=>{if(event.detail.pool===key)draw(event.detail.preview,'Simulated range');},{signal});
+      document.addEventListener('lp:execution-operation',event=>{if(event.detail.pool===key)slider.disabled=side.disabled=!!event.detail.locked;},{signal});
+      const state=window.LPExecution?.getState?.(key),existing=state?.review||window.LPExecution?.getDraft(key),range=readRange(existing);
+      if(state?.locked)slider.disabled=side.disabled=true;
+      if(range.lower>0&&range.upper>range.lower){if(existing.depositMode==='sol-only')side.value='below';$('#previewWidthLabel').textContent='Custom prices';draw(existing,state?.review?'Simulated range':'Draft');}else if(!state?.locked){if(family==='evm'&&Number(existing?.amountToken||0)===0)side.value='below';choose();}
+    }else{slider.closest('label').hidden=true;side.closest('label').hidden=true;}
+    host.textContent='Loading price history…';
+    try{
+      const data=await api(`/api/pool-chart?pool=${encodeURIComponent(p.id)}&days=7`);if(!host.isConnected||signal?.aborted)return;
+      cs=(data.candles||[]).filter(c=>c.c>0).sort((a,b)=>a.t-b.t);meta=data;
+      if(!cs.length){host.textContent='Price history is unavailable. The range diagram and exact-price inputs remain usable.';return;}
+      view=window.LPCandles.mount(host,cs,meta);
+      if(executable&&(direct||reverse)){
+        if(!reference){reference=direct?cs.at(-1).c:1/cs.at(-1).c;referenceAt=data.fetchedAt;}
+        const state=window.LPExecution?.getState?.(key),draft=state?.review||window.LPExecution?.getDraft(key),range=readRange(draft);
+        if(range.lower>0&&range.upper>range.lower)draw(draft,state?.review?'Simulated range':'Draft');else if(!state?.locked)choose();
+      }
+    }catch(e){if(host.isConnected&&!signal?.aborted)host.textContent='Price history unavailable: '+e.message+' Your range diagram and exact bounds remain available.';}
+  }
+  async function runAction(button, selector, work) {
+    const out = $(selector); button.disabled = true;
+    try { await work(); } catch(e) { if(out.isConnected) out.textContent = "Could not finish. " + e.message; }
+    finally { if(button.isConnected) button.disabled = false; }
+  }
+  async function buildOpen() { if(window.mountEvm) window.mountEvm($("#txOut"),state.current,'open'); }
+  async function buildBuy() { if(window.mountEvm) window.mountEvm($("#txOut"),state.current,'buy'); }
+  async function runCheck() {
+    const out = $("#checkOut"); out.innerHTML = `<div class="caveat">Reading token permissions and checking current swap quotes…</div>`;
+    const c = await api(`/api/check?pool=${encodeURIComponent(state.current.id)}`);
+    if(!out.isConnected)return;
+    if (c.error) { out.innerHTML = `<div class="flag">Check failed: ${esc(c.error)}</div>`; return; }
+    const icon = { ok: "●", warn: "▲", bad: "✕", info: "·" };
+    const label = { ok: "Limited checks passed", warn: "Costs or permissions to review", bad: "Restriction detected", info: "Some checks unavailable" };
+    out.innerHTML = `<div class="verdict ${c.verdict}">${icon[c.verdict]} ${label[c.verdict]}</div>` +
+      c.findings.map(x => `<div class="finding ${x.severity}"><b>${icon[x.severity]} ${esc(x.title)}</b><span>${esc(x.detail)}</span></div>`).join("") +
+      `<div class="caveat">These are limited, read-only checks. Quotes are not executed trades and may use other pools. Holder concentration, future restrictions and rug risk remain unverified.</div>`;
+  }
+  async function runTest() {
+    const out = $("#testOut"); out.innerHTML = `<div class="caveat">Pulling candles and simulating…</div>`;
+    const amount = Number($("#amt").value), days = Number($("#days").value);
+    if(!Number.isFinite(amount)||amount<=0||!Number.isInteger(days)||days<1||days>30)throw new Error("Enter a positive amount and a whole number of days from 1 to 30.");
+    const q = new URLSearchParams({ pool: state.current.id, amountUsd: String(amount), days: String(days) });
+    const s = await api(`/api/suggest?${q}`);
+    if(!out.isConnected)return;
+    if (s.error) { out.innerHTML = `<div class="flag">Couldn't test: ${esc(s.error)}</div>`; return; }
+    const rows = s.ranges.map(x => `<tr class="${s.pick && x.rangePct === s.pick.rangePct ? "pick" : ""}">
+      <td>±${Math.round(x.rangePct*100)}%</td><td>${pct(x.inRangePct, 0)}</td>
+      <td class="${x.ilPct < 0 ? "neg" : "pos"}">${pct(x.ilPct, 2)}</td><td>${x.concentration.toFixed(1)}×</td>
+      ${cell(usd(x.estFees7dUsd))}${x.netEst7dUsd == null ? cell(null) : `<td class="${x.netEst7dUsd >= 0 ? "pos" : "neg"}">${usd(x.netEst7dUsd)}</td>`}</tr>`).join("");
+    out.innerHTML = `
+      <div class="kv">
+        <div><span>Candles</span><b>${s.candles} × ${s.timeframe}</b></div><div><span>Realised vol / day</span><b>${pct(s.dailyVolPct, 1)}</b></div>
+        <div><span>Your share of pool</span><b>${s.currentFeeRunRate.shareOfPool == null ? "—" : pct(s.currentFeeRunRate.shareOfPool, 4)}</b></div>
+        <div><span>Pool fees / day</span><b>${usd(s.currentFeeRunRate.fees24hUsd) ?? "—"}</b></div>
+      </div>
+      <table class="ranges"><thead><tr><th style="text-align:left">Range</th><th>In range</th><th>IL</th><th title="Your fee-earning liquidity vs a typical ±20% LP with the same money">Conc.</th><th>Est. fees ${s.windowDays}d</th><th>Net</th></tr></thead><tbody>${rows}</tbody></table>
+      ${s.pick ? `<p style="margin:12px 0 4px"><b>Historical comparison:</b> ±${Math.round(s.pick.rangePct*100)}% — ${num(s.pick.lower, 5)} to ${num(s.pick.upper, 5)}, in range ${pct(s.pick.inRangePct, 0)} of the last ${s.windowDays} days.</p>` : ""}
+      ${s.series?.length && s.pick ? rangeChart(s.series, { lower: s.pick.lower, upper: s.pick.upper, chartUnit: s.chartUnit }) : ""}
+      ${s.strategy ? `<div class="strategy ${s.strategy.verdict}">
+        <div class="verdict ${s.strategy.verdict === "go" ? "ok" : s.strategy.verdict === "small" ? "warn" : "bad"}">${s.strategy.verdict === "go" ? "●" : s.strategy.verdict === "small" ? "▲" : "✕"} ${esc(s.strategy.shape)} · ${esc(s.strategy.side)} · ±${Math.round(s.strategy.rangePct*100)}% ${s.strategy.verdict === "skip" ? "— skip this one" : s.strategy.verdict === "small" ? "— size small" : ""}</div>
+        ${s.strategy.reasons.map(r => `<div class="finding info"><span>${esc(r)}</span></div>`).join("")}
+        <p class="caveat">Exploratory scenario, not an entry instruction. Shape scores measure overlap with sampled prices, not fees earned; they omit swap-by-bin volume and competing liquidity.</p><div class="finding info"><b>Setup context</b><span>${esc(s.strategy.howTo)}</span></div>
+        <table class="ranges" style="margin-top:8px"><thead><tr><th style="text-align:left">Shape</th><th>Price-path overlap vs Spot</th><th style="text-align:left">Character</th></tr></thead><tbody>
+          ${s.shapes.map(x => `<tr class="${x.shape === s.strategy.shape ? "pick" : ""}"><td>${esc(x.shape)}</td><td>${x.feeScore.toFixed(2)}×</td><td style="text-align:left;white-space:normal">${esc(x.note)}</td></tr>`).join("")}
+        </tbody></table></div>` : ""}
+      ${s.flags.map(f => `<span class="flag">▲ ${esc(f)}</span>`).join("")}
+      <div class="caveat">${esc(s.caveat)}</div>`;
+  }
+  let drawerReturnFocus=null,drawerPageY=0,detailHistory=[],currentDetail=null,restoringDetail=false;
+  function prepareDetail(next){
+    const isOpen=$('#drawer').classList.contains('open');
+    if(!isOpen){detailHistory=[];}else if(currentDetail&&!restoringDetail){detailHistory.push({...currentDetail,scroll:$('#drawerBody').scrollTop});}
+    currentDetail=next;
+    $('#drawerBack').hidden=!detailHistory.length;
+    $('#drawerLabel').textContent=next.kind==='position'?'Your position':'Pool details';
+    $('#drawerBody').scrollTop=0;
+  }
+  function showDrawer(){
+    if(!$('#drawer').classList.contains('open')){
+      drawerReturnFocus=document.activeElement;drawerPageY=window.scrollY;
+      document.body.style.top=-drawerPageY+'px';document.body.classList.add('detail-open');
+      history.pushState({lpDrawer:true},'',location.href);
+    }
+    $('#drawer').inert=false;$('#drawer').classList.add('open');$('#drawer').setAttribute('aria-hidden','false');
+    $('#drawerBackdrop').hidden=false;$('main').inert=true;$('#drawerClose').focus({preventScroll:true});
+  }
+  function closeDrawer(updateHistory=true){
+    if(!$('#drawer').classList.contains('open'))return;
+    executionChartController?.abort();
+    $('#drawer').classList.remove('open');$('#drawer').setAttribute('aria-hidden','true');$('#drawer').inert=true;
+    $('main').inert=false;$('#drawerBackdrop').hidden=true;document.body.classList.remove('detail-open');document.body.style.top='';
+    window.scrollTo({top:drawerPageY,behavior:'instant'});
+    if(drawerReturnFocus?.isConnected)drawerReturnFocus.focus({preventScroll:true});
+    drawerReturnFocus=null;detailHistory=[];currentDetail=null;
+    if(updateHistory&&history.state?.lpDrawer)history.back();
+  }
+  $('#drawerBack').onclick=()=>{const previous=detailHistory.pop();if(!previous)return;restoringDetail=true;
+    if(previous.kind==='position')openPosition(previous.item);else openDrawer(previous.item);
+    restoringDetail=false;$('#drawerBack').hidden=!detailHistory.length;
+    requestAnimationFrame(()=>$('#drawerBody').scrollTop=previous.scroll||0);
+  };
+  window.addEventListener('popstate',()=>{if($('#drawer').classList.contains('open')&&!history.state?.lpDrawer)closeDrawer(false);});
+  function setPoolLayout(layout){poolLayout=layout;$('#poolCards').hidden=layout!=='cards';$('#grid').closest('.pool-scroll').hidden=layout!=='table';$('.pool-scroll-hint').hidden=layout!=='table';document.querySelectorAll('[data-pool-layout]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.poolLayout===layout)));}
+  document.querySelectorAll('[data-pool-layout]').forEach(b=>b.onclick=()=>{setPoolLayout(b.dataset.poolLayout);try{localStorage.setItem('pat-pool-layout',poolLayout);}catch{}});
+  $('#savedPoolsOnly').onchange=()=>loadPools();
+  document.addEventListener('click',async e=>{
+    const card=e.target.closest('[data-card-pool]');if(card)openDrawer(displayedPools[Number(card.dataset.cardPool)]);
+    const save=e.target.closest('[data-save-pool]');if(save){const ok=LPExperience.toggleSaved(save.dataset.savePool);document.querySelectorAll('[data-save-pool]').forEach(b=>{const on=LPExperience.isSaved(b.dataset.savePool);b.setAttribute('aria-pressed',String(on));b.textContent=on?'★ Saved':'☆ Save';});$('#poolSaveNotice').textContent=ok?'Saved on this device':'Saved for this visit; browser storage unavailable';if($('#savedPoolsOnly').checked)loadPools();else if(state.snap)renderPools();}
+    const jump=e.target.closest('[data-jump]');if(jump)document.getElementById(jump.dataset.jump)?.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});
+    const explore=e.target.closest('[data-explore-position-pool]');if(explore){explore.disabled=true;try{const d=await api('/api/pool-context?pool='+encodeURIComponent(explore.dataset.explorePositionPool));if(explore.isConnected)openDrawer(d.pool);}catch(err){if(explore.isConnected)explore.textContent=err.message;}finally{if(explore.isConnected)explore.disabled=false;}}
+  });
+  document.addEventListener('keydown',e=>{const tab=e.target.closest('[role="tab"]');if(!tab||!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;
+    const items=[...tab.parentElement.querySelectorAll('[role="tab"]')];let i=items.indexOf(tab);i=e.key==='Home'?0:e.key==='End'?items.length-1:(i+(e.key==='ArrowRight'?1:-1)+items.length)%items.length;
+    e.preventDefault();items[i].click();items[i].focus({preventScroll:true});
+  });
+  // ---------- wiring ----------
+  $("#drawerClose").addEventListener("click", closeDrawer);
+  $("#drawerBackdrop").addEventListener("click", closeDrawer);
+  $("#drawer").addEventListener("keydown",e=>{
+    if(e.key!=="Tab")return;
+    const els=[...$("#drawer").querySelectorAll('button:not(:disabled),a[href],input:not(:disabled),select,textarea')].filter(x=>x.getClientRects().length);
+    if(!els.length)return;
+    if(e.shiftKey&&document.activeElement===els[0]){e.preventDefault();els.at(-1).focus();}
+    else if(!e.shiftKey&&document.activeElement===els.at(-1)){e.preventDefault();els[0].focus();}
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+  $("#grid tbody").addEventListener("click", (e) => { const tr = e.target.closest("tr"); if (tr) openDrawer(displayedPools[+tr.dataset.i]); });
+  $("#posGrid tbody").addEventListener("click", (e) => { if (e.target.closest("a")) return; const tr = e.target.closest("tr"); if (tr) openPosition(state.positions.positions[+tr.dataset.pi]); });
+  $("#filters").addEventListener("submit", (e) => { e.preventDefault(); $("#poolPreset").value="custom"; loadPools(); });
+  $('#moreAlphaPools').onclick=()=>{state.alphaLimit+=20;renderPools();};
+  document.querySelectorAll('[data-alpha-mode]').forEach(b=>b.onclick=()=>{
+    state.alphaMode=b.dataset.alphaMode;state.sort='feeApr';$('#poolOrder').value=state.sort;
+    document.querySelectorAll('[data-alpha-mode]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.alphaMode===state.alphaMode)));
+    loadPools();
+  });
+  $("#poolPreset").addEventListener("change", () => { const values=LPDiscovery.presets[$("#poolPreset").value];if(!values){$(".custom-filters").open=true;return;}for(const [k,v] of Object.entries(values))$("#filters [name="+k+"]").value=v;loadPools(); });
+  $("#poolAge").addEventListener("change",()=>loadPools());
+  $("#poolVenue").addEventListener("change",loadPools);
+  $("#volumePulse").addEventListener("click",e=>{const b=e.target.closest("[data-radar-pool]");if(b)openDrawer(displayedPools[Number(b.dataset.radarPool)]);});
+  $("#poolOrder").addEventListener("change",()=>{state.sort=$("#poolOrder").value;loadPools();});
+  async function refreshData(all) {
+    if (pending.refresh) return;
+    pending.refresh = true;
+    const buttons = [$("#refresh"), $("#refreshWallets"), $("#refreshPositions")];
+    const labels = buttons.map(b=>b.textContent);
+    buttons.forEach(b=>{b.disabled=true; b.textContent="Refreshing…";});
+    try {
+      const walletRead = loadPositions(true);
+      if (all) {
+        try { await api("/api/refresh", {method:"POST"}); await loadPools(); } catch(e) { clientErrors.pools = "Pool refresh failed. " + e.message; }
+        state.history = null;
+      }
+      await walletRead;
+      const failures=Object.values(state.positions?.sources||{}).filter(x=>x.status!=='fresh');
+      $("#refreshResult").textContent=clientErrors.positions || (failures.length ? `Refresh finished, but ${failures.length} sources could not update. ${failures.map(x=>x.message||x.label+' unavailable').join(' ')} Saved values remain visible.` : "Wallets and positions refreshed successfully.");
+    } finally { pending.refresh=false; buttons.forEach((b,i)=>{b.disabled=false; b.textContent=labels[i];}); renderMeta(); renderHome(); }
+  }
+  $("#refresh").addEventListener("click",()=>refreshData(true));
+  $("#refreshWallets").addEventListener("click",()=>refreshData(false));
+  $("#refreshPositions").addEventListener("click",()=>refreshData(false));
+  let searchTimer; $("#poolSearch").addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(loadPools,250);});
+  document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+    document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", "false"));
+    b.setAttribute("aria-pressed", "true"); state.chain = window.WorldsFair.showRobinhood ? b.dataset.chain : "solana"; loadPools(); renderWallets();
+  }));
+  $("#grid thead").addEventListener("click", (e) => { const th = e.target.closest("th"); if (!th) return; state.sort = th.dataset.k; $("#poolOrder").value=state.sort; loadPools(); });
+  function go(tab, searchOverride) {
+    if (!window.WorldsFair.showRobinhood && ["home","positions","wallets","history","alerts"].includes(tab)) tab = ["positions","history"].includes(tab) ? "baskets" : "alpha";
+    if (["settings", "wallets"].includes(tab) && !window.WorldsFair.showRobinhood) tab = "alpha";
+    if(["top","stock","pools"].includes(tab))tab="alpha";
+    if(['top','alpha','stock'].includes(state.tab))poolViews[state.tab]={fields:Object.fromEntries(new FormData($('#filters'))),chain:state.chain,sort:state.sort,alphaMode:state.alphaMode,preset:$('#poolPreset').value,search:$('#poolSearch').value};
+    state.tab = tab;
+    history.replaceState(null,'','#'+tab);
+    document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.tab===(["positions","wallets"].includes(tab)?"home":tab))));
+    requestAnimationFrame(()=>{
+      const nav=$('#tabs'),active=nav.querySelector('[aria-selected="true"]');
+      if(active&&nav.scrollWidth>nav.clientWidth){
+        const box=active.getBoundingClientRect(),rail=nav.getBoundingClientRect();
+        nav.scrollTo({left:nav.scrollLeft+box.left-rail.left-(nav.clientWidth-box.width)/2,behavior:'instant'});
+      }
+    });
+    const poolView = ["top","alpha","stock"].includes(tab);
+    if(poolView){
+      const view=poolViews[tab]||{fields:{minTvl:0,maxTvl:0,minVol:0,maxAgeH:0,venue:''},chain:'solana',sort:tab==='alpha'?'feeApr':'volume24hUsd',alphaMode:'depth',preset:'all',search:''};
+      for(const [k,v] of Object.entries(view.fields))$('#filters').elements[k].value=v;
+      state.chain=window.WorldsFair.showRobinhood?view.chain:"solana";state.sort=view.sort;state.alphaMode=view.alphaMode;
+      $('#poolPreset').value=view.preset;$('#poolSearch').value=searchOverride??view.search;
+      $('#filters .custom-filters').open=false;
+      document.querySelectorAll('#filters [data-chain]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.chain===state.chain)));
+      document.querySelectorAll('[data-alpha-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.alphaMode===state.alphaMode)));
+    }
+    $("#alphaTools").hidden=tab!=="alpha";
+    $('#alphaModes').hidden=tab!=='alpha';$('#poolSizeControls').hidden=tab==='alpha';
+    $('#view-pools').classList.toggle('alpha-view',tab==='alpha');
+    $("#view-pools").hidden=!poolView; $("#strip").hidden=!poolView;
+    $("#portfolioToolbar").hidden=tab!=="positions";
+    for(const name of ["home","positions","history","learn","baskets","wallets","alerts","bot","settings"]) $("#view-"+name).hidden=tab!==name;
+    $("#poolOrder").value=state.sort;
+    $("#poolTitle").textContent = 'Pools';
+    if(poolView)loadPools(); else if(tab==='positions')renderPositions(); else if(tab==='history')loadHistory(); else if(tab==='home')renderHome(); else if(tab==='baskets')window.loadBaskets?.(); else if(tab==='wallets'){$('#intelAddress').value='';window.loadWalletIntel?.();}
+    if(tab==='bot'){window.loadPaperFleet?.();}
+    if(tab==='alerts')window.loadRangeAlerts?.();
+    if(poolView)window.loadVolumeAlerts?.();
+    closeDrawer(false);
+    document.body.dataset.view=tab;
+    document.querySelectorAll("#tabs [role=tab]").forEach(b=>b.tabIndex=b.getAttribute("aria-selected")==="true"?0:-1);
+    $(".skip-link").href="#"+(poolView?"view-pools":"view-"+tab);
+    window.scrollTo({top:0,left:0,behavior:'instant'});
+  }
+  $("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(b)go(b.dataset.tab);});
+  document.addEventListener("click",e=>{const b=e.target.closest("[data-go]");if(b)go(b.dataset.go); const pos=e.target.closest("[data-position]");if(pos)openPosition(state.positions.positions[+pos.dataset.position]);});
+  document.addEventListener('worldsfair:visibility',()=>{
+    state.chain='solana';for(const key of Object.keys(poolViews))delete poolViews[key];
+    state.historyFetchedAt=0;
+    if(!window.WorldsFair.showRobinhood){
+      state.positions=window.WorldsFair.filterResponse('/api/positions',state.positions);
+      state.history=window.WorldsFair.filterResponse('/api/history',state.history);
+      if(['wallets','settings'].includes(state.tab))go('alpha');
+    }
+    closeDrawer(false);renderHome();if(state.tab==='positions')renderPositions();if(state.tab==='history'&&state.history)renderHistory(state.history);
+    loadPools();loadPositions(true);if(state.tab==='history')loadHistory(false,true);
+    document.querySelectorAll('#filters [data-chain]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.chain==='solana')));
+  });
+  $("#today").textContent = new Date().toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'long'});
+  document.addEventListener('lp:review-alert',async e=>{await loadPositions(true);const p=state.positions?.positions?.find(p=>p.id===e.detail);if(p)openPosition(p);else{go('positions');$('#operationNotice').hidden=false;$('#operationNotice').textContent='This position is no longer in the current portfolio. Check History for closed positions.';}});
+  document.addEventListener('lp:find-token-pools',e=>{delete poolViews.alpha;go('alpha',e.detail);});
+  document.addEventListener('lp:review-volume',async e=>{try{const d=await api('/api/pools?search='+encodeURIComponent(String(e.detail).split(':').at(-1)));const p=d.pools.find(p=>p.id===e.detail||p.address===e.detail);if(p)openDrawer(p);else{$('#operationNotice').hidden=false;$('#operationNotice').textContent='This pool is outside the current catalogue. Use Identify a pool with its address; saved alerts are historical observations.';}}catch(err){$('#operationNotice').hidden=false;$('#operationNotice').textContent=err.message;}});
+  document.addEventListener('lp:ranges-updated',()=>{renderHome();if(state.tab==='positions')renderPositions();});
+  document.addEventListener('lp:positions-refreshed' ,()=>loadPositions());
+  window.addEventListener('hashchange',()=>{const tab=location.hash.slice(1);if(['home','positions','top','alpha','pools','stock','history','learn','baskets','wallets','alerts','bot','settings'].includes(tab)&&tab!==state.tab)go(tab);});
+  const initialTab=location.hash.slice(1)||(new URLSearchParams(location.search).has("paybox")?"settings":"alpha");
+  renderHome(); loadPools(); loadPositions();
+  if(['home','positions','top','alpha','pools','stock','history','learn','baskets','wallets','alerts','bot','settings'].includes(initialTab))window.addEventListener('DOMContentLoaded',()=>{if(location.hash.slice(1)===initialTab||!location.hash)go(initialTab);},{once:true});
+  window.addEventListener('DOMContentLoaded',async()=>{
+    const query=new URLSearchParams(location.search);
+    const returned=query.has('paybox')?window.LPExecution?.restoreReturn?.():null;
+    const handoff=window.LPExecutionLink?.read(location.search)||(returned?.pool?{pool:returned.pool,draft:null}:null);
+    if(!handoff)return;
+    try{
+      const context=await api('/api/pool-context?pool='+encodeURIComponent(handoff.pool));
+      if(!context.pool)throw Error('This pool is not currently available in the terminal.');
+      executionInitialDraft=handoff;openDrawer(context.pool);executionInitialDraft=null;
+      $('#drawerBody [role="tab"][data-detail-tab="trade"]').click();
+      const clean=new URL(location.href);for(const key of ['floor','ceiling','size','shape','mix','paybox'])clean.searchParams.delete(key);
+      clean.searchParams.set('compose',handoff.pool);history.replaceState(history.state,'',clean);
+    }catch(error){executionInitialDraft=null;$('#operationNotice').hidden=false;$('#operationNotice').textContent='Could not restore this position draft: '+error.message;}
+  },{once:true});
+  setInterval(()=>{if(!document.hidden&&state.tab==='history')loadHistory();},20000);
+  setInterval(()=>{renderMeta();renderWallets();renderHome();},60000);
+</script>
+<script src="/wallet-intelligence.js" defer></script>
+<script src="/journey.js"></script>
+<script src="/baskets.js"></script>
+<script src="/long-game.js"></script>
+<script>window.lpAlertCounts={};window.setAlertCount=(kind,n)=>{window.lpAlertCounts[kind]=n;const count=window.lpAlertCounts.range||0,badge=document.querySelector('#alertBadge');badge.textContent=count>99?'99+':String(count);badge.hidden=!count;document.querySelector('#homeAlertLink').textContent=count?`Range watch · ${count} to review ↗`:'Range watch ↗';};</script>
+<script src="/range-alerts.js"></script>
+<script src="/volume-alerts.js"></script>
+<script src="/paper-bot.js"></script>
+<script src="/paper-lab.js"></script>
+<link rel="stylesheet" href="/scanner.css">
+<script src="/scanner-status.js"></script>
+<script src="/fleet-activity.js"></script>
+<script src="/worldsfair-devnet.js"></script>
+<script src="/worldsfair-paper.js"></script>
+<script src="/paper-fleet.js"></script>
+<script>fetch("/api/data-budget").then(r=>r.ok?r.json():null).then(d=>{if(d)document.querySelector("#dataBudget").textContent=`Free sources first · ${d.attemptsToday}/${d.dailyLimit} CoinGecko fallback attempts today. This is terminal usage, not the account total. Credits reset on the first of each month.`;}).catch(()=>{});</script>
+
+
+
+
+<script type="module" src="/main-pools.js"></script>
+</body>
+</html>

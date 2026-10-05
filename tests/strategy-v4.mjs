@@ -1,0 +1,83 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {mkdtemp} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const dir=await mkdtemp(join(tmpdir(),'pat-signals-'));
+for(const [n,p] of [['allocation','src/fleet-allocation.ts'],['signals','src/fleet-signals.ts'],['fleet','src/paper-fleet.ts'],['storage','src/paper-fleet-storage.ts'],['rpc','execution/paper-rpc.ts']])await build({entryPoints:[p],bundle:true,platform:'node',format:'esm',outfile:join(dir,n+'.mjs')});
+const imp=n=>import(pathToFileURL(join(dir,n+'.mjs')));
+const {allocationRequest}=await imp('allocation');
+const {observeMarkets,marketSignal,tokenPriceSol,signalExit}=await imp('signals');
+const {initialFleetState,advanceFleet,fleetPlan,fleetCanScan,fleetEquity,fleetPolicy,fleetTrial,FLEET_FUNDING,validFleetHarvest}=await imp('fleet');
+const {fleetRecords,fleetScanRecords,loadFleet}=await imp('storage');const {paperRpcTransport}=await imp('rpc');
+const t=Date.parse('2026-09-14T12:00:00Z'),at=m=>new Date(t+m*60000).toISOString(),ms=m=>t+m*60000;
+const SOL='So11111111111111111111111111111111111111112';
+const pool=(m,price=1,extra={})=>({id:'solana:test',address:'test',chain:'solana',venue:'meteora-dlmm',pair:'TEST/SOL',base:{address:'mint',symbol:'TEST'},quote:{address:SOL,symbol:'SOL'},tvlUsd:200000,priceQuote:price,ageHours:200,fetchedAt:at(m),activity:{fees1h:1000,volume30m:40000,volume1h:60000},...extra});
+const snap=p=>({updatedAt:p.fetchedAt,pools:[p],errors:{}});
+const rows=prices=>prices.map((price,i)=>[ms(i*5),price,200000,1000,40000]);
+assert.equal(tokenPriceSol(pool(0,2)),2);assert.equal(tokenPriceSol(pool(0,2,{base:{address:SOL},quote:{address:'mint'}})),.5);
+assert.equal(tokenPriceSol(pool(0,null)),null);assert.equal(tokenPriceSol(pool(0,null,{priceUsd:4,quotePriceUsd:100})),.04);
+let history=observeMarkets({},snap(pool(0)),ms(0));
+assert.equal(history['solana:test'].length,1);
+assert.deepEqual(observeMarkets(history,snap(pool(0,99)),ms(5)),history,'repeated timestamps never rewrite the first observation');
+history=observeMarkets(history,snap(pool(5,1.01)),ms(5));
+assert.deepEqual(observeMarkets(history,snap(pool(0)),ms(5)),history,'out-of-order source retains newer history');
+assert.equal(observeMarkets(history,snap(pool(20)),ms(20))['solana:test'].length,1,'a data gap resets continuity');
+const retained=observeMarkets(history,snap(pool(5)),ms(20));assert.deepEqual(retained,history,'stale sources retain bounded evidence without adding observations');assert.equal(marketSignal('scalp',pool(5),retained['solana:test'],ms(20)).ready,false,'retained history never qualifies a stale source');
+let p=pool(10,1.03);assert.equal(marketSignal('scalp',p,rows([1,1.01,1.03]),ms(10)).ready,true);
+assert.equal(marketSignal('scalp',pool(10,1.5),rows([1,1.01,1.5]),ms(10)).ready,false,'do not chase beyond the observed high');
+assert.equal(marketSignal('scalp',pool(10,.95),rows([1,.98,.95]),ms(10)).ready,false,'high fees do not make a falling price a breakout');
+const launch=rows([1,1.01,1.03]);launch.forEach((r,i)=>r[4]=[500,1000,1800][i]);
+assert.ok(Math.abs(marketSignal('scalp',pool(10,1.03,{ageHours:.3}),launch,ms(10)).volumeRatio-1.6)<1e-12,'launch pace uses disjoint source increments');
+assert.equal(marketSignal('scalp',pool(10,1.03,{ageHours:.7}),launch,ms(10)).ready,false,'incomplete rolling windows are not acceleration evidence');
+const dip=[1,.9,.8,.82,.85];assert.equal(marketSignal('wide',pool(20,.85),rows(dip),ms(20)).ready,true);
+assert.equal(marketSignal('wide',pool(20,.75),rows([1,.9,.85,.8,.75]),ms(20)).ready,false);
+const range=[1,1.01,1,.99,1.01,1.02,1];assert.equal(marketSignal('farmer',pool(30),rows(range),ms(30)).ready,true);
+assert.equal(marketSignal('farmer',pool(30,1.4),rows([1,1.05,1.1,1.2,1.3,1.4,1.4]),ms(30)).ready,false);
+assert.equal(marketSignal('steady',pool(60),rows(Array(13).fill(1)),ms(60)).ready,true);
+assert.equal(marketSignal('steady',pool(30),rows(range),ms(30)).ready,false,'longer hold needs its own longer evidence window');
+// Real signal selection through the ledger. A feed repeated without a new source timestamp cannot mature it.
+let state=initialFleetState();
+for(let i=0;i<3;i++)state=advanceFleet(state,snap(pool(i*5,[1,1.01,1.03][i],{ageHours:2})),[],ms(i*5));
+assert.equal(state.candidates.find(c=>c.group==='scalp').signal.ready,true);
+assert.equal(state.funnel.scalp.ready,1);assert.equal(state.funnel.farmer.screened,0);
+const p0=pool(10,1.03,{ageHours:2});
+const mark=(m,delta={})=>({at:at(m),principalSol:2,feesSol:0,grossSol:2,liquidationSol:1.9999,conversionCostSol:0,networkSol:.0001,inRange:true,waiting:false,priceSol:1.03,withdrawTaxSol:0,epoch:1,transferFees:[],...delta});
+const entry={id:'fleet:scalp:test:'+at(15),cohort:'test:'+at(15),experiment:'four-wallets-v6',arm:'scalp',pool:pool(15,1.04,{ageHours:2}),mint:'mint',budgetSol:2,rentSol:.1,entryNetworkSol:.0001,openedAt:at(15),model:{shares:[{id:0,share:'100',feeX:'0',feeY:'0'}],lowerBin:-4,upperBin:4,solX:false,decX:9,decY:9,mintX:'mint',mintY:SOL},dustSol:0,mark:mark(15),issue:null,pendingExit:null,observedInRangeMs:0};
+entry.allocation={...allocationRequest('scalp',state.portfolios.scalp.cashSol,fleetPlan(state,snap(entry.pool),ms(15)).signals[entry.pool.id].scalp),acceptedSol:2,attempts:[{budgetSol:2,reason:'Quoted fixture'}],limitedBy:'Fixture'};
+state=advanceFleet(state,snap(entry.pool),[{poolId:entry.pool.id,arm:'scalp',entry}],ms(15));assert.equal(state.positions.length,1);assert.equal(state.positions[0].entrySignal.ready,true);
+const original=structuredClone(state),current=snap(pool(16,1.04,{ageHours:2}));
+state=advanceFleet(state,current,[{poolId:entry.pool.id,arm:'scalp',positionId:entry.id,mark:mark(16)}],ms(16),'heart');
+assert.equal(state.lastFullScanAt,at(15));assert.deepEqual(state.markets,original.markets);assert.deepEqual(state.funnel,original.funnel);
+assert.equal(fleetCanScan(state,current,ms(16),'heart'),false);assert.equal(fleetCanScan(state,snap(pool(20)),ms(20),'full'),true);
+assert.equal(fleetCanScan(initialFleetState(),current,ms(16),'heart'),false,'empty Heart wallet creates no minute RPC work');
+state=advanceFleet(state,snap(pool(17)),[{poolId:entry.pool.id,arm:'scalp',positionId:entry.id,mark:mark(17,{inRange:false})}],ms(17),'heart');
+assert.equal(state.positions.length,0);assert.match(state.closed[0].reason,/nine-bin range/);assert.equal(state.closed[0].experiment,'four-wallets-v6');assert.equal(fleetTrial(state,'scalp',ms(17)).closedCount,1);assert.ok(Math.abs(fleetTrial(state,'scalp',ms(17)).netSol+.0002)<1e-9);
+// A separately recorded funding grant does not convert old losses into gains or refund unknowns.
+let old=initialFleetState();old.version='four-wallets-v3';for(const wallet of Object.values(old.portfolios)){wallet.cashSol=9;wallet.seedSol=10;wallet.peakSol=10;delete wallet.funding;wallet.realizedPnlSol=-1;wallet.closedCount=1;}
+old.portfolios.wide.halted=true;old.portfolios.wide.maxDrawdown=.35;old.portfolios.wide.unscorableCount=1;old.portfolios.wide.unresolvedSol=2.1;
+const migrated=advanceFleet(old,snap(pool(0)),[],ms(0));
+for(const a of ['farmer','scalp','wide','steady']){assert.ok(Math.abs(migrated.portfolios[a].cashSol-(FLEET_FUNDING.sol-1))<1e-10);assert.equal(migrated.portfolios[a].realizedPnlSol,-1);assert.equal(migrated.portfolios[a].funding.length,1);}
+assert.equal(fleetEquity(migrated,'wide',ms(0)),null);assert.equal(migrated.portfolios.wide.unresolvedSol,2.1);assert.equal(migrated.portfolios.wide.halted,false,'new funded paper interval restarts risk');assert.equal(migrated.portfolios.wide.funding[0].priorRisk.halted,true);assert.equal(migrated.portfolios.wide.funding[0].priorRisk.maxDrawdown,.35);assert.equal(fleetTrial(migrated,'wide',ms(0)).netSol,0,'old unknown outcomes remain in lifetime, not newly invented v4 losses');
+const twice=advanceFleet(migrated,snap(pool(5)),[],ms(5));assert.equal(twice.portfolios.farmer.cashSol,migrated.portfolios.farmer.cashSol);assert.equal(twice.portfolios.farmer.funding.length,1);
+// A harvest checkpoint is monotone, exact-bin, and bound to the Heart policy.
+const hp={...entry,policy:fleetPolicy('scalp')};const h={counters:[{id:0,feeX:'9',feeY:'1'}],bankedSol:.0198,grossSol:.02,taxSol:0,count:1,at:at(16)};
+assert.equal(validFleetHarvest(hp,h,ms(16)),true);assert.equal(validFleetHarvest(hp,{...h,bankedSol:Infinity},ms(16)),false);assert.equal(validFleetHarvest(hp,{...h,counters:[{id:1,feeX:'9',feeY:'1'}]},ms(16)),false);
+assert.equal(validFleetHarvest({...hp,harvest:h},undefined,ms(17)),false);assert.equal(validFleetHarvest({...hp,harvest:h},h,ms(17)),true);
+assert.equal(validFleetHarvest({...hp,harvest:h},{...h,count:2,at:at(17),bankedSol:.03,grossSol:.04,counters:[{id:0,feeX:'8',feeY:'1'}]},ms(17)),false,'fee checkpoints never regress');
+let weakState={};for(const m of [30,31,32])weakState=signalExit('farmer',{state:weakState,at:at(m),openedAt:at(0),netSol:0,budgetSol:2,inRange:true,priceSol:1,current:pool(30,1,{activity:{fees1h:200,volume30m:10000,volume1h:40000}}),entryPool:pool(0),continuous:true}).state;
+assert.equal(weakState.weakChecks,1,'repeated cached volume is not multiple weak observations');
+const nextWeak=signalExit('farmer',{state:weakState,at:at(35),openedAt:at(0),netSol:0,budgetSol:2,inRange:true,priceSol:1,current:pool(35,1,{activity:{fees1h:200,volume30m:10000,volume1h:40000}}),entryPool:pool(0),continuous:true});assert.match(nextWeak.reason,/two observations/);
+// Stress state and history sharding at the configured cap, with a full recent-close index.
+const stress=initialFleetState();stress.markets=Object.fromEntries(Array.from({length:2048},(_,i)=>['solana:'+String(i).padEnd(44,'X'),rows(Array(25).fill(1.123456789123))]));
+stress.closed=Array.from({length:90},(_,i)=>({...state.closed[0],id:'close-'+i}));
+const saved=fleetRecords(stress);for(const [key,value] of Object.entries(saved))assert.ok(Buffer.byteLength(JSON.stringify(value))<128*1024,key+' exceeds DO limit');
+const restored=await loadFleet({get:async key=>structuredClone(saved[key])});assert.deepEqual(restored.markets,stress.markets);assert.equal(restored.closed.length,90);
+const fullRead={poolId:'test',diagnostics:{bins:Array.from({length:256},(_,id)=>({id,virtualShareRaw:'9'.repeat(70),supplyRaw:'8'.repeat(70)}))}};
+const largeScan={at:at(0),reads:Array(13).fill(fullRead)};const scanRecords=fleetScanRecords(at(0),largeScan);const scanIndex=scanRecords['fleet-scan:'+at(0)];assert.equal(scanIndex.readRefs.length,13);assert.deepEqual(scanIndex.readRefs.map(ref=>scanRecords[ref]),largeScan.reads);for(const v of Object.values(scanRecords))assert.ok(Buffer.byteLength(JSON.stringify(v))<128*1024);
+// Scan-wide transport: serialized requests, bounded Retry-After, no retry burst.
+let clock=0,active=0,peak=0,calls=0,starts=[];
+const rpc=paperRpcTransport({now:()=>clock,sleep:async n=>{clock+=n;},maxRequests:3,maxDurationMs:10000,intervalMs:350,fetcher:async()=>{active++;peak=Math.max(peak,active);starts.push(clock);await Promise.resolve();active--;return new Response('',{status:++calls===1?429:200,headers:{'retry-after':'2'}});}});
+const rr=await Promise.allSettled(Array.from({length:4},()=>rpc.fetch('https://unused.invalid')));assert.equal(peak,1);assert.equal(calls,3);assert.equal(starts[1],2000);assert.equal(starts[2],2350);assert.equal(rr[3].status,'rejected');assert.equal(rpc.stats.rateLimits,1);
+console.log('PASS v4: real signals, no look-ahead/replay, distinct horizons, Heart-only minute marks, preserved paper funding, harvest guards, bounded storage and RPC backoff');

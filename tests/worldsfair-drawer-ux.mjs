@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {recordSkippedPool,readSkippedPools,skippedLogHtml,downsideSummaryHtml} from '../public/main-pool-drawer.js';
+import {preflightHtml} from '../public/worldsfair-preflight.js';
+const source=await readFile('public/main-pool-drawer.js','utf8'),now=Date.parse('2026-10-05T12:00:00Z');
+const storage={data:new Map(),setCalls:0,getItem(key){return this.data.get(key)||null;},setItem(key,value){this.setCalls++;this.data.set(key,value);}};
+assert.deepEqual(readSkippedPools(storage),[]);assert.match(skippedLogHtml([]),/No skipped pools yet/);assert.equal(storage.setCalls,0,'reading or displaying skips is read-only');
+const chars='ABCDEFGHJKLMNPQRSTUVWXYZ123456789',pool=i=>({id:'solana:'+('A'.repeat(31)+chars[i]),pair:'PAIR '+i+'/SOL',balanceSol:999,sizeSol:2,secret:'not persisted'});
+assert.equal(recordSkippedPool(pool(0),undefined,storage,now).ok,false);assert.equal(storage.setCalls,0,'a reason must be explicitly chosen');
+assert.equal(recordSkippedPool(pool(0),'constructor',storage,now).ok,false);
+assert.equal(recordSkippedPool(pool(0),['costs'],storage,now).ok,false);
+assert.equal(recordSkippedPool({id:'bad'},'costs',storage,now).ok,false);
+for(let i=0;i<12;i++)assert.equal(recordSkippedPool(pool(i),i%2?'costs':'evidence',storage,now+i*1000).ok,true);
+let saved=readSkippedPools(storage);assert.equal(saved.length,10);assert.equal(saved[0].pair,'PAIR 11/SOL');assert.equal(saved[9].pair,'PAIR 2/SOL');
+assert.deepEqual(Object.keys(saved[0]).sort(),['at','pair','poolId','reasonId'],'skip metadata cannot become a funds or position ledger');
+assert.doesNotMatch([...storage.data.values()].join(''),/balanceSol|sizeSol|secret|999/);
+assert.equal(recordSkippedPool(pool(5),'downside',storage,now+20000).ok,true);saved=readSkippedPools(storage);assert.equal(saved.length,10);assert.equal(saved[0].pair,'PAIR 5/SOL');assert.equal(saved.filter(r=>r.poolId===pool(5).id).length,1,'an intentional later skip updates the existing pool instead of filling the log with duplicates');
+assert.match(skippedLogHtml(saved),/Too much downside/);assert.match(skippedLogHtml(saved),/<time datetime="2026-10-05/);
+const hostile={...pool(0),pair:'<img src=x onerror=evil()>'};recordSkippedPool(hostile,'token',storage,now+30000);assert.doesNotMatch(skippedLogHtml(readSkippedPools(storage)),/<img/);assert.match(skippedLogHtml(readSkippedPools(storage)),/&lt;img/);
+for(const raw of ['not json','{}','[null]',JSON.stringify([{poolId:pool(0).id,pair:'TEST',reasonId:'__proto__',at:new Date(now).toISOString()}])])assert.deepEqual(readSkippedPools({getItem:()=>raw}),[]);
+assert.deepEqual(readSkippedPools({getItem(){throw Error('blocked');}}),[]);
+for(const blocked of [null,{getItem:()=>null,setItem(){throw Error('quota');}}]){const result=recordSkippedPool(pool(1),'fit',blocked,now);assert.equal(result.ok,false);assert.match(result.error,/not saved/);}
+const html=preflightHtml({}, {},now);assert.equal((html.match(/data-preflight="/g)||[]).length,8);assert.equal((html.match(/class="wf-preflight-why"/g)||[]).length,8);assert.equal((html.match(/>Why\?<\/summary>/g)||[]).length,8);assert.doesNotMatch(html,/<details[^>]*\sopen[\s>]/);assert.match(html,/A dated 24h fee reading and complete costs are needed/);assert.match(html,/1h \/ 4h \/ 24h/,'complete underlying trend evidence is retained within its explanation');
+const unavailable=downsideSummaryHtml({},{});assert.match(unavailable,/Choose a valid range/);assert.doesNotMatch(unavailable,/NaN|Infinity|0.0000 SOL/);
+const model={sizeSol:1,saleAssumed:true,taxAssumed:true,range:{selected:{atFloor:{pnlSol:-.2,returnFraction:-.2},belowFloor:{pnlSol:-.3,returnFraction:-.3}}}};
+const downside=downsideSummaryHtml({},model);assert.match(downside,/0.8000 SOL left/);assert.match(downside,/0.7000 SOL left/);assert.match(downside,/Some costs are assumed; unverified token tax is excluded/);assert.match(downside,/floor does not stop a loss/);
+const drawer=source.match(/dialog.innerHTML='([^]*?);\n const c=/)?.[1];assert(drawer);const advanced=drawer.indexOf('<details class="mpd-advanced">');assert(advanced>drawer.indexOf('data-mpd-panel="downside"'));assert(advanced>drawer.indexOf('data-mpd-field="depth"'));for(const name of ['range','worth','structure','scenarios','rule'])assert(drawer.indexOf('data-mpd-panel="'+name+'"')>advanced,'technical '+name+' panel is inside closed Advanced');assert.doesNotMatch(drawer,/<details class="mpd-advanced" open/);assert.match(source,/if\(button.hasAttribute\('data-mpd-save-skip'\)\)/);assert.equal((source.match(/recordSkippedPool\(/g)||[]).length,2,'the sole recording call is the explicit save action');
+console.log('Drawer UX passed: eight closed Why explainers, essential range controls, technical disclosure, honest downside, explicit local-only last-ten skips, escaping and storage failures.');
