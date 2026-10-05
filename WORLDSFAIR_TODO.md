@@ -18,6 +18,7 @@ There is **no missing Jupiter key blocker**. Public quote and Price reads are su
 - [ ] Record a **product demo of at most three minutes**, preferably with Loom, using the actual product. Show pre-flight, a range scenario, paper portfolio flow and honest devnet status. Do not present a synthetic fixture as live activity or a completed real signing flow.
 - [ ] Record a **separate founder pitch of at most two minutes**. Keep it distinct from the product walkthrough.
 - [ ] Confirm the X profile to use in the submission. Do not infer it from inherited project branding.
+- X handle shortlist: `@easylp` and `@stilllp`. On 5 October 2026, the user reported that neither appeared to exist on X; verify availability before choosing or reserving one. Product name remains Still.
 - [ ] Add final video links, logo, public repository and demo URL to the submission fields; check reviewer access without unexpected permission requests.
 - [ ] Review the complete Colosseum entry, prior-work disclosure and links with the user before submitting. **Final review and submission have not been performed.**
 

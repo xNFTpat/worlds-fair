@@ -4,6 +4,8 @@ Clarity before capital.
 
 Still helps people understand a Solana liquidity pool before trying a paper allocation. The user selected the name on 5 October 2026. World's Fair is the repository and hackathon context; Still is the product name.
 
+On 5 October 2026, the user reported that neither `@easylp` nor `@stilllp` appeared to exist on X. Keep both as possible handles; availability has not been independently verified and neither has been reserved. The chosen product name remains Still.
+
 ## Visual system
 
 | Role | Value |
