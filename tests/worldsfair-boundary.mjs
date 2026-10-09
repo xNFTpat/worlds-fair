@@ -46,7 +46,7 @@ try {
     assert.equal((await worker.fetch(request(path,method,{origin,'x-terminal-key':env.TX_KEY}), env)).status, 404, 'Personal archive media stays private even with the reference toggle and owner header');
   for(const path of ['/brand/still-mark.svg','/product.css','/product-brand.js'])
     assert.equal((await worker.fetch(request(path,'POST',{origin}),env)).status,405,'Public brand assets remain read-only');
-  for (const path of ['/api/pools', '/api/cesto', '/api/research/pool', '/api/positions', '/api/history'])
+  for (const path of ['/api/pools', '/api/cesto', '/api/research/pool', '/api/positions', '/api/history', '/api/still/pools', '/api/still/preflight', '/api/baskets', '/api/still/basket-preflight'])
     assert.equal((await worker.fetch(request(path, 'POST', {origin}), env)).status, 405, 'Read-only routes reject mutation methods');
   for (const headers of [{}, {origin: 'https://other.test'}])
     assert.equal((await worker.fetch(request('/api/refresh', 'POST', headers), env)).status, 403);
@@ -98,9 +98,28 @@ try {
   response = await worker.fetch(request('/api/version', 'HEAD'), env);
   assert.equal(response.status, 200); assert.equal(await response.text(), '');
   response = await worker.fetch(request('/'), env);
-  assert.equal(response.status, 200); assert.equal(await response.text(), 'asset /');
-  assert.equal(assets, 1);
+  assert.equal(response.status, 200); assert.equal(await response.text(), 'asset /still-demo');
+  for (const path of ['/index.html', '/advanced', '/advanced/']) {
+    const response = await worker.fetch(request(path), env);
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), path === '/index.html' ? 'asset /still-demo' : 'asset /');
+  }
+  assert.equal(assets, 4);
+  const beforeGuided = {writes, assets, providers};
+  data = await (await worker.fetch(request('/api/still/pools'), env)).json();
+  assert.equal(data.paper, true); assert.deepEqual(data.pools, [], 'Ineligible snapshot rows produce an explicit empty shortlist');
+  data = await (await worker.fetch(request('/api/baskets'), env)).json();
+  assert.equal(data.baskets.length, 3); assert.ok(data.baskets.every(b => b.status === 'unavailable'));
+  for (const path of ['/api/still/preflight?poolAddress=bad', '/api/still/preflight?amountSol=1e3', '/api/still/basket-preflight?basketId=other']) {
+    const priorReads = reads;
+    assert.equal((await worker.fetch(request(path), env)).status, 400);
+    assert.equal(reads, priorReads, 'Invalid guided requests stop before cache reads');
+  }
+  assert.equal((await worker.fetch(request('/api/still/preflight?poolAddress='+'A'.repeat(32)), env)).status, 404);
+  response = await worker.fetch(request('/api/baskets', 'HEAD'), env);
+  assert.equal(response.status, 200); assert.equal(await response.text(), '');
+  assert.deepEqual({writes, assets, providers}, beforeGuided, 'Guided evidence stays read-only and uses only the supplied snapshot');
   for(const path of ['/brand/still-mark.svg','/product.css','/product-brand.js']){const response=await worker.fetch(request(path),env);assert.equal(response.status,200);assert.equal(await response.text(),'asset '+path,'public product assets reach only the static binding');}
-  assert.equal(assets, 4); assert.equal(writes, 0); assert.equal(providers, 0);
+  assert.equal(assets, 7); assert.equal(writes, 0); assert.equal(providers, 0);
   console.log('PASS: Paper Worker blocks all signing/auth assets and endpoints before side effects; secrets excluded; read APIs and Solana defaults verified.');
 } finally {globalThis.fetch = realFetch;}

@@ -5,6 +5,7 @@ import {selectPools} from './discovery';
 import {getSnapshot} from './refresh';
 import {BackgroundScanner as LegacyBackgroundScanner} from './background-scanner';
 import {worldsfairPaperRoute} from './worldsfair-paper';
+import {stillDemoRoute} from './still-demo-routes';
 
 export {WorldsfairRangeInbox as RangeInbox} from './worldsfair-paper';
 
@@ -94,11 +95,15 @@ async function fetchPaper(req: Request, env: Env, ctx?: ExecutionContext): Promi
   if (!path.startsWith('/api/')) {
     if (!['GET', 'HEAD'].includes(req.method)) return json({error: 'Demo assets are read-only.'}, 405);
     if (path === '/paper-research.json') return json({paper: true, personal: {}, note: 'This separate demo contains no personal wallet research.'});
+    if (path === '/' || path === '/index.html') url.pathname = '/still-demo';
+    else if (path === '/advanced' || path === '/advanced/') url.pathname = '/';
     return safeEnv.ASSETS ? safeEnv.ASSETS.fetch(new Request(url, req)) : json({error: 'Not found.'}, 404);
   }
 
   const paper = await worldsfairPaperRoute(new Request(url, req), safeEnv);
   if (paper) return paper;
+  const guided = await stillDemoRoute(new Request(url, req), safeEnv);
+  if (guided) return guided;
   if (path === '/api/refresh') {
     if (req.method !== 'POST') return json({error: 'Use the demo refresh button.'}, 405);
     if (req.headers.get('origin') !== url.origin) return json({error: 'Open the demo to refresh market data.'}, 403);
