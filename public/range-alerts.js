@@ -28,7 +28,7 @@
   }
   const episodeKey = p => `episode:${p.id}:${p.outSince || p.firstObservedOutAt || ''}`;
   function rangeView(position, data, now=Date.now()) {
-    const p=Object.values(data?.state?.positions||{}).find(p=>p.id===position.id || p.wallet===position.wallet && p.chain===position.chain && p.poolAddress===(position.poolAddress||position.pool?.address));
+    const p=Object.values(data?.state?.positions||{}).find(p=>typeof position.id==='string' && p.id===position.id);
     const stamp=Date.parse(p?.lastSampleAt), out=Date.parse(p?.outSince);
     const newerPosition=Number.isFinite(Date.parse(position.fetchedAt))&&Date.parse(position.fetchedAt)>stamp&&position.inRange!==p?.inRange;
     if(newerPosition)return {state:position.inRange===false?'out':position.inRange===true?'in':'unknown',label:position.inRange==null?'Range unavailable':position.inRange?'In range':'Out of range',detail:'New position reading · timer awaiting confirmation'};

@@ -39,6 +39,18 @@
   #meta { font-size: .85rem; color: var(--khaki); }
   #meta .err { color: var(--red); }
 
+
+  .advanced-position-group { border:1px solid var(--moss-2); border-radius:10px; margin:12px 0; overflow:hidden; }
+  .advanced-position-group > summary { padding:16px; cursor:pointer; font-weight:600; }
+  .advanced-position-group > summary small { font-weight:400; margin-left:8px; }
+  .advanced-position-group > summary:focus-visible, .position-pool-toggle:focus-visible { outline:2px solid currentColor; outline-offset:-3px; }
+  .advanced-position-group .position-card { margin:0; border-radius:0; border-width:1px 0 0; }
+  .position-identity { display:block; overflow-wrap:anywhere; margin:8px 0; font-size:.75rem; font-weight:400; }
+  .position-pool-heading th { text-align:left; padding:0; }
+  .position-pool-toggle { padding:14px; width:100%; text-align:left; background:transparent; color:inherit; border:0; cursor:pointer; font:inherit; }
+  .position-pool-toggle small { margin-left:12px; display:inline; }
+  #posGrid tr[hidden] { display:none !important; }
+
   /* stats strip */
   .strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-bottom: 18px; }
   .tile { background: var(--drab-2); border: 1px solid var(--moss-2); border-radius: 6px; padding: 12px 14px; min-height: 84px; }
@@ -536,6 +548,31 @@
     const known = rows.filter(p => Number.isFinite(p[field]));
     return { value: rows.length && !known.length ? null : known.reduce((n,p)=>n+p[field],0), partial: known.length !== rows.length };
   }
+  // Presentation groups retain each position object and its original drawer index.
+  const expandedPositionPools = new Set();
+  function positionPoolGroups(rows) {
+    const groups = new Map();
+    rows.forEach((position, index) => {
+      const key = position.poolGroupId || (position.poolAddress ? JSON.stringify([position.chain, position.wallet, position.poolAddress]) : JSON.stringify(['position', position.id || index, index]));
+      if (!groups.has(key)) groups.set(key, {key, pair: position.pair, wallet: position.wallet, members: []});
+      groups.get(key).members.push({position, index});
+    });
+    return [...groups.values()];
+  }
+  function positionIdentity(position) {
+    const value = String(position.positionAddress || position.id || 'Address unavailable');
+    return `<small class="position-identity" title="${esc(value)}">Position ${esc(value.length > 22 ? value.slice(0, 10) + '…' + value.slice(-8) : value)}</small>`;
+  }
+  function togglePositionPool(button) {
+    const expanded = button.getAttribute('aria-expanded') !== 'true';
+    button.setAttribute('aria-expanded', String(expanded));
+    const key = button.dataset.positionGroupKey;
+    if (expanded) expandedPositionPools.add(key); else expandedPositionPools.delete(key);
+    button.querySelector('.group-chevron').textContent = expanded ? '▾' : '▸';
+    for (const id of button.getAttribute('aria-controls').split(' ')) {
+      const row = document.getElementById(id); if (row) row.hidden = !expanded;
+    }
+  }
   function renderHome() {
     const p = state.positions, rows = p?.positions || [];
     const value = sumKnown(rows,"valueUsd"), fees = sumKnown(rows,"feesEarnedUsd");
@@ -545,8 +582,8 @@
     const metric = (label, val, note, cls="") => `<div class="overview-card ${cls}"><span class="metric-label">${label}</span><strong>${val ?? "—"}</strong><small>${note}</small></div>`;
     $("#homeMetrics").innerHTML = metric("Capital in LPs", p && (rows.length || !incomplete) ? usd(value.value) : null, incomplete ? "Saved / incomplete portfolio" : value.partial ? "Partial value · some positions unpriced" : "Current value of tracked positions", "lead") +
       metric("Unclaimed total", p && (rows.length || !incomplete) ? usd(fees.value) : null, `${incomplete || fees.partial ? "Saved / partial · " : ""}Accrued fees + stored amounts owed`, "fees") +
-      metric("Open LP groups",knownCount,incomplete ? "Count may be incomplete" : "Meteora grouped by pool") +
-      metric("In range",p && (rows.length || !incomplete) ? `${rows.filter(x=>x.inRange===true).length} / ${rows.length}` : null, incomplete ? "Based on saved readings" : rows.some(x=>x.inRange==null) ? "Some ranges are not verified" : "Tracked LP groups");
+      metric("Open positions",knownCount,incomplete ? "Count may be incomplete" : "Each position address counted separately") +
+      metric("In range",p && (rows.length || !incomplete) ? `${rows.filter(x=>x.inRange===true).length} / ${rows.length}` : null, incomplete ? "Based on saved readings" : rows.some(x=>x.inRange==null) ? "Some ranges are not verified" : "Tracked positions");
     const priced=rows.filter(x=>Number.isFinite(x.valueUsd)&&x.valueUsd>0),total=priced.reduce((n,x)=>n+x.valueUsd,0);
     let offset=0;
     $("#capitalMap").innerHTML=total>0?`<div><h2>Breakdown</h2><p>LP positions${incomplete||value.partial?' · partial / saved readings':''} · excludes wallet cash.</p></div><div class="capital-visual"><svg viewBox="0 0 120 120" role="img" aria-label="Allocation of priced LP positions">${priced.map((x,i)=>{const size=x.valueUsd/total*100;const ring=`<circle cx="60" cy="60" r="44" pathLength="100" fill="none" stroke="hsl(${70+i*33} 24% ${36+i*8}%)" stroke-width="17" stroke-dasharray="${size} ${100-size}" stroke-dashoffset="${-offset}" transform="rotate(-90 60 60)"/>`;offset+=size;return ring;}).join('')}<text x="60" y="64" text-anchor="middle" fill="currentColor" font-size="14">${usd(total)}</text></svg><div>${priced.map((x,i)=>`<button data-position="${rows.indexOf(x)}"><i style="background:hsl(${70+i*33} 24% ${36+i*8}%)"></i>${esc(x.pair)}<b>${(x.valueUsd/total*100).toFixed(1)}%</b><span>↗</span></button>`).join('')}</div></div>`:'';
@@ -555,7 +592,10 @@
       return `<article class="wallet-card"><div class="wallet-top"><span class="chain-mark ${b.chain}">${b.chain==='solana'?'S':'R'}</span><div><h3>${esc(b.wallet)}</h3><small>${b.chain==='solana'?'Solana':'Robinhood Chain'}</small></div><span class="health-pill ${st}">${st==='fresh'?'Updated':st==='stale'?'Saved':st==='partial'?'Partial':'Unavailable'}</span></div><div class="wallet-amount">${Number.isFinite(b.native)?num(b.native,4):'—'} <span>${esc(b.symbol)}</span></div><div class="wallet-bottom"><span>${b.stable!=null?`${num(b.stable,2)} USDC`:'Native balance'}</span><span>${esc(timeText(h?.lastSuccessAt))}</span></div>${b.chain==='robinhood'?'<button class="text-button" data-go="wallets">Wallet activity ↗</button>':''}</article>`;
     }).join("") : `<div class="empty-card">${clientErrors.positions ? esc(clientErrors.positions) : 'Loading your wallets…'}</div>`;
     const tokenLine = tokens => tokens?.length ? tokens.map(t=>`${num(t.amount,6)} ${esc(t.symbol)}`).join(' + ') : 'Token amounts unavailable';
-    $("#homePositions").innerHTML = rows.length ? rows.map((x,i)=>{const b=pnlData(x);return `<button class="position-card" data-position="${i}"><div class="position-summary"><span class="eyebrow">${esc(x.wallet)} / ${x.chain==='solana'?'METEORA':'UNISWAP'}</span><h3>${esc(x.pair)} <span>↗</span></h3>${window.rangeBadge?window.rangeBadge(x):`<span class="range-chip range-${x.inRange===false?'out':x.inRange===true?'in':'unknown'}">${x.inRange==null?'Range unavailable':x.inRange?'In range':'Out of range'}</span>`}${LPExperience.miniRange(x)}<div class="position-cost"><span>${x.chain==='solana'&&x.depositScope!=='open-positions'?'Pool deposits · includes earlier positions':'Deposited · includes top-ups'}</span><b>${usd(x.depositedUsd)??'—'}</b></div><small class="position-holding">${tokenLine(x.currentTokens)}</small></div><div class="position-value"><div class="position-headline"><span><small>Value now</small><strong>${usd(x.valueUsd)??'—'}</strong></span><span><small>Total P&amp;L</small><strong class="${pnlClass(b.totalPnlUsd)}">${signedUsd(b.totalPnlUsd)??'—'}</strong></span></div><div class="position-quick-split"><span>Price / LP <b class="${pnlClass(b.positionPnlUsd)}">${signedUsd(b.positionPnlUsd)??'—'}</b></span><span>Claimed fees <b>${usd(b.claimedFeesUsd)??'—'}</b></span><span>Unclaimed fees <b>${usd(b.unclaimedFeesUsd)??'—'}</b></span></div><small class="pnl-footnote">${b.status==='reconciled'?'Fees included · before network costs':'Incomplete breakdown · inspect details'}</small><span>Chart &amp; manage position ↗</span></div></button>`;}).join("") : `<div class="empty-card"><strong>${!p?'Loading positions…':incomplete?'Positions could not be fully verified':'No open positions'}</strong><p>${incomplete?'Refresh wallets to request a new reading.':'Explore a pool and test a range to get started.'}</p><button class="text-button" data-go="top">Explore pools ↗</button></div>`;
+    const positionCard = (x, i) => {const b=pnlData(x);return `<button class="position-card" data-position="${i}"><div class="position-summary"><span class="eyebrow">${esc(x.wallet)} / ${x.chain==='solana'?'METEORA':'UNISWAP'}</span><h3>${esc(x.pair)} <span>↗</span></h3>${positionIdentity(x)}${window.rangeBadge?window.rangeBadge(x):`<span class="range-chip range-${x.inRange===false?'out':x.inRange===true?'in':'unknown'}">${x.inRange==null?'Range unavailable':x.inRange?'In range':'Out of range'}</span>`}${LPExperience.miniRange(x)}<div class="position-cost"><span>${x.chain==='solana'&&x.depositScope!=='open-positions'?'Pool deposits · includes earlier positions':'Deposited · includes top-ups'}</span><b>${usd(x.depositedUsd)??'—'}</b></div><small class="position-holding">${tokenLine(x.currentTokens)}</small></div><div class="position-value"><div class="position-headline"><span><small>Value now</small><strong>${usd(x.valueUsd)??'—'}</strong></span><span><small>Total P&amp;L</small><strong class="${pnlClass(b.totalPnlUsd)}">${signedUsd(b.totalPnlUsd)??'—'}</strong></span></div><div class="position-quick-split"><span>Price / LP <b class="${pnlClass(b.positionPnlUsd)}">${signedUsd(b.positionPnlUsd)??'—'}</b></span><span>Claimed fees <b>${usd(b.claimedFeesUsd)??'—'}</b></span><span>Unclaimed fees <b>${usd(b.unclaimedFeesUsd)??'—'}</b></span></div><small class="pnl-footnote">${b.status==='reconciled'?'Fees included · before network costs':'Incomplete breakdown · inspect details'}</small><span>Chart &amp; manage position ↗</span></div></button>`;};
+    $("#homePositions").innerHTML = rows.length ? positionPoolGroups(rows).map(group =>
+      `<details class="advanced-position-group" data-position-pool="${esc(group.key)}"${expandedPositionPools.has(group.key) ? ' open' : ''}><summary>${esc(group.pair)} <small>${esc(group.wallet)} · ${group.members.length} ${group.members.length === 1 ? 'position' : 'positions'}</small></summary>${group.members.map(({position, index}) => positionCard(position, index)).join('')}</details>`
+    ).join('') : `<div class="empty-card"><strong>${!p?'Loading positions…':incomplete?'Positions could not be fully verified':'No open positions'}</strong><p>${incomplete?'Refresh wallets to request a new reading.':'Explore a pool and test a range to get started.'}</p><button class="text-button" data-go="top">Explore pools ↗</button></div>`;
     const alerts = rows.filter(x=>x.inRange===false&&!window.isRangeAcknowledged?.(x)).map(x=>`<div class="attention-item"><strong>${esc(x.pair)} is out of range</strong><p>${sourceState(p.sources?.[`positions:${x.wallet}`])!=='fresh'?'According to the saved reading. Refresh before acting.':'Review the position and its current price range.'}</p></div>`);
 
     for (const e of Object.values(clientErrors)) alerts.push(`<div class="attention-item"><strong>Refresh interrupted</strong><p>${esc(e)}</p></div>`);
@@ -656,16 +696,21 @@
       const sum = (f) => !hasRead || (ps.length && ps.every(x=>f(x)==null)) ? null : ps.reduce((a, x) => a + (f(x) ?? 0), 0);
       return `<div class="card"><h3>${esc(w)}</h3>
         ${b ? `<div class="row"><span>Gas</span><b>${num(b.native, 4) ?? "Unavailable"} ${b.symbol}</b></div>` : ""}
-        <div class="row"><span>Open LP groups</span><b>${hasRead ? ps.length : "—"}</b></div>
+        <div class="row"><span>Open positions</span><b>${hasRead ? ps.length : "—"}</b></div>
         <div class="row"><span>In positions</span><b>${usd(sum(x => x.valueUsd)) ?? "—"}</b></div>
         <div class="row"><span>Unclaimed amounts</span><b class="pos">${usd(sum(x => x.feesEarnedUsd)) ?? "—"}</b></div><p class="caveat">Wallet: ${esc(timeText(bh?.lastSuccessAt))}<br>Positions: ${esc(timeText(ph?.lastSuccessAt))} · ${sourceState(ph)==="fresh"?"Updated":"Saved / unavailable"}</p></div>`;
     }).join("");
-    const rows = p.positions.map((x, i) => `<tr data-pi="${i}">
-      <td class="pair"><button class="pool-open"><span class="dot ${x.chain}"></span>${esc(x.pair)} ↗</button><small>${esc(x.venue)} · ${sourceState(p.sources?.[`positions:${x.wallet}`])=== "fresh" ? "updated" : "saved / unverified"}</small></td>
+    const positionRow = (x, i, expanded) => `<tr id="advanced-position-row-${i}" data-pi="${i}"${expanded ? '' : ' hidden'}>
+      <td class="pair"><button class="pool-open"><span class="dot ${x.chain}"></span>${esc(x.pair)} ↗</button>${positionIdentity(x)}<small>${esc(x.venue)} · ${sourceState(p.sources?.[`positions:${x.wallet}`])=== "fresh" ? "updated" : "saved / unverified"}</small></td>
       <td>${esc(x.wallet)}</td>${cell(usd(x.depositedUsd))}${cell(usd(x.valueUsd))}${pnlCells(x)}
       ${cell(x.openedAt ? held(x.openedAt, new Date().toISOString()) : null)}
       ${window.rangeBadge?`<td>${window.rangeBadge(x)}</td>`:x.inRange == null ? cell(null) : `<td class="${x.inRange ? "pos" : "neg"}">${x.inRange ? "in range" : "out of range"}${x.lower != null ? ` · ${chartPrice(x.lower)}–${chartPrice(x.upper)}` : x.current != null ? ` · price ${num(x.current, 6)}` : ""}</td>`}
-    </tr>`).join("");
+    </tr>`;
+    const rows = positionPoolGroups(p.positions).map(group => {
+      const expanded = expandedPositionPools.has(group.key);
+      const controlled = group.members.map(({index}) => 'advanced-position-row-' + index).join(' ');
+      return `<tr class="position-pool-heading"><th colspan="10" scope="row"><button type="button" class="position-pool-toggle" data-position-group-key="${esc(group.key)}" aria-expanded="${expanded}" aria-controls="${controlled}"><span class="group-chevron" aria-hidden="true">${expanded ? '▾' : '▸'}</span> ${esc(group.pair)} <small>${esc(group.wallet)} · ${group.members.length} ${group.members.length === 1 ? 'position' : 'positions'}</small></button></th></tr>` + group.members.map(({position, index}) => positionRow(position, index, expanded)).join('');
+    }).join('');
     $("#posGrid tbody").innerHTML = rows;
     $("#posGrid").hidden = !rows; $("#posEmpty").hidden = !!rows;
     $("#posEmpty").textContent = Object.keys(p.errors || {}).length ? "Positions are unavailable or incomplete. Refresh wallets to try again." : "No open positions. Explore a pool and test a range to get started.";
@@ -1004,7 +1049,16 @@
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
   $("#grid tbody").addEventListener("click", (e) => { const tr = e.target.closest("tr"); if (tr) openDrawer(displayedPools[+tr.dataset.i]); });
-  $("#posGrid tbody").addEventListener("click", (e) => { if (e.target.closest("a")) return; const tr = e.target.closest("tr"); if (tr) openPosition(state.positions.positions[+tr.dataset.pi]); });
+  $("#posGrid tbody").addEventListener("click", (e) => {
+    const group = e.target.closest('.position-pool-toggle'); if (group) { togglePositionPool(group); return; }
+    if (e.target.closest("a")) return;
+    const tr = e.target.closest("tr[data-pi]"); if (tr) openPosition(state.positions.positions[+tr.dataset.pi]);
+  });
+  document.addEventListener('toggle', e => {
+    if (!e.target.matches?.('details.advanced-position-group')) return;
+    const key = e.target.dataset.positionPool;
+    if (e.target.open) expandedPositionPools.add(key); else expandedPositionPools.delete(key);
+  }, true);
   $("#filters").addEventListener("submit", (e) => { e.preventDefault(); $("#poolPreset").value="custom"; loadPools(); });
   $('#moreAlphaPools').onclick=()=>{state.alphaLimit+=20;renderPools();};
   document.querySelectorAll('[data-alpha-mode]').forEach(b=>b.onclick=()=>{

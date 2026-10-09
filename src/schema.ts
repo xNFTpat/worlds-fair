@@ -42,6 +42,8 @@ export interface Token {
 }
 
 export interface Position {
+  positionAddress?: string;  // Exact on-chain position identity; never a pool address.
+  poolGroupId?: string;      // Presentation grouping only; records stay independent.
   baseAddress?: string;
   quoteAddress?: string;
   id: string;

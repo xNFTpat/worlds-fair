@@ -81,6 +81,22 @@ try {
     assert.equal(partial.pnlBreakdown.positionPnlUsd,null);
     assert.equal(partial.pnlBreakdown.status,'incomplete');
   }
+  const second={...structuredClone(fixture),positionAddress:'b',minPrice:'0.7',maxPrice:'0.9',createdAt:'2026-10-01T10:00:00Z',allTimeDeposits:{total:{usd:'200'}},allTimeWithdrawals:{total:{usd:'0'}},allTimeFees:{total:{usd:'7'}},unrealizedPnl:{...fixture.unrealizedPnl,balances:190},pnlUsd:'0'};
+  const sharedPool={...pool,openPositionCount:2,listPositions:['a','b'],positionsOutOfRange:['b']};
+  globalThis.fetch=async url=>respond(String(url).includes('/portfolio/open')?{pools:[sharedPool],hasNext:false}:{positions:[second,fixture],hasNext:false});
+  const records=await fetchMeteoraPositions({name:'test',address:'wallet'});
+  assert.equal(records.length,2);
+  assert.deepEqual(records.map(p=>[p.id,p.positionAddress,p.depositedUsd,p.valueUsd,p.lower,p.upper,p.pnlUsd,p.inRange]),[
+    ['solana:a','a',100,70,0.25,0.5,-2,true],['solana:b','b',200,190,0.7,0.9,0,false]
+  ],'independent same-pool deposits, ranges, accounting and identities survive reversed detail order');
+  assert.equal(records[0].poolGroupId,records[1].poolGroupId,'presentation may group rows without merging them');
+  const noBounds={...fixture,minPrice:undefined,maxPrice:undefined,lowerBinId:1,upperBinId:2};
+  globalThis.fetch=async url=>respond(String(url).includes('/portfolio/open')?{pools:[pool],hasNext:false}:{positions:[noBounds],hasNext:false});
+  assert.equal((await fetchMeteoraPositions({name:'test',address:'wallet'}))[0].lower,null,'unknown token decimals must never manufacture a price range');
+  for(const ids of [['a','a'],['a'],[]]){
+    globalThis.fetch=async()=>respond({pools:[{...sharedPool,listPositions:ids}],hasNext:false});
+    await assert.rejects(()=>fetchMeteoraPositions({name:'test',address:'wallet'}),/identities are incomplete/);
+  }
   globalThis.fetch=async url=>respond(String(url).includes('/portfolio/total')?{totalPnlUsd:'15',totalClosedPositions:1}:
     String(url).includes('/positions/')?{positions:[closed],hasNext:false}:
     {pools:[{...pool,totalDeposit:'9999'}],hasNext:false});
