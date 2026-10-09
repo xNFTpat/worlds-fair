@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
-const [paper,longGame,baskets]=await Promise.all(['public/worldsfair-paper.js','public/long-game.js','public/baskets.js'].map(path=>readFile(path,'utf8')));
+const [paper,longGame,baskets,html]=await Promise.all(['public/worldsfair-paper.js','public/long-game.js','public/baskets.js','public/index.html'].map(path=>readFile(path,'utf8')));
 const markup=paper.match(/host.innerHTML='([^]*?);\n  document.dispatchEvent\(new CustomEvent\('worldsfair:paper-ready'\)/)?.[1];assert(markup);
 assert(markup.indexOf('data-paper-balance')<markup.indexOf('data-paper-seed'));
 assert(markup.indexOf('data-paper-seed')<markup.indexOf('data-paper-choices'));
@@ -19,18 +19,22 @@ assert.match(paper,/data-paper-stamp="'\+esc\(JSON.stringify\(\{kind:'pot-roll',
 assert.match(paper,/WorldsfairDevnet\?\.mount\(host.querySelector\('\[data-paper-history\]'\)\)/);
 assert.match(paper,/worldsfair:devnet-ready/);
 // Navigation is bound before the later paper script creates its choice slot.
-const events={},nodes=new Map(),scrolls=[];let choiceTarget=null,exploreTarget=null;
+assert.doesNotMatch(html,/\bvaults?\b/i,'Deferred vaults have no Advanced tab or promotional copy');
+assert.deepEqual([...html.matchAll(/data-long-view="([^"]+)"/g)].map(match=>match[1]),['baskets','staking']);
+const events={},nodes=new Map(),scrolls=[];let choiceTarget=null,exploreTarget=null,receivedIdeas=[];
 const node=(extra={})=>({value:'',hidden:false,innerHTML:'',textContent:'',disabled:false,options:[{value:''}],checked:false,setAttribute(name,value){this[name]=value;},insertAdjacentHTML(_where,html){this.innerHTML+=html;},scrollIntoView(options){scrolls.push(options);},...extra});
 for(const id of ['yieldAsset','yieldSort','yieldSaved','yieldMore','yieldStatus','yieldCards','refreshYields','longBasketPanel','longYieldPanel','refreshBaskets','longYieldTitle','longYieldIntro'])nodes.set('#'+id,node());
 const buttons=['baskets','staking','vault'].map(value=>node({dataset:{longView:value}}));
 const nav=node({classList:{add(){}},querySelectorAll:()=>buttons});nodes.set('.long-nav',nav);
 const document={querySelector:selector=>selector==='[data-paper-choices]'?choiceTarget:selector==='[data-paper-explore]'?exploreTarget:nodes.get(selector),querySelectorAll:selector=>selector==='[data-long-view]'?buttons:[],addEventListener:(name,callback)=>events[name]=callback};
-const window={matchMedia:()=>({matches:true}),WorldsFair:{dataUrl:value=>value,filterResponse:(_path,value)=>value},WorldsFairPaper:{setYieldIdeas(){}}};
-vm.runInNewContext(longGame,{document,window,localStorage:{getItem:()=>null},AbortSignal,fetch:async()=>({ok:true,json:async()=>({items:[],errors:[]})})});
+const window={matchMedia:()=>({matches:true}),WorldsFair:{dataUrl:value=>value,filterResponse:(_path,value)=>value},WorldsFairPaper:{setYieldIdeas(items){receivedIdeas=items;},depositAvailable(){return false;}}};
+vm.runInNewContext(longGame,{document,window,localStorage:{getItem:()=>null},AbortSignal,fetch:async()=>({ok:true,json:async()=>({items:[{id:'jito-liquid-staking',name:'Synthetic staking option',kind:'staking',chain:'Solana',asset:'SOL',provider:'Synthetic',rate:5,rateType:'APY'},{id:'backyard:fixture',name:'Deferred vault sentinel',kind:'vault',chain:'Solana',asset:'SOL',provider:'Synthetic',rate:9}],errors:[]})})});
 assert.equal(typeof buttons[0].onclick,'function');
 choiceTarget=node({append(element){this.child=element;}});exploreTarget=node({children:[],append(element){this.children.push(element);}});events['worldsfair:paper-ready']();assert.equal(choiceTarget.child,nav,'the existing navigation is moved, not duplicated');assert.deepEqual(exploreTarget.children,[nodes.get('#longBasketPanel'),nodes.get('#longYieldPanel')],'original panels move beside choices without losing handlers');assert.match(buttons[0].innerHTML,/Baskets.*A mix of tokens/);assert.match(buttons[1].innerHTML,/Staking.*rewards on SOL/);
 buttons[1].onclick();await new Promise(resolve=>setTimeout(resolve,0));assert.equal(nodes.get('#longYieldPanel').hidden,false);assert.equal(nodes.get('#longBasketPanel').hidden,true);assert.equal(nodes.get('#longYieldTitle').textContent,'Try paper staking');assert.equal(buttons[1]['aria-pressed'],'true');assert.equal(scrolls.at(-1).behavior,'auto','navigation respects reduced motion');
 assert.match(nodes.get('#longYieldIntro').innerHTML,/data-paper-home/,'a scrolled staking view can return to the paper balance');
+assert.equal(receivedIdeas.length,1);assert.equal(receivedIdeas[0].kind,'staking');assert.match(nodes.get('#yieldCards').innerHTML,/Synthetic staking option/);assert.doesNotMatch(nodes.get('#yieldCards').innerHTML,/Deferred vault sentinel/,'Mixed provider data cannot reveal a deferred vault card');
+buttons[2].onclick();assert.equal(nodes.get('#longBasketPanel').hidden,false);assert.equal(nodes.get('#longYieldPanel').hidden,true,'Even an obsolete vault navigation event returns to baskets');
 buttons[0].onclick();assert.equal(nodes.get('#longBasketPanel').hidden,false);assert.equal(nodes.get('#longYieldPanel').hidden,true);
 // Eight catalogue cards are revealed at a time; expanding is local and keeps
 // catalogue filters intact, rather than making another provider request.
@@ -49,4 +53,4 @@ clickBasket('[data-basket]');await new Promise(setImmediate);
 const detailNode=basketNodes.get('#basketDetail');assert.equal(mountedBasket.slug,'basket-0');assert(detailNode.innerHTML.indexOf('data-paper-basket')<detailNode.innerHTML.indexOf('What’s inside'),'paper amount/action is not buried below token allocations');assert.match(detailNode.innerHTML,/data-paper-home/);assert.equal(detailNode['aria-busy'],'false');
 failDetail=true;clickBasket('[data-basket]');await new Promise(setImmediate);assert.match(detailNode.innerHTML,/Try loading this basket again/);assert.match(detailNode.innerHTML,/data-basket-back/);assert.doesNotMatch(detailNode.innerHTML,/Raw upstream|RPC/);
 failDetail=false;clickBasket('[data-basket-retry]');await new Promise(setImmediate);assert.match(detailNode.innerHTML,/What’s inside/,'the same selected basket can retry without returning through the catalogue');
-console.log('Paper portfolio UX passed: balance-first layout, exploration before holdings, preserved action/devnet hooks, three-way navigation, reduced motion, local pagination and selected basket failure/retry.');
+console.log('Paper portfolio UX passed: balance-first layout, exploration before holdings, preserved action/devnet hooks, basket/staking navigation with deferred vaults, reduced motion, local pagination and selected basket failure/retry.');

@@ -118,6 +118,16 @@ try {
   assert.equal((await worker.fetch(request('/api/still/preflight?poolAddress='+'A'.repeat(32)), env)).status, 404);
   response = await worker.fetch(request('/api/baskets', 'HEAD'), env);
   assert.equal(response.status, 200); assert.equal(await response.text(), '');
+  const originalSnapshot = store.get('snapshot:v1');
+  for (const malformed of [{updatedAt:now}, {pools:null}, {pools:[null]}]) {
+    store.set('snapshot:v1',malformed);
+    for (const path of ['/api/still/pools','/api/baskets','/api/still/preflight?poolAddress='+'A'.repeat(32),'/api/still/basket-preflight?basketId=steady']) {
+      const broken = await worker.fetch(request(path),env);
+      assert.equal(broken.status,503,'Malformed snapshot returns a retryable error for '+path);
+      assert.match((await broken.json()).error,/unavailable/i);
+    }
+  }
+  store.set('snapshot:v1',originalSnapshot);
   assert.deepEqual({writes, assets, providers}, beforeGuided, 'Guided evidence stays read-only and uses only the supplied snapshot');
   for(const path of ['/brand/still-mark.svg','/product.css','/product-brand.js']){const response=await worker.fetch(request(path),env);assert.equal(response.status,200);assert.equal(await response.text(),'asset '+path,'public product assets reach only the static binding');}
   assert.equal(assets, 7); assert.equal(writes, 0); assert.equal(providers, 0);
