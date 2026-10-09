@@ -2,36 +2,59 @@
 
 **Clarity before capital.**
 
-Still is a pre-flight check for Solana liquidity pools: understand net fee estimates, exit costs and downside before trying a range, then practise moving paper profits into baskets and yield estimates.
+Liquidity-pool screens show plenty of numbers without making the decision clear. Still gives a first-time visitor one path: choose a Solana pool, see its fee pace, costs and downside, then practise with a paper position before committing capital.
 
-[Open the paper demo](https://lp-terminal-worldsfair.pat-862.workers.dev) · [Public GitHub repository](https://github.com/xNFTpat/worlds-fair) · [Technical guide and disclosure](WORLDSFAIR_README.md)
+[Open Still](https://lp-terminal-worldsfair.pat-862.workers.dev) · [Public GitHub repository](https://github.com/xNFTpat/worlds-fair) · [Technical guide and prior research](WORLDSFAIR_README.md)
 
-Paper money, real market observations, optional Solana **devnet** receipts. No mainnet transactions. Not financial advice.
+The guided demo starts each browser with **10 practice SOL**. No login, wallet or real funds are needed. Market observations are real; positions, balances and settlement are paper models. Mainnet signing and money movement are disabled.
 
-## Try it
+## Demo path
 
-1. Open a pool and read its overall pre-flight verdict. Expand **Why?** for the evidence behind each check.
-2. Use the suggested Bid-Ask range, or choose a floor and inspect the downside scenario. A suggestion appears only when its depth fits the 69-bin limit.
-3. Add labelled **Paper SOL** to the Paper portfolio. Paper-buy a basket or save a paper staking/vault deposit.
-4. Inspect the shared strategies. An eligible, profitable close can roll into your paper portfolio; a saved profit rule can split it between LP, a vault and a basket.
-5. Optionally stamp a saved strategy open/close or your profit roll with Phantom on devnet. Each signature needs an explicit approval.
+The intended first-visit path is Home → pool → pre-flight → position → basket. Current data must be available; the app does not substitute invented prices if a provider fails.
 
-Missing quotes, stale prices and unscorable outcomes stay unavailable. A failed quote cannot spend paper funds.
+1. On Home, click **Try a pool on paper**.
+2. Choose one of the eight or fewer pools and click **Check this pool**.
+3. Keep the default **0.5 SOL**. Read the suggested Bid-Ask range, the **20% / 50%** downside scenarios, fee pace, costs and verdict. Missing evidence says **Unavailable**.
+4. Click **Review paper deposit**, then **Confirm paper deposit**. The position opens and the Positions view appears.
+5. Read the position's inventory value and gross P&L versus holding SOL, modelled fees, range status and floor distance. Expand its pool group to see each separate position. **Refresh marks** requests the latest available observation.
+6. Click **Try a basket**, choose **Steady**, **Busy** or **Spicy**, then **Check the basket**. Review the combined pre-flight and the two component pools.
+7. Click **Review paper basket**, then **Confirm paper deposit**. Two separate positions appear, with the total paper amount split equally.
 
-## What runs where
+Optional devnet proof: after the basket opens, scroll to **Record your basket choice** and click **Record basket on devnet**. Connect Phantom, review the exact Memo, then approve it yourself on Solana devnet. The signature and devnet Explorer link appear after submission. The paper balance never changes.
 
-| Component | Responsibility |
+Optional close: on a position, click **Close paper position**, then **Confirm paper close**. A fresh mark is required. Settlement returns the modelled inventory value **before fees and trading costs** to the practice balance; it is not net profit.
+
+The collapsed **Advanced** section opens the separate research workspace. Strategy trials, earlier trials, wallet settings and other-chain reference material are outside the guided path. Its earlier paper portfolios remain separate from the new 10-SOL practice account.
+
+## What the demo measures
+
+| Display | Evidence and limits |
 | --- | --- |
-| HTML, CSS, JavaScript/TypeScript | Cream interface, pre-flight, range scenarios and paper controls |
-| Cloudflare Worker | Read-only market APIs, strict demo boundary and anonymous paper sessions |
-| Durable Objects | Serialized paper accounting, shared strategy journal, scanner and quote allowance |
-| Dedicated Workers KV | Market caches and retryable copies of paper accounts, events and receipts |
-| Meteora/Solana reads, Jupiter, Cesto, yield providers | Dated market, allocation and rate evidence |
-| Phantom + Solana devnet | Optional Memo receipt; no token transfer |
+| Pool shortlist | Current SOL-paired Meteora DLMM pools with at least $5,000 TVL, a usable price/bin step and a source read no older than ten minutes. Maximum eight; not a complete market index. |
+| 24h fees / TVL | Reported trailing-day pool fees divided by current TVL. A pool younger than 24 hours has no complete daily comparison. |
+| 1h fee trend | Last-hour fee pace compared with the hourly average of the trailing 24 hours, not with the preceding hour. |
+| Fee pace per day | Paper amount × last-hour pool fees/TVL × 24. A comparison at the observed pool pace, not expected position earnings or a forecast. |
+| Suggested range | SOL-only Bid-Ask below the observed price, with more allocation near the bottom. The model uses up to 69 bins and states the actual attainable depth. Native alignment is labelled unverified when unavailable. |
+| Downside scenarios | The **paired token's price in SOL** falls 20% or 50%. Fixed-price bins model a monotonic downward path. Gross inventory excludes fees, transfer taxes, slippage, network costs and liquidity limits. The floor is not a stop-loss. |
+| Transfer fee | A dated, exact-mint Solana RPC policy read. Unknown or stale policy stays unavailable; it never becomes zero. |
+| Entry / exit costs | Complete transaction evidence is required. A size-matched Jupiter conversion quote is shown separately when available; it does not establish all-in LP costs. No default network allowance is presented as observed data. |
+| Position result | Every paper position has a unique address. Pool rows group positions for display without merging their balances, ranges or history. Gross P&L is separate from net P&L; missing costs keep net P&L unavailable. |
 
-The account cookie is random, Secure, HttpOnly and SameSite=Strict. The server derives its account key; balances are never accepted from browser storage. Clearing the cookie loses access to that browser's paper account. There is no login or recovery service.
+**Steady / Busy / Spicy** are comparison tags, not safety ratings. Steady requires at least a week of pool history, $100,000 TVL and a recent fee pace between half and twice the daily average. A pool younger than a day, below $25,000 TVL, with unknown age or a twofold fee burst is Spicy. Remaining eligible pools are Busy; the card explains the observed reason.
 
-Profit rolls debit the shared paper strategy and record the destination in one durable commit. A close can be claimed once across visitors. Retries reuse the same request ID. Provider calls finish before the commit, which rechecks balance, source state, quote expiry and the saved rule. Failed KV copies use an outbox rather than repeating a money move.
+Each basket uses two current pools in its band at a **50/50** split. Selection prefers different paired-token mints. If only separate pools for the same token are available, the overlap is disclosed; if fewer than two eligible pools exist, that preset is unavailable. Membership is checked again at confirmation. These are paper LP allocations, not tokens representing a basket or a claim to stable prices.
+
+Each numeric evidence field carries its source and time. The fast guided flow uses the current pool snapshot and existing policy/quote caches; it does not wait for a burst of external quote requests. Missing costs currently produce **Marginal**, or **Skip** when an observed concern is sufficient. They cannot produce **Worth it**.
+
+## Paper and devnet boundaries
+
+The browser receives a random, Secure, HttpOnly, SameSite=Strict account cookie. The server derives its account key; it does not trust balances from browser storage. Clearing the cookie loses access to that practice account. There is no login or recovery service.
+
+Paper deposits and closes require a confirmation dialog. The Durable Object serializes balance changes and saves each request's receipt atomically. Repeating the same request returns its saved result. Basket opening is all-or-nothing: an unavailable component cannot leave a partial debit or one position behind.
+
+Position fees are explicitly **modelled**, not earned on-chain. The model uses short intervals between dated pool observations, does not backfill missing periods and cannot establish actual concentrated-position fee share. Net results stay unavailable when costs or fee coverage are missing. A newly suggested range starts below the active price and earns no modelled fees while price remains above it.
+
+The optional guided **devnet Memo** records a hash of the saved basket choice, exact allocations and individual position addresses. Its target survives reloads; closing a position cannot rewrite it. Connecting Phantom and signing require separate explicit reviews. The client pins Solana devnet, checks the exact Memo and fixed compute budget, preserves signed bytes for retries, and displays the signature with a devnet Explorer link. Pat still needs to complete a real wallet signing session; automated fixtures do not replace that check. The optional SPL receipt token is cut.
 
 ## Run locally
 
@@ -46,7 +69,7 @@ npm run build
 npm run dev
 ```
 
-Open the local URL printed by Wrangler. Development uses `wrangler.worldsfair.toml` and emulated storage. The separate `execution/` dependency folder supplies inherited SDKs and the devnet client; installing it does not enable mainnet routes.
+Open the local URL printed by Wrangler. Development uses `wrangler.worldsfair.toml` and emulated storage. The separate `execution/` dependency folder supplies inherited SDKs and the devnet client; installing it does not enable mainnet routes. A local catalogue needs a successful market-data refresh before live pools appear.
 
 ```sh
 npm test
@@ -54,15 +77,15 @@ npm run check
 npm run verify
 ```
 
-`verify` also runs scanner, paper-ledger and devnet-receipt tests in the real local Worker runtime. Runtime tests need permission to bind a localhost port. Provider and signing fixtures are synthetic; they do not submit transactions.
+`verify` also runs scanner, paper-ledger and devnet-receipt tests in the local Worker runtime. Runtime tests need permission to bind a localhost port. Provider and signing fixtures are synthetic; they do not submit transactions.
 
-## Data access
+## Architecture and data sources
 
-Jupiter quote and Price reads work without a key under a shared 30-request rolling-minute allowance. A dedicated `JUPITER_API_KEY` is optional for additional provider capacity; the application's conservative allowance still applies. Cached values retain their original dates. See [Jupiter's documented limits](https://developers.jup.ag/docs/portal/rate-limits).
+The HTML/CSS/JavaScript guided app calls the Cloudflare Worker for evidence and the isolated paper ledger. Durable Objects serialize accounting; the dedicated Workers KV stores market caches and earlier research records. The guided evidence routes are `/api/still/pools`, `/api/still/preflight`, `/api/baskets` and `/api/still/basket-preflight`.
 
-`SOLANA_RPC` is a read-only market-data endpoint. A dedicated endpoint may improve availability. Keep optional local credentials in ignored `.dev.vars`, using the safe `.dev.vars.example`; never copy another deployment's secrets or commit them. No wallet private key is needed.
+[Meteora's DLMM Data API](https://docs.meteora.ag/api-reference/dlmm/pools/pools) supplies pool prices, liquidity, fee windows, age and bin configuration. Read-only Solana RPC supplies mint policy and native grid evidence when available. Jupiter supplies dated conversion evidence under the application's shared request allowance. See the [data-provider limits](https://developers.jup.ag/docs/portal/rate-limits) and [technical guide](WORLDSFAIR_README.md) for the inherited research integrations and bounded fallback behavior.
 
-For the standard public Solana mainnet URL, bounded market reads can fall back to the documented [PublicNode endpoint](https://solana.publicnode.com/). Public responses must prove the mainnet genesis identity; existing mint-program, account and quote-age checks still apply. The adapter caches only immutable block timestamps, observes provider cooldowns, and never sends transactions. Custom/keyed RPC endpoints stay with their configured provider. Holder enumeration is unavailable on the shared fallback, and public services can still reject reads; missing evidence remains unavailable rather than passing a safety check.
+Optional local credentials belong in ignored `.dev.vars`, using `.dev.vars.example`. A dedicated demo-only `SOLANA_RPC` or `JUPITER_API_KEY` may improve provider availability; neither is required to browse existing observations. Never copy another deployment's secrets. No wallet private key is needed.
 
 ## Deploy this demo safely
 
@@ -72,18 +95,16 @@ npm run verify
 npm run deploy
 ```
 
-The guarded deployment script requires a clean `worldsfair` branch with the public repository as its origin, checks the dedicated demo configuration, builds a real Git version stamp, and deploys **only** with `--config wrangler.worldsfair.toml`. It records a deployment receipt in the demo's isolated KV namespace. Use the guarded command; do not substitute an unqualified Wrangler deployment.
+The guarded command requires a clean **`worldsfair`** branch with **`xNFTpat/worlds-fair`** as its public origin. It checks publication exclusions and the dedicated configuration, builds a real Git version stamp and deploys **only** with `--config wrangler.worldsfair.toml` to **`lp-terminal-worldsfair`**. It records a receipt in the isolated demo KV namespace. Do not replace it with an unqualified Wrangler deployment.
 
-This public repository excludes the original Worker's deployment configuration. The demo's `/api/version` and footer identify its deployed build. A demo link is not a claim that an uncommitted local change is already deployed.
+The original Worker configuration is excluded from this public repository. Do not modify or deploy `lp-agg` or the personal terminal. `/api/version` and the footer identify the actual deployed build; uncommitted local work is not a release.
 
-## Honest limits
+## What's next
 
-- A pre-flight pass is a screen against dated evidence, not a token audit or prediction. Fees and range scenarios are estimates; losses can exceed the illustrated floor case.
-- Paper baskets record quoted token units, not Cesto wrapper ownership. Market marks exclude exit costs; absent prices never become zero.
-- Vault/staking accrual is a linear estimate from original principal at the saved annual rate, even when the source labels it APY. Native SOL staking does not invent liquid-staking-token shares.
-- Shared strategy capital is simulated. Seeded SOL is demo funding; retained LP contributions are not personal wallet equity.
-- Devnet stamps preserve signed bytes for retries and verify the confirmed Memo. **A real Phantom signing session has not yet been manually exercised.** Web Locks, persistent browser storage and compatible Phantom support are required.
-- The optional devnet SPL receipt token was cut. No custom on-chain vault, live basket deposit or mainnet money flow is included.
+- Complete transaction-specific entry/exit evidence so net comparisons can become available without assumptions.
+- Pat's manual Phantom devnet signing and explorer check; automated tests do not replace this check.
+- Vaults and alerts after the guided demo; they are outside this feature-freeze scope.
+- Product demo recording, separate founder pitch, final logo and chosen X profile. See [the submission checklist](WORLDSFAIR_TODO.md).
 
 ## Prior work and public history
 
@@ -91,6 +112,4 @@ Still builds on the owner's existing **private LP Terminal**. This public reposi
 
 In the private source repository, both provenance tags point to `bccf1bb049dc58381a60b87356bde729a6b8fd06` (4 September 2026). Later working source lacked matching Git history. Its research, range mathematics, market integrations and strategy foundation are disclosed as **inherited**, and the available history cannot establish their exact relationship to the **14 September 2026, 14:00 UK** cutoff.
 
-Clearly new work is identified by the **5 October 2026** task records in [WORLDSFAIR_CHANGELOG.md](WORLDSFAIR_CHANGELOG.md). Earlier task SHAs refer to the private development repository, not public commits in this fresh export. No historical commits or public baseline tags have been fabricated.
-
-See [WORLDSFAIR_TODO.md](WORLDSFAIR_TODO.md) for the manual wallet check, recordings and submission work still outstanding.
+New work is identified by the **5 October** task records and **9 October guided-demo changes** in [WORLDSFAIR_CHANGELOG.md](WORLDSFAIR_CHANGELOG.md). Earlier task SHAs refer to the private development repository, not public commits in this fresh export. No historical commits or public baseline tags have been fabricated.

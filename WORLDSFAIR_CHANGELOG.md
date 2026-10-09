@@ -25,3 +25,16 @@ All times use Europe/London. The original Worker and `wrangler.toml` are preserv
 - Validation for that change: all **62 test scripts**, both TypeScript checks and three runtime suites passed. Mobile 390×844 checks covered the unchosen range, explicit depth, basket purchase layout, holdings navigation and cancelled staking review without a balance change. Real workerd SOL/USDC mint and block-time reads succeeded; Cesto basket preparation hit a provider HTTP 403 and saved no purchase. Live basket completion, genuine profit roll and actual Phantom devnet signing remain in TODO.
 
 - 2026-10-05 15:11 BST · `ed0f0f2b0ee036ac3b7708c90f5be913cf69dcb4` · Live mobile review found an inherited light-on-light selected portfolio label; restored ink text on the pale selected background and added balance scroll spacing. Re-ran all 62 scripts, both type checks and three runtime suites successfully. The live 0.1 Paper SOL basket attempt stopped on unverified provider evidence, with no holding created and the 1 SOL practice balance preserved; the remaining provider work is explicitly banked.
+
+
+## Guided demo — 9 October 2026
+
+The user's 9 October feature-freeze brief supersedes the earlier research-first navigation and rigid 45–50% suggested-floor requirement. The public branch and Worker remain isolated from the personal terminal.
+
+- `f4d92de` — Add Home → pool → pre-flight → paper position → basket, cream styling, source/time labels, explicit paper confirmations, recoverable request IDs and collapsed Advanced navigation.
+- `a417ab4` — Serve the guided Home and dated read-only evidence APIs, including `/api/baskets`. Shortlist up to eight fresh SOL-paired DLMM pools, offer attainable Bid-Ask ranges and gross 20% / 50% scenarios, preserve unavailable costs, and define three current equal-weight pool presets.
+- `0ac40e0` — Preserve every Meteora position address; never apply pool-wide accounting to individual positions. Expandable pool groups retain each position's range, status and exact drawer target.
+- `0113af8` — Add the isolated 10-practice-SOL ledger, atomic multi-position basket opens, exact lamport accounting, persistent idempotent receipts and gross-only settlement. Extend optional devnet Memo proofs to the immutable basket choice and exact position addresses, retaining session isolation and identical signed-byte recovery.
+- `0cb2fd0` — Finish guided receipt controls, long-signature layout, tiny-number display and recovery checks.
+
+Validation before deployment: 66 automated test scripts, both TypeScript checks and three local Worker runtime suites passed. Local browser checks covered desktop and 390px mobile flow, independent positions in the same pool, one-position close, explicit confirmations, unavailable-Phantom, loading, empty and failed-data states. Real Phantom signing and live deployment/timed-flow verification are recorded separately; this entry does not claim either happened. Complete LP entry/exit costs and net outcomes remain unavailable rather than guessed.

@@ -2,7 +2,25 @@
 
 Product: **Still — Clarity before capital.** Public repository: [xNFTpat/worlds-fair](https://github.com/xNFTpat/worlds-fair). The original LP Terminal repository remains private.
 
-## Release checks
+## 9 October — guided demo before feature freeze
+
+Scope: branch **worldsfair**, public repository **xNFTpat/worlds-fair**, Worker **lp-terminal-worldsfair** only. Feature freeze: **Saturday 10 October 2026 at 12:00 UK**. The personal terminal and `lp-agg` are excluded.
+
+- [x] Implement the source-checked shortlist (maximum eight SOL-paired Meteora DLMM pools), attainable SOL-only Bid-Ask range, 20% / 50% gross downside scenarios and three current 50/50 pool-basket presets. Focused pre-flight tests passed; this alone does not mark the release deployed.
+- [x] Replace the README's earlier research-tour instructions with the exact guided demo clicks, the 10-practice-SOL account, separate positions within pool groups and explicit paper-model limits.
+- [ ] Verify the complete fresh-browser flow: **Try a pool on paper → Check this pool → Review paper deposit → Confirm paper deposit → Positions → Try a basket → Check the basket → Review paper basket → Confirm paper deposit**. Target under 90 seconds, excluding optional detailed reading.
+- [x] Local browser review covered desktop and mobile (390 × 844) Home, loading, empty, unavailable, filled and confirmation states. A single 0.5-SOL deposit plus a 0.5-SOL basket created three distinct addresses, including two STONK/SOL positions in one group. Closing only the first returned 0.5 gross practice SOL and left both basket positions open. Mobile document width remained 390px. Malformed local market data produced a clear retry state.
+- [x] Run all 66 test scripts, both TypeScript checks and the three real local Worker runtime suites. Basket receipt runtime coverage includes opening, one-leg closing, reload, same-session recovery and cross-session rejection with synthetic providers; no wallet was signed.
+- [ ] Push the reviewed commits, deploy only the separate demo, and record the live version plus the measured demo path. Deployment remains pending until confirmed from the live Worker.
+- [ ] All-in entry/exit transaction costs remain unavailable where actual simulation evidence is missing. Gross inventory, conversion-only quotes and pool fee pace must remain distinct. Net P&L and net downside proceeds cannot be demonstrated as known yet; do not substitute a fixed network allowance or a guessed fee.
+- [x] Implement the optional guided **basket-choice devnet Memo** using an immutable receipt for the browser session’s exact saved allocation and position addresses. The button survives reloads; signature and devnet Explorer link are shown after submission. The unavailable-Phantom state was checked without connecting a wallet.
+- [ ] Pat: click **Record basket on devnet**, connect Phantom, review the exact Memo, sign it yourself and verify the devnet Explorer receipt. This human signing check is still outstanding; automated fixtures do not count as a completed wallet session.
+
+Cuts for this pass: vaults, profit-roll rules, live basket-token execution and strategy trials are outside the guided demo. Earlier research tools remain behind **Advanced** with their separate paper accounts. Mainnet transactions, the optional SPL receipt token and custom on-chain vault work are excluded.
+
+## Earlier release checks and research backlog
+
+These dated records describe the earlier research build. They do not establish validation of the 9 October guided demo. Cesto purchase and shared-strategy profit-roll work below are retained as an Advanced backlog, not a requirement to add them back to the new first-visit path.
 
 - [x] Verify the next flow/reliability change (`03017a4da964dc8950f15e32c1bd56cef092d29c`): 62 test scripts, both TypeScript checks, and three runtime suites passed. Local mobile checks covered basket form placement, balance/holdings navigation, an unchosen then manually chosen range, and cancelling a paper staking review without changing its balance. Deployment evidence is recorded separately.
 
@@ -21,10 +39,10 @@ There is **no missing Jupiter key blocker**. Public quote and Price reads are su
 
 ## Submission assets — bank for the final pass
 
-Banked at the user’s request. A one-time reminder is scheduled in this chat for **Tuesday 6 October 2026 at 09:00 Europe/London** to revisit the four remaining assets below.
+Banked at the user’s request; the reminder was delivered in this chat on **Tuesday 6 October 2026**. No completed upload, recording or claimed profile has been recorded here, so the four assets remain open.
 
 - [ ] Polish the chosen Still logo and export the upload-ready asset; upload it to the Colosseum project when ready.
-- [ ] Record a **product demo of at most three minutes**, preferably with Loom, using the actual product. Show pre-flight, a range scenario, paper portfolio flow and honest devnet status. Do not present a synthetic fixture as live activity or a completed real signing flow.
+- [ ] Record a **product demo of at most three minutes**, preferably with Loom, using the actual product. Use the README’s new guided clicks: one pool, its pre-flight, a confirmed paper position and a combined basket. Show costs/net figures as unavailable where needed and state the actual devnet status. Do not present a synthetic fixture as live activity or a completed real signing flow.
 - [ ] Record a **separate founder pitch of at most two minutes**. Keep it distinct from the product walkthrough.
 - [ ] Confirm the X profile to use in the submission. Do not infer it from inherited project branding.
 - X handle shortlist: `@easylp` and `@stilllp`. On 5 October 2026, the user reported that neither appeared to exist on X; verify availability before choosing or reserving one. Product name remains Still.
