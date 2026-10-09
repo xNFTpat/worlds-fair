@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Still · Clarity before capital</title>
+<meta name="description" content="See the fees, costs and downside of a Solana liquidity pool before you deposit. Try a pool on paper with Still.">
+<meta name="theme-color" content="#f7f6f0">
+<meta name="color-scheme" content="light">
+<link rel="icon" href="/brand/still-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/still-demo.css">
+<script type="module" src="/still-demo.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to demo</a>
+<header class="site-header wrap">
+<a class="brand" href="#home" aria-label="Still home"><img src="/brand/still-mark.svg" alt="" width="34" height="34"><span>Still</span></a>
+<div class="mode"><i aria-hidden="true"></i>Paper demo <span>· Solana</span></div>
+</header>
+<main id="main" class="wrap" tabindex="-1">
+<section id="home" class="hero" aria-labelledby="hero-title">
+<p class="eyebrow">A clearer way to provide liquidity</p>
+<h1 id="hero-title">Clarity before<br><em>capital.</em></h1>
+<p class="hero-copy">See a pool’s fees, costs and downside before you deposit. Start with a little practice SOL.</p>
+<button class="primary hero-cta" data-go="pools">Try a pool on paper <span aria-hidden="true">↗</span></button>
+<p class="quiet">No wallet needed. No real money moves.</p>
+<div class="hero-bottom"><span>01 &nbsp; Pick a pool</span><span>02 &nbsp; See the trade-offs</span><span>03 &nbsp; Practise the position</span></div>
+<div class="hero-art" aria-hidden="true"><div class="art-line"></div><div class="range-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span>A little perspective.<br>Before you take a position.</span></div>
+</section>
+<div id="journey" hidden>
+<nav class="steps" aria-label="Demo steps"><button data-go="pools">1 <span>Pick a pool</span></button><span aria-hidden="true">/</span><button data-go="preflight" id="step-preflight" disabled>2 <span>Pre-flight</span></button><span aria-hidden="true">/</span><button data-go="positions">3 <span>Positions</span></button><span aria-hidden="true">/</span><button data-go="baskets">4 <span>Baskets</span></button></nav>
+<section id="screen" aria-live="polite" aria-busy="false"></section>
+</div>
+<details class="advanced"><summary>Advanced</summary><div><p>Looking for more detail? Open the research workspace for strategy trials, earlier trials, wallet settings and other-chain reference data.</p><a href="/advanced#alpha">Open advanced research <span aria-hidden="true">↗</span></a><p class="quiet">The guided demo uses its own practice balance. Older research portfolios remain separate.</p></div></details>
+</main>
+<footer class="wrap"><span>Still. Clarity before capital.</span><span>Paper models · live observations <span id="build-version"></span></span></footer>
+<dialog id="confirmation" aria-labelledby="confirm-title"><form method="dialog"><button class="dialog-close" value="cancel" aria-label="Cancel">×</button></form><div id="confirm-content"></div><p id="confirm-error" role="alert" hidden></p><div class="dialog-actions"><button id="confirm-cancel" class="secondary">Keep reviewing</button><button id="confirm-submit" class="primary">Confirm paper deposit</button></div></dialog>
+<div id="notice" class="toast" role="status" hidden></div>
+<noscript><p class="wrap">Enable JavaScript to compare live pools and open a paper position. <a href="https://github.com/xNFTpat/worlds-fair">Read about Still on GitHub.</a></p></noscript>
+</body>
+</html>
