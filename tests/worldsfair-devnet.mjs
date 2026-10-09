@@ -17,6 +17,10 @@ const entry={id:'fleet:farmer:fixture:'+at,arm:'farmer',openedAt:at,budgetSol:1,
 const close={...entry,closedAt:at,exitSol:1.2,pnlSol:.2,pair:'FIX/SOL',poolAddress:'fixture-pool'};
 const event={id:'saved-roll-001',kind:'roll',source:'fleet',at,tradeId:entry.id,closedAt:at,amountLamports:100000000,retainedSol:.1};
 const openTarget={kind:'fleet-open',id:entry.id},closeTarget={kind:'fleet-close',id:close.id,closedAt:at},rollTarget={kind:'pot-roll',eventId:event.id};
+const basketRecord={requestId:'basket-event-001',action:'still-basket',at,amountSol:.5,positionIds:['paper:position-0001','paper:position-0002'],
+ basket:{id:'steady',name:'Steady',amountLamports:500000000,positions:[{positionAddress:'paper:position-0001',poolAddress:wallet,amountLamports:250000000},{positionAddress:'paper:position-0002',poolAddress:otherWallet,amountLamports:250000000}]}};
+const basketTarget={kind:'still-basket',eventId:basketRecord.requestId};
+
 function transaction(receipt,sig=signature){return {slot:123456,blockTime:Math.floor(Date.now()/1000),version:'legacy',transaction:{signatures:[sig],message:{accountKeys:[wallet,COMPUTE_PROGRAM,MEMO_PROGRAM],header:{numRequiredSignatures:1,numReadonlySignedAccounts:0,numReadonlyUnsignedAccounts:2},instructions:[
   {programIdIndex:1,accounts:[],data:b58(new Uint8Array([2,160,134,1,0]))},
   {programIdIndex:1,accounts:[],data:b58(new Uint8Array([3,0,0,0,0,0,0,0,0]))},
@@ -28,6 +32,19 @@ assert.equal((await createStampReceipt(account,openTarget,entry,wallet)).id,rece
 assert.notEqual((await createStampReceipt(other,openTarget,entry,wallet)).id,receipt.id,'Stamp identities are session-isolated');
 assert.equal(receipt.description,'Observation of a shared Paper fleet open');
 assert.equal((await createStampReceipt(account,rollTarget,{event},wallet)).description,'Your saved Paper roll');
+const basketReceipt=await createStampReceipt(account,basketTarget,basketRecord,wallet);
+assert.equal(basketReceipt.description,'Your saved Still paper basket');
+assert.match(basketReceipt.memo,/v1 \| still-basket \| sha256:/);
+assert.ok(!basketReceipt.memo.includes(basketRecord.requestId)&&!basketReceipt.memo.includes(wallet)&&!basketReceipt.memo.includes('position-0001'),'Memo contains the hash, not browser or position details');
+assert.deepEqual(stampTarget(basketTarget),basketTarget);
+for(const mutate of [record=>record.action='still-open',record=>record.requestId='other-basket',record=>record.basket.amountLamports++,record=>record.positionIds.reverse(),record=>record.basket.positions[1].poolAddress=record.basket.positions[0].poolAddress,record=>record.basket.positions[1].positionAddress=record.basket.positions[0].positionAddress,record=>record.basket.positions[0].amountLamports=-1]) {
+ const changed=structuredClone(basketRecord);mutate(changed);await assert.rejects(()=>createStampReceipt(account,basketTarget,changed,wallet));
+}
+const shifted=structuredClone(basketRecord);shifted.basket.positions[0].amountLamports++;shifted.basket.positions[1].amountLamports--;
+assert.notEqual((await createStampReceipt(account,basketTarget,shifted,wallet)).eventHash,basketReceipt.eventHash,'Exact saved split participates in the memo commitment');
+const ignoredFields={...basketRecord,unrelated:{browserPrivateNote:'not-for-chain'}};
+assert.equal((await createStampReceipt(account,basketTarget,ignoredFields,wallet)).eventHash,basketReceipt.eventHash,'Only the fixed authoritative projection enters the hash');
+
 assert.ok(!receipt.memo.includes(account)&&!receipt.memo.includes(entry.id),'Only an evidence hash, event kind and paper/devnet label go on chain');
 assert.equal(verifyStampTransaction(receipt,signature,transaction(receipt)).explorerUrl,'https://explorer.solana.com/tx/'+signature+'?cluster=devnet');
 for(const bytes of [new Uint8Array(32),new Uint8Array([0,0,7,255]),new Uint8Array(64).fill(255)])assert.deepEqual(stampBase58(b58(bytes),64),bytes);
@@ -55,6 +72,8 @@ const ctx={storage,blockConcurrencyWhile(fn){const task=queue.then(async()=>{gua
 const object=new WorldsfairRangeInbox(ctx,{LP_CACHE:{put:async(key,value)=>{if(failKv)throw Error('KV down');kv.set(key,value);}}});
 const paperState={version:1,revision:19,balanceLamports:700000000,holdings:[]};
 await storage.put({fleet:{revision:81,portfolios:{farmer:{cashSol:9,withdrawnSol:.1}}},['fleet-entry:'+entry.id]:entry,['fleet-trade:'+at+':'+close.id]:close,['wf:receipt:'+account+':'+event.id]:{event},['wf:account:'+account]:paperState});
+await storage.put({['still:receipt:'+account+':'+basketRecord.requestId]:basketRecord,['still:account:'+account]:{revision:4,balanceLamports:9500000000,positions:[{id:'paper:position-0001',status:'closed'}]}});
+const baselineStill=await storage.get('still:account:'+account);
 const baselineFleet=await storage.get('fleet'),baselineAccount=await storage.get('wf:account:'+account);
 const run=async(action,body,owner=account)=>{const r=await object.fetch(new Request('https://paper/worldsfair-paper/'+action,{method:body?'POST':'GET',headers:{'x-worldsfair-account':owner},...(body?{body:JSON.stringify(body)}:{})}));return {status:r.status,data:await r.json()};};
 const realFetch=globalThis.fetch;let rpc=[],rpcMode='confirmed',currentReceipt=receipt,gate=null;
@@ -93,6 +112,16 @@ try {
   const changed=await storage.get('fleet-trade:'+at+':'+close.id);changed.pnlSol=.7;await storage.put('fleet-trade:'+at+':'+close.id,changed);release();gate=null;
   result=await racing;assert.equal(result.status,409);assert.equal(result.data.code,'paper_stamp_event_changed');
   result=await run('stamp-prepare',{target:rollTarget,wallet});assert.equal(result.status,200);assert.equal(result.data.receipt.target.kind,'pot-roll');
+  assert.equal((await run('stamp-prepare',{target:basketTarget,wallet},other)).status,404,'Another browser cannot stamp the saved basket');
+  assert.equal((await run('stamp-prepare',{target:{...basketTarget,amountSol:99},wallet})).status,400,'Client cannot supply basket evidence at stamp time');
+  result=await run('stamp-prepare',{target:basketTarget,wallet});assert.equal(result.status,200);currentReceipt=result.data.receipt;
+  assert.equal(currentReceipt.id,basketReceipt.id);assert.equal(currentReceipt.eventHash,basketReceipt.eventHash,'Closing positions cannot change the immutable opening evidence');
+  assert.equal((await run('stamp-prepare',{target:basketTarget,wallet:otherWallet})).status,409,'A prepared basket stamp remains bound to its selected wallet');
+  result=await run('stamp-confirm',{receiptId:currentReceipt.id,signature});assert.equal(result.status,200);assert.equal(result.data.receipt.status,'confirmed');
+  assert.equal((await run('stamp-prepare',{target:basketTarget,wallet})).data.receipt.status,'confirmed');
+  assert.deepEqual(await storage.get('still:account:'+account),baselineStill,'Devnet proof does not change the paper basket, positions, balance or revision');
+  assert.deepEqual(await storage.get('still:receipt:'+account+':'+basketRecord.requestId),basketRecord,'Immutable opening receipt stays unchanged');
+
   const publicEnv={RANGE_ALERTS:{idFromName:()=>1,get:()=>({fetch:async(url,init)=>object.fetch(new Request(url,init))})}};
   assert.equal((await worldsfairPaperRoute(new Request('https://paper/api/paper/stamp-prepare',{method:'POST',headers:{origin:'https://foreign','content-type':'application/json'},body:JSON.stringify({target:openTarget,wallet})}),publicEnv)).status,403);
   assert.equal((await worldsfairPaperRoute(new Request('https://paper/api/paper/stamp-prepare',{method:'POST',headers:{origin:'https://paper','content-type':'application/json'},body:JSON.stringify({target:openTarget,wallet})}),publicEnv)).status,401);

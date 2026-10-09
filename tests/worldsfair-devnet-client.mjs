@@ -18,7 +18,7 @@ assert.equal(tx.instructions.length,3);assert.ok(tx.instructions[0].programId.eq
 assert.equal(tx.instructions[0].data.readUInt8(0),2);assert.equal(tx.instructions[0].data.readUInt32LE(1),100000);assert.equal(tx.instructions[1].data.readUInt8(0),3);assert.equal(tx.instructions[1].data.readBigUInt64LE(1),0n);assert.equal(tx.instructions[2].data.toString('utf8'),'Paper record fixture');
 for(const memo of ['', 'x'.repeat(513),'😀'.repeat(129)])assert.throws(()=>buildMemoTransaction(walletAddress,memo,blockhash,150));
 for(const height of [0,-1,NaN,Infinity,1.5])assert.throws(()=>buildMemoTransaction(walletAddress,'ok',blockhash,height));
-function fixture(){
+function fixture(stampTarget=target){
  const map=new Map(),calls=[],sent=[],emitted=[];let connects=0,signs=0,genesis=DEVNET_GENESIS,sendLost=false,confirmMode='confirmed',mutation=null,consentConnect=true,consentSign=true,status=null,height=100,failRecordWrite=false,capability=true,receiptFault=null;
  const storage={getItem:key=>map.get(key)??null,setItem:(key,value)=>{if(failRecordWrite&&key===storageKey)throw Error('Storage failed');map.set(key,value);},removeItem:key=>map.delete(key)};
  const consent=async detail=>{calls.push({kind:'consent',detail});return detail.stage==='connect'?consentConnect:consentSign;};
@@ -28,7 +28,7 @@ function fixture(){
   if(mutation==='budget')tx.instructions[0]=ComputeBudgetProgram.setComputeUnitLimit({units:200000});
   tx.partialSign(wallet);if(mutation==='signature')tx.signatures[0].signature[0]^=1;return tx;
  }};
- const receipt=(targetValue=target)=>({id:'receipt-1',memo:`Paper record | devnet | v1 | ${targetValue.kind} | sha256:${'a'.repeat(64)}`,target:targetValue,eventAt:'2026-10-05T12:00:00.000Z',eventHash:'a'.repeat(64),wallet:walletAddress,status:'ready'});
+ const receipt=(targetValue=stampTarget)=>({id:'receipt-1',memo:`Paper record | devnet | v1 | ${targetValue.kind} | sha256:${'a'.repeat(64)}`,target:targetValue,eventAt:'2026-10-05T12:00:00.000Z',eventHash:'a'.repeat(64),wallet:walletAddress,status:'ready'});
  const fetcher=async(path,init)=>{
   if(path==='/api/paper/stamps'){assert.equal(init.method,'GET');assert.equal(init.credentials,'same-origin');calls.push({kind:'api',path});return Response.json({paper:true,cluster:'devnet',receipts:[]});}
   assert.equal(init.method,'POST');assert.equal(init.credentials,'same-origin');assert.equal(init.headers['content-type'],'application/json');const body=JSON.parse(init.body);calls.push({kind:'api',path,body});
@@ -73,6 +73,17 @@ f=fixture();f.sendLost=true;await f.client().stamp(target);const saved=JSON.pars
 f=fixture();f.deps.locks.request=async(name,options,callback)=>callback(null);result=await f.client().stamp(target);assert.equal(result.status,'pending');assert.equal(f.connects,0);assert.equal(f.signs,0,'cross-tab lock excludes second flow');
 f=fixture();assert.equal((await f.client().checkPending(target)).status,'unavailable');assert.equal(f.connects,0);assert.equal(f.signs,0);
 for(const bad of [{kind:'fleet-open',id:''},{kind:'fleet-close',id:'x',closedAt:'bad'},{kind:'pot-roll',eventId:'x\n'}]){f=fixture();assert.equal((await f.client().stamp(bad)).status,'unavailable');assert.equal(f.signs,0);}
+const basketTarget={kind:'still-basket',eventId:'basket-event-001'};
+f=fixture(basketTarget);result=await f.client().stamp(basketTarget);assert.equal(result.status,'confirmed');assert.equal(f.signs,1);assert.equal(f.connects,1);
+assert.deepEqual(f.calls.filter(call=>call.kind==='consent').map(call=>call.detail.stage),['connect','sign']);
+const beforeRecovery=f.calls.length,recovered=f.client().savedAttempt(basketTarget);
+assert.equal(recovered.status,'pending','Browser recovery does not assert chain confirmation');assert.equal(recovered.signature,result.signature);assert.equal(recovered.explorerUrl,result.explorerUrl);assert.equal(f.calls.length,beforeRecovery,'Rendering a saved signature never connects or sends');
+await f.client().stamp(basketTarget);assert.equal(f.signs,1);assert.equal(f.sent.length,1,'Confirmed basket recovery never signs or sends another transaction');
+f=fixture(basketTarget);f.sendLost=true;await f.client().stamp(basketTarget);assert.equal(f.sent.length,1);
+const ownedFetch=f.deps.fetch;f.deps.fetch=async(path,init)=>path==='/api/paper/stamp-prepare'?Response.json({error:'This basket belongs to a different browser session.'},{status:404}):ownedFetch(path,init);
+result=await f.client().checkPending(basketTarget);assert.equal(result.status,'pending');assert.equal(f.sent.length,1,'Lost session cannot rebroadcast an old browser recovery record');assert.equal(f.signs,1);
+f.deps.fetch=ownedFetch;f.sendLost=false;result=await f.client().checkPending(basketTarget);assert.equal(result.status,'confirmed');assert.equal(f.signs,1);assert.equal(f.sent.length,2);assert.deepEqual(f.sent[0],f.sent[1],'Authorized basket retry uses exactly the original signed bytes');
+for(const bad of [{kind:'still-basket',eventId:'short'},{kind:'still-basket',eventId:'x'.repeat(81)},{kind:'still-basket',eventId:'unsafe\nidentifier'}]){f=fixture();assert.equal((await f.client().stamp(bad)).status,'unavailable');assert.equal(f.signs,0);}
 const source=await readFile('src/worldsfair-devnet-client.ts','utf8');assert.doesNotMatch(source,/signAndSendTransaction|\/api\/solana\/|\/api\/evm\/|api\.mainnet|clusterApiUrl/);assert.match(source,/worldsfair:devnet-ready/);assert.match(source,/span\[data-paper-stamp\]/);assert.match(source,/observation of a shared paper strategy/);assert.match(source,/your saved paper profit roll/);assert.match(source,/https:\/\/docs\.phantom\.com\/developer-powertools\/testnet-mode/);
 f=fixture();f.consentConnect=false;assert.equal((await f.client().stamp({kind:'fleet-open',id:'x'.repeat(240)})).status,'cancelled');assert.equal((await f.client().stamp({kind:'fleet-open',id:'x'.repeat(241)})).status,'unavailable');
 await build({entryPoints:['src/worldsfair-devnet-client.ts'],bundle:true,platform:'browser',format:'iife',target:'es2022',outfile:join(dir,'browser.js'),minify:true,define:{'process.env.NODE_ENV':'"production"'}});

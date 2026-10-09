@@ -25,7 +25,7 @@ const compiled=await build({stdin:{contents:`
    }
    if(path==='/fixture-money'){
     const rows=await this.fixtureStorage.list();
-    return Response.json(Object.fromEntries([...rows].filter(([k])=>k==='fleet'||/^wf:(account|event|receipt|claim):/.test(k))));
+    return Response.json(Object.fromEntries([...rows].filter(([k])=>k==='fleet'||/^(?:wf:(?:account|event|receipt|claim)|still:(?:account|receipt)):/.test(k))));
    }
    return super.fetch(req);
   }
@@ -35,7 +35,8 @@ const compiled=await build({stdin:{contents:`
  for(const kind of ['basket','vault']){
   b.onResolve({filter:new RegExp('^\\./worldsfair-paper-'+kind+'s$')},()=>({path:kind,namespace:'fixture'}));
  }
- b.onLoad({filter:/.*/,namespace:'fixture'},async(args)=>({contents:await readFile('tests/fixtures/worldsfair-'+args.path+'-provider.fixture.mjs','utf8'),loader:'js'}));
+ b.onResolve({filter:/^\.\/still-preflight$/},()=>({path:'still',namespace:'fixture'}));
+ b.onLoad({filter:/.*/,namespace:'fixture'},async(args)=>({contents:await readFile(args.path==='still'?'tests/fixtures/still-preflight.fixture.mjs':'tests/fixtures/worldsfair-'+args.path+'-provider.fixture.mjs','utf8'),loader:'js'}));
 }}]});
 const alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 function b58(bytes){let n=0n,text='';for(const byte of bytes)n=(n<<8n)+BigInt(byte);while(n){text=alphabet[Number(n%58n)]+text;n/=58n;}for(const byte of bytes){if(byte)break;text='1'+text;}return text;}
@@ -68,6 +69,14 @@ try{
  const a=await call('account'),b=await call('account');assert(a.cookie&&b.cookie&&a.cookie!==b.cookie);
  const rollId=randomUUID(),roll=await call('roll',{source:'fleet',id:fixture.trade.id,closedAt:fixture.trade.closedAt,percent:50,requestId:rollId},a.cookie);
  assert.equal(roll.status,200,JSON.stringify(roll.data));
+ const stillAccount=await call('still-account',undefined,a.cookie);assert.equal(stillAccount.status,200);assert.equal(stillAccount.data.account.seededSol,10);
+ const basketId=randomUUID(),basket=await call('still-basket',{basketId:'steady',poolAddresses:['11111111111111111111111111111111','So11111111111111111111111111111111111111112'],amountSol:'0.5',requestId:basketId,confirmed:true},a.cookie);
+ assert.equal(basket.status,200,JSON.stringify(basket.data));assert.equal(basket.data.account.positions.length,2);assert.equal(basket.data.account.balanceSol,9.5);
+ const basketTarget=basket.data.account.latestBasket.stampTarget;
+ assert.deepEqual(basketTarget,{kind:'still-basket',eventId:basketId});
+ const basketClose=await call('still-close',{positionId:basket.data.receipt.positionIds[0],requestId:randomUUID(),confirmed:true},a.cookie);
+ assert.equal(basketClose.status,200,JSON.stringify(basketClose.data));assert.equal(basketClose.data.account.balanceSol,9.75);
+ assert.deepEqual((await call('still-account',undefined,a.cookie)).data.account.latestBasket.stampTarget,basketTarget,'Reload and closing a leg preserve the immutable basket target');
  const moneyBefore=await stub.fetch('https://internal/fixture-money').then(r=>r.json());
  const target={kind:'fleet-open',id:fixture.entry.id},prepare={target,wallet};
  assert.equal((await call('stamp-prepare',prepare)).status,401);
@@ -79,6 +88,9 @@ try{
  const privateTarget={kind:'pot-roll',eventId:rollId};
  assert.equal((await call('stamp-prepare',{target:privateTarget,wallet},b.cookie,{'x-worldsfair-account':'a'.repeat(64)})).status,404,'An injected header cannot choose another session');
  assert.equal((await call('stamp-prepare',{target:privateTarget,wallet},a.cookie)).status,200,'A real committed roll can be stamped by its session');
+ assert.equal((await call('stamp-prepare',{target:basketTarget,wallet},b.cookie,{'x-worldsfair-account':'a'.repeat(64)})).status,404,'Another cookie cannot stamp the real committed basket');
+ const basketPrepared=await call('stamp-prepare',{target:basketTarget,wallet},a.cookie);assert.equal(basketPrepared.status,200,JSON.stringify(basketPrepared.data));
+ assert.equal(basketPrepared.data.receipt.target.kind,'still-basket');assert.equal(basketPrepared.data.receipt.description,'Your saved Still paper basket');
  const confirm={receiptId:receipt.id,signature};
  result=await call('stamp-confirm',confirm,a.cookie);assert.equal(result.status,202,JSON.stringify(result.data));assert.equal(result.data.receipt.status,'ready');
  assert.equal((await call('stamp-confirm',confirm,b.cookie)).status,404);
@@ -86,9 +98,12 @@ try{
  rpcMode='confirmed';result=await call('stamp-confirm',confirm,a.cookie);assert.equal(result.status,200,JSON.stringify(result.data));assert.equal(result.data.receipt.status,'confirmed');assert.equal(result.data.receipt.explorerUrl,'https://explorer.solana.com/tx/'+signature+'?cluster=devnet');
  const reads=rpcCalls.length;assert.equal((await call('stamp-confirm',confirm,a.cookie)).status,200);assert.equal(rpcCalls.length,reads,'Confirmed replay is served from the authoritative journal');
  assert.equal((await call('stamp-confirm',{...confirm,signature:otherSignature},a.cookie)).status,409);
- const stamps=await call('stamps',undefined,a.cookie);assert.equal(stamps.data.receipts.length,2);assert.equal(stamps.data.receipts.filter(r=>r.status==='confirmed').length,1);
+ receipt=basketPrepared.data.receipt;
+ result=await call('stamp-confirm',{receiptId:receipt.id,signature},a.cookie);assert.equal(result.status,200,JSON.stringify(result.data));assert.equal(result.data.receipt.status,'confirmed');
+ assert.deepEqual((await call('stamp-prepare',{target:basketTarget,wallet},a.cookie)).data.receipt,result.data.receipt,'The real committed basket replays the same confirmed receipt');
+ const stamps=await call('stamps',undefined,a.cookie);assert.equal(stamps.data.receipts.length,3);assert.equal(stamps.data.receipts.filter(r=>r.status==='confirmed').length,2);
  assert.deepEqual((await call('stamps',undefined,b.cookie)).data.receipts,[]);
  assert.deepEqual(await stub.fetch('https://internal/fixture-money').then(r=>r.json()),moneyBefore,'Stamp preparation, failures, confirmation and replay cannot alter money, claims or revisions');
- const kv=await mf.getKVNamespace('LP_CACHE'),keys=await kv.list({prefix:'wf:stamp:'});assert.equal(keys.keys.length,2);const mirrored=await Promise.all(keys.keys.map(k=>kv.get(k.name,'json')));assert(mirrored.some(r=>r.status==='confirmed'&&r.signature===signature));
+ const kv=await mf.getKVNamespace('LP_CACHE'),keys=await kv.list({prefix:'wf:stamp:'});assert.equal(keys.keys.length,3);const mirrored=await Promise.all(keys.keys.map(k=>kv.get(k.name,'json')));assert(mirrored.some(r=>r.status==='confirmed'&&r.signature===signature));
  console.log('PASS real Worker devnet stamps: secure sessions, genuine persisted events, exact receipt replay, private roll isolation, pinned read-only mocked RPC, pending/error/confirmed states, immutable paper money and separate KV receipts. No real signing or network.');
 }finally{await mf.dispose();}

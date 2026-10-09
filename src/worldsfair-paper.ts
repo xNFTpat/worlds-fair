@@ -1,4 +1,5 @@
 import type {Env} from './env';
+import {StillPaperLedger} from './still-paper';
 import {RangeInbox as LegacyRangeInbox} from './range-alerts';
 import {fleetEquity, fleetRisk, fleetFresh, type FleetState, type FleetClosed} from './paper-fleet';
 import {LAMPORTS_PER_SOL, MAX_ACCOUNT_SOL, paperLamports, paperProfitSplit, paperPeakAfterWithdrawal} from './worldsfair-paper-math';
@@ -93,8 +94,8 @@ export async function worldsfairPaperRoute(request: Request, env: Env): Promise<
   const url = new URL(request.url), path = url.pathname;
   if (!path.startsWith('/api/paper/')) return null;
   const action = path.slice('/api/paper/'.length);
-  if (!['account', 'history', 'seed', 'roll', 'basket', 'refresh', 'deposit', 'rule', 'stamp-prepare', 'stamp-confirm', 'stamps'].includes(action)) return json({error: 'Unknown Paper action.'}, 404);
-  const read = ['account', 'history', 'stamps'].includes(action);
+  if (!['account', 'history', 'seed', 'roll', 'basket', 'refresh', 'deposit', 'rule', 'stamp-prepare', 'stamp-confirm', 'stamps', 'still-account', 'still-open', 'still-basket', 'still-refresh', 'still-close'].includes(action)) return json({error: 'Unknown Paper action.'}, 404);
+  const read = ['account', 'history', 'stamps', 'still-account'].includes(action);
   if (request.method !== (read ? 'GET' : 'POST')) return json({error: read ? 'Use a Paper account read.' : 'Use a Paper action.'}, 405);
   if (!env.RANGE_ALERTS) return json({error: 'The Paper journal is unavailable.'}, 503);
   if (!read && request.headers.get('origin') !== url.origin) return json({error: 'Open this demo to update its Paper pot.'}, 403);
@@ -130,7 +131,8 @@ export async function worldsfairPaperRoute(request: Request, env: Env): Promise<
 /** Same fleet object: source cash and each visitor's pot have one atomic writer. */
 export class WorldsfairRangeInbox extends LegacyRangeInbox {
   private preparing = new Map<string, {fingerprint: string; promise: Promise<Response>}>();
-  constructor(private paperCtx: DurableObjectState, private paperEnv: Env) {super(paperCtx);}
+  private stillPaper: StillPaperLedger;
+  constructor(private paperCtx: DurableObjectState, private paperEnv: Env) {super(paperCtx); this.stillPaper = new StillPaperLedger(paperCtx, paperEnv);}
 
   private async serialize<T>(run: () => Promise<T>): Promise<T> {
     // Throwing through blockConcurrencyWhile resets a real Durable Object.
@@ -145,7 +147,7 @@ export class WorldsfairRangeInbox extends LegacyRangeInbox {
 
   private stampKey(account:string,id:string) {return 'wf:stamp:'+account+':'+id;}
   private async stampSource(account:string,target:PaperStampTarget) {
-    const key=target.kind==='pot-roll'?'wf:receipt:'+account+':'+target.eventId:target.kind==='fleet-open'?'fleet-entry:'+target.id:'fleet-trade:'+target.closedAt+':'+target.id;
+    const key=target.kind==='still-basket'?'still:receipt:'+account+':'+target.eventId:target.kind==='pot-roll'?'wf:receipt:'+account+':'+target.eventId:target.kind==='fleet-open'?'fleet-entry:'+target.id:'fleet-trade:'+target.closedAt+':'+target.id;
     return this.paperCtx.storage.get(key);
   }
   private async stampRate(account:string,action:string,limit:number) {
@@ -576,8 +578,8 @@ export class WorldsfairRangeInbox extends LegacyRangeInbox {
     }
     const account = request.headers.get('x-worldsfair-account');
     if (!account || !/^[a-f0-9]{64}$/.test(account)) return json({error: 'Invalid Paper session.'}, 401);
-    const action = path.slice('/worldsfair-paper/'.length), read = ['account', 'history', 'stamps'].includes(action);
-    if (!['account', 'history', 'seed', 'roll', 'basket', 'refresh', 'deposit', 'rule', 'stamp-prepare', 'stamp-confirm', 'stamps'].includes(action)) return json({error: 'Unknown Paper action.'}, 404);
+    const action = path.slice('/worldsfair-paper/'.length), read = ['account', 'history', 'stamps', 'still-account'].includes(action);
+    if (!['account', 'history', 'seed', 'roll', 'basket', 'refresh', 'deposit', 'rule', 'stamp-prepare', 'stamp-confirm', 'stamps', 'still-account', 'still-open', 'still-basket', 'still-refresh', 'still-close'].includes(action)) return json({error: 'Unknown Paper action.'}, 404);
     if (request.method !== (read ? 'GET' : 'POST')) return json({error: 'Invalid Paper method.'}, 405);
     let input: Record<string, unknown> = {};
     if (!read) {
@@ -586,6 +588,7 @@ export class WorldsfairRangeInbox extends LegacyRangeInbox {
       try { input = JSON.parse(text); if (!input || typeof input !== 'object' || Array.isArray(input)) throw Error(); }
       catch { return json({error: 'Invalid Paper action JSON.'}, 400); }
     }
+    if (action.startsWith('still-')) return this.stillPaper.handle(account, action, input);
     const errorResponse = (error: unknown) => {
       if (error instanceof PaperError || error instanceof PaperBasketError || error instanceof PaperVaultError || error instanceof PaperStampError) return json({error: error.message, code: error.code}, error.status);
       if (error instanceof RangeError) return json({error: error.message, code: 'invalid_paper_amount'}, 400);

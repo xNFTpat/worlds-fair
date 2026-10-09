@@ -5,7 +5,7 @@ export const DEVNET_RPC='https://api.devnet.solana.com';
 export const DEVNET_GENESIS='EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
 export const MEMO_PROGRAM='MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
 const STORAGE_KEY='worldsfair:devnet-stamps:v1',MAX_SAVED=128;
-export type StampTarget={kind:'fleet-open';id:string}|{kind:'fleet-close';id:string;closedAt:string}|{kind:'pot-roll';eventId:string};
+export type StampTarget={kind:'fleet-open';id:string}|{kind:'fleet-close';id:string;closedAt:string}|{kind:'pot-roll';eventId:string}|{kind:'still-basket';eventId:string};
 type StampStatus='confirmed'|'pending'|'unavailable'|'cancelled'|'failed'|'expired';
 export interface StampResult {status:StampStatus;message:string;receiptId?:string;signature?:string;explorerUrl?:string}
 interface Receipt {id:string;memo:string;target:StampTarget;eventAt:string;eventHash:string;wallet:string;status:'ready'|'confirmed';signature?:string;explorerUrl?:string}
@@ -20,6 +20,7 @@ interface Dependencies {storage:Storage;fetch:BrowserFetch;rpc:Rpc;phantom:()=>P
 class StampError extends Error {}
 const validText=(value:unknown,max:number):value is string=>typeof value==='string'&&value.length>0&&value.length<=max&&!/[\u0000-\u001f]/.test(value);
 function normalizeTarget(value:any):StampTarget {
+ if(value?.kind==='still-basket'&&typeof value.eventId==='string'&&/^[A-Za-z0-9_-]{8,80}$/.test(value.eventId))return {kind:'still-basket',eventId:value.eventId};
  if(value?.kind==='pot-roll'&&validText(value.eventId,200))return {kind:'pot-roll',eventId:value.eventId};
  if(value?.kind==='fleet-open'&&validText(value.id,240))return {kind:'fleet-open',id:value.id};
  if(value?.kind==='fleet-close'&&validText(value.id,240)&&validText(value.closedAt,40)&&Number.isFinite(Date.parse(value.closedAt)))return {kind:'fleet-close',id:value.id,closedAt:value.closedAt};
@@ -85,6 +86,12 @@ export function createDevnetClient(deps:Dependencies){
  async function check(record:Pending):Promise<StampResult>{
   try{
    await ensureSession();
+   if(record.target.kind==='still-basket') {
+    // A cleared session cookie must not authorize a recovery broadcast for an
+    // event owned by the prior session. Revalidate the immutable receipt first.
+    const owned=verifiedReceipt(await post('/api/paper/stamp-prepare',{target:record.target,wallet:record.wallet}),record.target,record.wallet);
+    if(owned.id!==record.receiptId||owned.memo!==record.memo||owned.eventHash!==record.eventHash)throw new StampError('This browser session no longer matches the saved basket receipt. Nothing was sent.');
+   }
    // Browser storage is a recovery aid, never evidence of on-chain confirmation.
    if(record.state==='confirmed')return await confirm(record);
    await assertDevnet();const statuses=await deps.rpc.getSignatureStatuses([record.signature],{searchTransactionHistory:true});
@@ -150,7 +157,8 @@ export function createDevnetClient(deps:Dependencies){
   let target:StampTarget;try{target=normalizeTarget(value);}catch(error){return {status:'unavailable',message:(error as Error).message};}
   return locked(target,async()=>{const saved=pending(target);return saved?check(saved):{status:'unavailable',message:'No signed devnet attempt is saved in this browser. Choose Stamp to review a new memo.'};});
  }
- return {stamp,checkPending,hasPending:(target:StampTarget)=>{try{return !!pending(target);}catch{return true;}}};
+ const savedAttempt=(target:StampTarget):StampResult|null=>{try{const record=pending(target);return record?savedResult(record,'pending','A signed devnet memo is saved. Check its confirmation without signing again.'):null;}catch{return null;}};
+ return {stamp,checkPending,savedAttempt,hasPending:(target:StampTarget)=>{try{return !!pending(target);}catch{return true;}}};
 }
 
 // The Worker project has no DOM library. Browser-only objects stay isolated
@@ -162,7 +170,7 @@ function consentDialog(detail:Consent):Promise<boolean>{
   const dialog=doc.createElement('dialog');dialog.className='wf-devnet-dialog';dialog.setAttribute('aria-label','Review devnet memo');
   const title=doc.createElement('h3');title.textContent=detail.stage==='connect'?'Stamp this Paper record on devnet':'Review the devnet memo';
   const note=doc.createElement('p');note.textContent='Optional public record on Solana devnet. Phantom signs only a Memo and a fixed compute budget. Devnet SOL pays the network fee. Your paper balances and holdings do not change.';
-  const scope=doc.createElement('p');scope.textContent=detail.target.kind==='pot-roll'?'This stamps your saved paper profit roll.':'This stamps an observation of a shared paper strategy.';
+  const scope=doc.createElement('p');scope.textContent=detail.target.kind==='still-basket'?'This records a hash of your saved basket choice and allocation. It does not deposit tokens or prove investment performance.':detail.target.kind==='pot-roll'?'This stamps your saved paper profit roll.':'This stamps an observation of a shared paper strategy.';
   const setup=doc.createElement('a');setup.href='https://docs.phantom.com/developer-powertools/testnet-mode';setup.target='_blank';setup.rel='noopener';setup.textContent='Set up Phantom testnet mode ↗';
   dialog.append(title,note,scope,setup);
   if(detail.stage==='sign'){
@@ -184,8 +192,9 @@ function mountBrowser(){
  let storage=unavailableStorage;try{storage=browser.localStorage||unavailableStorage;}catch{}
  const client=createDevnetClient({storage,fetch:globalThis.fetch.bind(globalThis),rpc:new Connection(DEVNET_RPC,{commitment:'confirmed',disableRetryOnRateLimit:true}),phantom:()=>browser.phantom?.solana||null,locks:browser.navigator?.locks,consent:consentDialog,emit:detail=>{pruneListeners();listeners.get(targetKey(detail.target))?.forEach(row=>row.paint(detail));if(browser.CustomEvent)browser.document.dispatchEvent(new browser.CustomEvent('worldsfair:stamp-status',{detail}));}});
  const renderButton=(value:StampTarget,label='Stamp Paper record on devnet')=>{
-  const target=normalizeTarget(value),doc=browser.document,wrapper=doc.createElement('div'),button=doc.createElement('button'),status=doc.createElement('span'),link=doc.createElement('a');wrapper.className='wf-devnet-stamp';button.type='button';button.textContent=client.hasPending(target)?'Check saved devnet stamp':label;status.className='wf-devnet-status';status.setAttribute('role','status');link.textContent='View devnet memo ↗';link.target='_blank';link.rel='noopener';link.hidden=true;wrapper.append(button,status,link);
-  const paint=(result:StampResult)=>{status.textContent=result.message;wrapper.dataset.stampStatus=result.status;if(result.explorerUrl){link.href=result.explorerUrl;link.hidden=false;}button.textContent=result.status==='confirmed'?'Devnet memo confirmed':client.hasPending(target)?'Check saved devnet stamp':label;button.disabled=result.status==='confirmed';};
+  const target=normalizeTarget(value),doc=browser.document,wrapper=doc.createElement('div'),button=doc.createElement('button'),status=doc.createElement('span'),signature=doc.createElement('code'),link=doc.createElement('a');wrapper.className='wf-devnet-stamp';button.type='button';button.textContent=client.hasPending(target)?'Check saved devnet stamp':label;status.className='wf-devnet-status';status.setAttribute('role','status');link.textContent='View devnet memo ↗';link.target='_blank';link.rel='noopener';link.hidden=true;signature.className='wf-devnet-signature';signature.setAttribute('aria-label','Devnet transaction signature');signature.hidden=true;wrapper.append(button,status,signature,link);
+  const paint=(result:StampResult)=>{status.textContent=result.message;wrapper.dataset.stampStatus=result.status;if(result.signature){signature.textContent=result.signature;signature.hidden=false;}if(result.explorerUrl){link.href=result.explorerUrl;link.hidden=false;}button.textContent=result.status==='confirmed'?'Devnet memo confirmed':client.hasPending(target)?'Check saved devnet stamp':label;button.disabled=result.status==='confirmed';};
+  const saved=client.savedAttempt(target);if(saved)paint(saved);
   const key=targetKey(target);if(!listeners.has(key))listeners.set(key,new Set());listeners.get(key)!.add({element:wrapper,paint});
   button.addEventListener('click',async()=>{button.disabled=true;try{paint(await client.stamp(target));}finally{if(wrapper.dataset.stampStatus!=='confirmed')button.disabled=false;}});return wrapper;
  };

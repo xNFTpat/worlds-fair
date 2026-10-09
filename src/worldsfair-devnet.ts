@@ -5,7 +5,7 @@ export const DEVNET_GENESIS = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
 export const MEMO_PROGRAM = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
 export const COMPUTE_PROGRAM = 'ComputeBudget111111111111111111111111111111';
 export const STAMP_COMPUTE_UNITS = 100000;
-export type PaperStampTarget = {kind:'fleet-open';id:string} | {kind:'fleet-close';id:string;closedAt:string} | {kind:'pot-roll';eventId:string};
+export type PaperStampTarget = {kind:'fleet-open';id:string} | {kind:'fleet-close';id:string;closedAt:string} | {kind:'pot-roll';eventId:string} | {kind:'still-basket';eventId:string};
 export interface PaperStampReceipt {
   id:string;paper:true;cluster:'devnet';target:PaperStampTarget;eventAt:string;eventHash:string;
   wallet:string;memo:string;description:string;status:'ready'|'confirmed';createdAt:string;
@@ -20,10 +20,10 @@ const dated = (value:unknown):value is string => typeof value==='string' && /^\d
 export function stampTarget(input:unknown):PaperStampTarget {
   if(!input||typeof input!=='object'||Array.isArray(input))throw new PaperStampError('Choose a saved Paper event.');
   const row=input as Record<string,unknown>;
-  if(row.kind==='pot-roll') {
+  if(row.kind==='pot-roll'||row.kind==='still-basket') {
     exact(row,['kind','eventId']);
     if(typeof row.eventId!=='string'||!/^[A-Za-z0-9_-]{8,80}$/.test(row.eventId))throw new PaperStampError('Choose a saved Paper roll.');
-    return {kind:'pot-roll',eventId:row.eventId};
+    return {kind:row.kind,eventId:row.eventId};
   }
   if(!['fleet-open','fleet-close'].includes(String(row.kind))||typeof row.id!=='string'||row.id.length>240||!/^fleet:[a-z0-9-]+:/.test(row.id))throw new PaperStampError('Choose a saved shared Paper fleet observation.');
   exact(row,row.kind==='fleet-open'?['kind','id']:['kind','id','closedAt']);
@@ -34,6 +34,20 @@ export function stampTarget(input:unknown):PaperStampTarget {
 /** Only a fixed projection of authoritative journal fields enters the public hash. */
 export function stampEvidence(target:PaperStampTarget, record:any) {
   if(!record||typeof record!=='object')throw new PaperStampError('This Paper event is not in the saved journal.',404,'paper_stamp_event_missing');
+  if(target.kind==='still-basket') {
+    const basket=record.basket, legs=basket?.positions;
+    const invalid=()=>new PaperStampError('Only this browser’s saved Still basket deposits can be stamped.',404,'paper_stamp_event_missing');
+    if(record.action!=='still-basket'||record.requestId!==target.eventId||!dated(record.at)||!basket
+      ||typeof basket.id!=='string'||!/^[a-z0-9-]{1,40}$/.test(basket.id)||typeof basket.name!=='string'||!basket.name.length||basket.name.length>80
+      ||!Number.isSafeInteger(basket.amountLamports)||basket.amountLamports<=0||record.amountSol!==basket.amountLamports/1_000_000_000
+      ||!Array.isArray(legs)||legs.length<2||legs.length>3||!Array.isArray(record.positionIds)||record.positionIds.length!==legs.length
+      ||legs.some((leg:any,i:number)=>!leg||typeof leg.positionAddress!=='string'||!/^paper:[a-zA-Z0-9-]{8,80}$/.test(leg.positionAddress)
+        ||record.positionIds[i]!==leg.positionAddress||!basketMint(leg.poolAddress)||!Number.isSafeInteger(leg.amountLamports)||leg.amountLamports<=0)
+      ||new Set(legs.map((leg:any)=>leg.positionAddress)).size!==legs.length||new Set(legs.map((leg:any)=>leg.poolAddress)).size!==legs.length
+      ||legs.reduce((sum:number,leg:any)=>sum+leg.amountLamports,0)!==basket.amountLamports)throw invalid();
+    return {version:1,paper:true,kind:target.kind,eventId:record.requestId,at:record.at,basketId:basket.id,basketName:basket.name,
+      amountLamports:basket.amountLamports,positions:legs.map((leg:any)=>({positionAddress:leg.positionAddress,poolAddress:leg.poolAddress,amountLamports:leg.amountLamports}))};
+  }
   if(target.kind==='pot-roll') {
     const event=record.event;
     if(!event||event.kind!=='roll'||event.id!==target.eventId||event.source!=='fleet'||!dated(event.at)||!Number.isSafeInteger(event.amountLamports)||event.amountLamports<0||!Number.isFinite(event.retainedSol))throw new PaperStampError('Only this browser’s saved Paper profit rolls can be stamped.',404,'paper_stamp_event_missing');
@@ -50,7 +64,7 @@ export async function createStampReceipt(account:string,target:PaperStampTarget,
   const id=await stampDigest('paper-devnet-v1:'+account+':'+eventHash);
   return {id,paper:true,cluster:'devnet',target,eventAt:evidence.at,eventHash,wallet,
     memo:'Paper record | devnet | v1 | '+target.kind+' | sha256:'+eventHash,
-    description:target.kind==='pot-roll'?'Your saved Paper roll':'Observation of a shared Paper fleet '+(target.kind==='fleet-open'?'open':'close'),status:'ready',createdAt:new Date().toISOString()};
+    description:target.kind==='still-basket'?'Your saved Still paper basket':target.kind==='pot-roll'?'Your saved Paper roll':'Observation of a shared Paper fleet '+(target.kind==='fleet-open'?'open':'close'),status:'ready',createdAt:new Date().toISOString()};
 }
 const alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 /** Bounded decoder used for instruction bytes and signatures; no transaction SDK on the server. */
