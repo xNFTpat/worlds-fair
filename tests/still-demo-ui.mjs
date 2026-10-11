@@ -3,7 +3,8 @@ import {readFile} from 'node:fs/promises';
 import {runInNewContext} from 'node:vm';
 
 const source = await readFile('public/still-demo.js', 'utf8');
-const browserSource = source.replace(/^export /gm, '');
+const lessons = await readFile('public/still-lessons.js', 'utf8');
+const browserSource = lessons.replace(/^export /gm, '') + source.replace(/^import .*from '\.\/still-lessons.js';$/m, '').replace(/^export /gm, '');
 const helpers = runInNewContext(browserSource + '\n({esc,number,sol,groupPositions,requestFingerprint,readOnboarding,sortForPreference})', {Intl});
 assert.equal(helpers.sol(null), 'Unavailable');
 assert.equal(helpers.sol(0), '0 SOL');
@@ -63,7 +64,7 @@ function fixture() {
   class TestDate extends Date {constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}}
   const sessionStorage = {getItem:key=>stored.get(key) ?? null,setItem:(key,value)=>stored.set(key,value),removeItem:key=>stored.delete(key)};
   runInNewContext(browserSource, {document,window,location,history,sessionStorage,localStorage:sessionStorage,fetch,Date:TestDate,URLSearchParams,AbortController,Intl,crypto:{randomUUID:()=>`request-${++serial}`},setTimeout:()=>1,clearTimeout:()=>{}});
-  const click = async dataset => {await document.dispatch('click',{target:{closest:()=>({dataset,disabled:false})}}); await flush();};
+  const click = async dataset => {await document.dispatch('click',{preventDefault(){},target:{closest:selector=>selector==='[data-lesson]'&&!dataset.lesson?null:({dataset,disabled:false})}}); await flush();};
   const confirm = async () => {await elements['#confirm-submit'].dispatch('click'); await flush();};
   return {elements,requests,stored,click,confirm,address,async ready(){await flush();await click({go:'pools'});await click({pool:address});},advance(ms){clock+=ms;},fail(value){failMode=value;}};
 }
@@ -106,3 +107,9 @@ await intro.click({onboard:'next'}); await intro.click({pace:'calm'}); await int
 assert.equal(JSON.parse(intro.stored.get('still:onboarding:v1')).preference,'calm');
 await intro.click({go:'home'});await intro.click({action:'start'});
 assert.ok(intro.elements['#screen'].innerHTML.includes('Run pre-flight'),'Returning visitors go directly to pools');
+
+const reading = fixture(); await reading.click({go:'learn'}); await reading.click({lesson:'3'});
+assert.ok(reading.elements['#screen'].innerHTML.includes('Why exit cost matters on thin tokens'));
+assert.deepEqual(JSON.parse(reading.stored.get('still:lessons:v1')),[3]);
+await reading.click({lesson:'4'}); assert.deepEqual(JSON.parse(reading.stored.get('still:lessons:v1')),[3,4]);
+assert.equal(reading.requests.filter(r=>r.method==='POST').length,0,'Reading lessons never changes paper money');
