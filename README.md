@@ -30,6 +30,7 @@ Wallet reading: **Positions → View a live wallet · read-only → Connect Phan
 
 ### Recording caveats
 
+- **Live cost verification is blocked (11 October, 16:45 UK):** the public RPC returned HTTP 429 / RPC −32029 on the first mint read, despite the shared two-method allowance. Five live pools have not passed the full cost/net check. A dedicated read-only Solana RPC for the Still Worker is required before recording that part of the pitch; no wallet private key or signing access is needed. The current fallback is visibly **Unavailable**. See [remaining work](WORLDSFAIR_TODO.md).
 - A **Worth a look** verdict is not guaranteed. The cost panel now computes a dated **paper estimate** from Jupiter's actual net token-sale proceeds versus a verified native pool mark (or a fresh, explicitly labelled exact-pool Meteora mark) and Solana RPC `getFeeForMessage` base fees. This is not a complete LP transaction simulation. A better route can offset fees; zero quote drag does not mean zero fees. No assumed swap fee is substituted.
 - Holder concentration can remain unavailable because a largest-account sample cannot prove the complete owner distribution. Missing or stale readings are never zero.
 - Strategy results say **Too early to judge** until five closed paper trades. Entries wait for their conditions, and stale evidence can delay a planned close. Five trades do not make missing costs known.
@@ -130,7 +131,7 @@ The public source is inspectable, but this repository currently has **no project
 - Vendored Uniswap v3 SDK: [MIT licence](public/vendor/uniswap-v3-sdk-LICENSE.txt).
 - Installed direct-package metadata: Solana web3.js, bn.js, MCP SDK/ext-apps and esbuild — MIT; SPL Token and TypeScript — Apache-2.0; Wrangler and Workers types — MIT OR Apache-2.0.
 - Meteora zap-sdk 1.3.2 is pinned in the execution lockfile, but its installed package declares no licence and contains no licence file. Licence review remains open; do not infer permission from availability on npm.
-- Instrument fonts are loaded from Google Fonts. Review their upstream font licences before redistributing local font files. Third-party packages retain their own notices; lockfiles identify the full transitive inventory.
+- Instrument fonts are served locally with their [source record](public/fonts/SOURCES.md), [Instrument Sans OFL](public/fonts/instrumentsans-OFL.txt) and [Instrument Serif OFL](public/fonts/instrumentserif-OFL.txt). Third-party packages retain their own notices; lockfiles identify the full transitive inventory.
 
 ## Business model and what's next
 
@@ -138,7 +139,7 @@ Still is paper today and earns nothing. **0.3% (example rate, not live)** illust
 
 Next: measured transaction costs and complete holder coverage; earned-profit routing once net results can be established; live execution with upfront fees; alerts; a strategy marketplace; and broader devnet/mainnet stamped records. Current Backyard is an estimate, not a vault-execution product. Custom bots and all eight lessons are implemented; they were not cut. Optional SPL receipt tokens and custom on-chain vaults remain cut.
 
-The separate two-minute founder pitch, three-minute product demo, chosen X profile, logo export, licence/attribution review and final Colosseum submission are still human tasks in [WORLDSFAIR_TODO.md](WORLDSFAIR_TODO.md). This build did not publish videos, claim handles or submit the entry.
+The supplied logo pack is applied and ready for Colosseum upload. That upload, the separate two-minute founder pitch, three-minute product demo, chosen X profile, licence/attribution review and final Colosseum submission are still human tasks in [WORLDSFAIR_TODO.md](WORLDSFAIR_TODO.md). This build did not publish videos, claim handles or submit the entry.
 
 **Not financial advice.** Paper models do not establish achievable returns, and real LP positions can lose capital.
 
