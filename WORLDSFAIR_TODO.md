@@ -2,6 +2,14 @@
 
 Product: **Still — Clarity before capital.** Public repository: [xNFTpat/worlds-fair](https://github.com/xNFTpat/worlds-fair). The original LP Terminal repository remains private.
 
+## 11 October — cost and verdict correction, 21:19 BST
+
+- [x] Deployed `eff791bcbdc2ff15942e8077097440042fd97648` to Still only; removed network-only exit fallback, added quote-derived half-position fee/impact costs, exact two-sided funding and Known issuer cautions.
+- [x] Live one-hour-volume catalogue cached for five minutes; SKR thin example pinned by exact identity. Thresholds and motion pack unchanged.
+- [x] 85 script tests, both type checks, five Worker runtime suites and live browser checks passed.
+- [x] Checked the six original pools and all eight current hot-list entries at 0.5 SOL (12 distinct pools). **None returned Worth a look.** CTM, SKR and one baton pool have complete estimates; nine rows lack verified route-fee/impact costs and show Unavailable / Caution. The previous complete-cost checkpoint below predates this stricter correction.
+- [x] Saved the full table, source times and reasons in `validation/worldsfair/COST_VERDICT_CHECKPOINT.md`; stopped at the requested checkpoint.
+
 ## 11 October — motion and cost checkpoint
 
 - [x] Integrate the supplied app motion components, exact real-data ticket sentence, range gauge, paper sheet, empty states and accessible status chips.

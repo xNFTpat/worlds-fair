@@ -70,3 +70,10 @@ Validation before deployment: 66 automated test scripts, both TypeScript checks 
 - `4552b516b89ea5aec6eead94bf10c84a34354ba1` bundles runtime/styles and preloads the hero fonts. Deployed to `lp-terminal-worldsfair` only; mobile Lighthouse **98 performance / 100 accessibility**.
 - All six 0.5 SOL / four-hour pre-flights returned complete cost estimates. SKR exit cost 0.000777916 SOL exceeds four-hour projected fees 0.000093703 SOL, yielding −0.1388% net and Skip for now. Refundable position rent 0.04189984 SOL is read from chain, excluded from net. The exact STONK demo mint is legacy SPL with no transfer fee.
 - Validation: 84 script tests, both type checks, five Worker runtime suites and local/live browser checks. Below-range contrast 5.48:1; reduced motion/transparency honored. Local paper open only; no real transaction/signing or secret exposure. Stopped at checkpoint.
+
+
+## Cost and verdict correction — 11 October 2026, 21:19 BST
+
+- `eff791bcbdc2ff15942e8077097440042fd97648`: Still-only deployment. Verified half-position route fees + adverse quote impact replace zero-clamped net drag; no complete quote means Unavailable and Caution. Two-sided entry requires a quoted funding swap. Exact canonical USDC/USDT freeze authority is Known issuer / Caution; thresholds unchanged.
+- Live top one-hour-volume SOL-paired Meteora catalogue, five-minute KV cache, exact SKR thin example retained. Motion pack preserved.
+- 85 script tests, two type checks and five runtime suites passed. Live 0.5 SOL check covered twelve distinct original/hot pools from 21:17:38 to 21:19:03 BST. None returned Worth a look. CTM, SKR and the second baton pool had complete costs; other rows had unverifiable fee/impact metadata and remain unavailable. Browser verified issuer chip, hot sorting and missing-cost display. No secret exposure, signing or real funds. Stopped at checkpoint.
