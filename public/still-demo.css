@@ -90,7 +90,7 @@ body{overflow-x:clip}main,.screen-head>div,.pool-card,.metric{min-width:0}
 .still-number-settle{display:inline-block;animation:still-number-settle .24s ease-out both}
 .still-load-ripple{position:absolute;top:42%;left:72%;width:96px;height:96px;margin:-48px 0 0 -48px;border:1px solid var(--deep);border-radius:50%;pointer-events:none;animation:still-load-ripple .85s ease-out both;z-index:0}
 .still-cursor{position:fixed;left:0;top:0;width:14px;height:14px;margin:-7px 0 0 -7px;border:1px solid var(--deep);border-radius:50%;pointer-events:none;z-index:1000;opacity:0;transition:width .12s,height .12s,border-radius .12s,opacity .12s}
-.still-cursor.is-visible{opacity:.8}.still-cursor.is-action{width:30px;height:15px;margin:-15px 0 0 -15px;border-bottom-color:transparent;border-radius:30px 30px 0 0;opacity:.7}
+.still-cursor.is-visible{opacity:.8}.still-cursor.is-action{width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;opacity:.7}
 .still-cursor.is-pulsing:after{content:'';position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px 0 0 -9px;border:1px solid var(--deep);border-radius:50%;animation:still-cursor-pulse .4s ease-out both}
 @keyframes still-horizon-load{from{transform:scaleX(.06)}to{transform:scaleX(1)}}
 @keyframes still-chip-settle{from{transform:translateY(5px);opacity:.65}to{transform:translateY(0);opacity:1}}

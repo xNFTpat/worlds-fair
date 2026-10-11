@@ -488,5 +488,5 @@ window.addEventListener('hashchange',()=>{if(location.hash==='#main')return;if(l
 api('/api/version').then(version=>{const hash=version.git?.short || version.git?.sha || version.gitSha || version.sha || version.commit; if(typeof hash==='string')$('#build-version').textContent='· '+hash.slice(0,8);}).catch(()=>{});
 navigate(location.hash.slice(1)||'home',true);
 // Supplied motion components own the intro, loading and navigation transitions.
-// No second hero ripple, numeric interpolation or custom cursor is installed.
+// The bundled shell owns the sole cursor overlay; no legacy initializer runs.
 }

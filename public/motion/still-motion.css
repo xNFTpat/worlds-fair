@@ -206,3 +206,15 @@ still-empty[kind="closed"]{ --e-anim:e-breathe; } still-empty[kind="grow"]{ --e-
 .still-chip--pass{ color:var(--still-pass-ink); background:rgb(63 125 88 / .10); border-color:rgb(63 125 88 / .40); }
 .still-chip--caution{ color:var(--still-caution-ink); background:rgb(183 134 43 / .12); border-color:rgb(183 134 43 / .50); }
 .still-chip--fail{ color:var(--still-fail-ink); background:rgb(176 74 58 / .10); border-color:rgb(176 74 58 / .40); }
+
+/* Full-circle pointer: viewport/top-layer host, never inside a clipping card. */
+.still-pointer-overlay{position:fixed;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;background:transparent;overflow:visible;contain:none;pointer-events:none;z-index:2147483647;}
+.still-pointer-overlay::backdrop{background:transparent;pointer-events:none;}
+.still-pointer-overlay *{pointer-events:none;}
+.still-pointer-dot,.still-pointer-ring{position:absolute;box-sizing:border-box;border:1.5px solid var(--still-deep);border-radius:50%;background:transparent;overflow:visible;clip-path:none;pointer-events:none;}
+.still-pointer-dot{width:14px;height:14px;margin:-7px 0 0 -7px;}
+.still-pointer-ring{width:52px;height:52px;margin:-26px 0 0 -26px;animation:still-pointer-click 350ms ease-out 1 both;}
+@keyframes still-pointer-click{from{transform:scale(.25);opacity:.7;}to{transform:scale(1);opacity:0;}}
+@media(hover:hover) and (pointer:fine){html.still-pointer-active,html.still-pointer-active *{cursor:none!important;}}
+@media(prefers-reduced-motion:reduce){.still-pointer-ring{display:none;animation:none;}}
+@media(pointer:coarse){.still-pointer-overlay{display:none!important;}html.still-pointer-active,html.still-pointer-active *{cursor:revert!important;}}
