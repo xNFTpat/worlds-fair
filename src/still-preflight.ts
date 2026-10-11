@@ -1,8 +1,11 @@
+import {fetchMeteoraPool} from './sources/meteora';
+import {stillChecks, type StillCheck} from './still-checks';
+import {parseStillRangeOptions, type StillRangeOptions} from './still-preflight-config';
 import type {Env} from './env';
 import type {Pool, Snapshot} from './schema';
 import {getSnapshot} from './refresh';
 import {researchFeeRates, researchPool, type ResearchPoolDetail} from './lp-research';
-import {cachedMintSafety, cachedResearchQuotes, researchQuoteFresh, researchEconomicQuoteFresh, researchToken, type MintSafety, type ResearchQuote, type ResearchRangeAnchor} from './sources/research-reads';
+import {cachedMintSafety, cachedResearchQuotes, researchReadContext, readMintSafety, readRugSafety, readResearchCandles, readResearchRangeAnchor, readResearchQuotes, type RugSafety, type ResearchCandles, researchQuoteFresh, researchEconomicQuoteFresh, researchToken, type MintSafety, type ResearchQuote, type ResearchRangeAnchor} from './sources/research-reads';
 import {buildResearchRange, defaultResearchFloor, inventoryAtPrice, type ResearchRangeBin} from './research-range';
 
 export const STILL_MAX_PRICE_AGE_MS = 10 * 60_000;
@@ -109,29 +112,28 @@ export function listStillPools(snapshot: Snapshot, now = Date.now()): StillPoolC
   return [...picked.values()].slice(0, 8).map(pool => poolCard(pool, now));
 }
 export interface StillBasket {
-  id: string; name: StillRiskLabel; reason: string; status: 'available' | 'unavailable'; source: string; asOf: string | null;
+  id: string; name: string; range?: StillRangeOptions; reason: string; status: 'available' | 'unavailable'; source: string; asOf: string | null;
   components: {poolId: string; pool: StillPoolCard; weightBps: number}[];
   legs: {poolAddress: string; weightBps: number}[];
 }
 export function buildStillBaskets(snapshot: Snapshot, now = Date.now()): StillBasket[] {
   const pools = listStillPools(snapshot, now);
-  return (['Steady', 'Busy', 'Spicy'] as const).map(name => {
-    const members = pools.filter(pool => pool.risk.label === name).slice(0, 2);
-    const available = members.length === 2;
-    let reason = !available ? 'Two current pools in this band are needed. Check again after the market data refreshes.' :
-      name === 'Steady' ? 'Two deeper pools with longer histories and no observed fee burst. Equal paper amounts; no stable-price or low-risk claim.' :
-      name === 'Busy' ? 'Two established pools outside the Steady screen. Equal paper amounts; compare both pre-flights before practising.' :
-      'Two pools with a short history, thin liquidity or a fee burst. Equal paper amounts; speculative practice only.';
-    if (available && members[0].pairedMint === members[1].pairedMint) reason += ' Both pools hold the same paired token; this does not diversify token exposure.';
-    return {id: name.toLowerCase(), name, reason, status: available ? 'available' : 'unavailable',
-      source: MARKET_SOURCE + ' + Still risk thresholds', asOf: members.length ? members.map(p => p.risk.asOf).sort()[0] : null,
-      components: available ? members.map(pool => ({poolId: pool.id, pool, weightBps: 5000})) : [],
-      legs: available ? members.map(pool => ({poolAddress: pool.address, weightBps: 5000})) : []};
+  const steady=pools.filter(p=>p.risk.label==='Steady'),busy=pools.filter(p=>p.risk.label==='Busy'),spicy=pools.filter(p=>p.risk.label==='Spicy');
+  const definitions=[
+    {id:'steady',name:'Calm start',reason:'Two Steady pools, wide Spot ranges.',members:steady.slice(0,2),count:2,range:{shape:'Spot' as const,floorPct:10,ceilingPct:10,holdMinutes:1440}},
+    {id:'busy',name:'Learn the busy ones',reason:'One Steady and one Busy pool, short holds.',members:[steady[0],busy[0]].filter(Boolean),count:2,range:{shape:'Spot' as const,floorPct:25,ceilingPct:0,holdMinutes:30}},
+    {id:'spicy',name:'See a bad day',reason:'One Spicy pool, small size, so you know what it looks like.',members:spicy.slice(0,1),count:1,range:{shape:'BidAsk' as const,floorPct:30,ceilingPct:0,holdMinutes:30}},
+  ];
+  return definitions.map(({members,count,...definition})=>{
+    const available=members.length===count,weightBps=10000/count;
+    const sameToken=members.length>1&&members.every(p=>p.pairedMint===members[0].pairedMint);
+    return {...definition,reason:definition.reason+(sameToken?' Both pools hold the same paired token; this does not diversify token exposure.':''),status:available?'available':'unavailable',source:MARKET_SOURCE+' + example Still mix rules',asOf:members.length?members.map(p=>p.risk.asOf).sort()[0]:null,
+      components:available?members.map(pool=>({poolId:pool.id,pool,weightBps})):[],legs:available?members.map(pool=>({poolAddress:pool.address,weightBps})):[]};
   });
 }
 
 export interface StillRange {
-  shape: 'BidAsk'; floorPriceSol: number; topPriceSol: number; binStep: number; binCount: number;
+  shape: 'Spot'|'BidAsk'|'Curve'; floorPriceSol: number; topPriceSol: number; binStep: number; binCount: number;
   depthFraction: number; bins: ResearchRangeBin[]; alignment: string; source: string; asOf: string; note: string;
 }
 export interface StillScenario {
@@ -139,6 +141,7 @@ export interface StillScenario {
   grossPnlSol: StillEvidence<number>; netValueSol: StillEvidence<number>; pnlSol: StillEvidence<number>; vsHoldingSol: StillEvidence<number>;
 }
 export interface StillPreflight {
+  checks?: StillCheck[]; options?: StillRangeOptions; transferFeeChangeable?: StillEvidence<boolean>;
   pool: StillPoolCard; poolAddress: string; name: string; sizeSol: number; fetchedAt: string;
   priceSol: StillEvidence<number>; range: StillRange | null;
   feeRateHourly: StillEvidence<number>; expectedFeesPerDaySol: StillEvidence<number>;
@@ -149,12 +152,12 @@ export interface StillPreflight {
   ledger: {priceSol: number | null; feeRateHourly: number | null; entryCostsSol: number | null; exitCostsSol: number | null; transferFeeBps: number | null; bins: ResearchRangeBin[] | null};
 }
 export interface StillPreflightInput {
-  pool: Pool; quotes?: ResearchQuote[]; safety?: {rpc: MintSafety}; rangeAnchor?: ResearchRangeAnchor;
+  pool: Pool; rug?: RugSafety; candles?: ResearchCandles; quotes?: ResearchQuote[]; safety?: {rpc: MintSafety}; rangeAnchor?: ResearchRangeAnchor;
 }
 /** Build only what observed inputs support. The inherited model's network default
  * is explicitly overridden for gross inventory arithmetic, and never presented as
  * a measured zero-cost transaction. Missing network evidence keeps all-in net null. */
-export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, now = Date.now()): StillPreflight {
+export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, now = Date.now(), options?: StillRangeOptions): StillPreflight {
   if (!positive(sizeSol) || sizeSol > 1000) throw new RangeError('Choose a paper amount greater than zero and no more than 1,000 SOL.');
   const pool = detail.pool, card = poolCard(pool, now), token = researchToken(pool), rpc = detail.safety?.rpc;
   const marketCurrent = supportedPool(pool, now), anchor = detail.rangeAnchor;
@@ -182,6 +185,20 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
       }
     } catch { /* Invalid or unrepresentable source inputs produce an unavailable range. */ }
   }
+  if(options && positive(mark) && positive(binStep) && token){
+    const requested=parseStillRangeOptions(options)!;
+    try {
+      const oneSided=requested.ceilingPct<=0, depth=oneSided?requested.floorPct/100:Math.max(requested.floorPct/100,requested.ceilingPct/(100+requested.ceilingPct));
+      const floor=defaultResearchFloor({priceSol:mark,binStep,preferredDepthFraction:depth,oneSided,maxSetupBins:69});
+      const built=buildResearchRange({sizeSol,priceSol:mark,floorPriceSol:floor.floorPriceSol,binStep,shape:requested.shape,oneSided,solIsBase:token.solX,maxSetupBins:69,networkSol:0,positionRentSol:0,transferFeeBps:null,...(native?{activeBinId:anchor!.activeBinId!,activeBinPriceSol:mark}:{})});
+      const retained=built.selected.bins.filter(b=>b.priceSol>=mark*(1-requested.floorPct/100)/(1+binStep/10000)&&b.priceSol<=mark*(1+requested.ceilingPct/100));
+      if(!retained.length||retained.length>69)throw Error('Range cannot be represented');
+      const principal=retained.reduce((sum,b)=>sum+b.sol+b.token*mark,0),scale=sizeSol/principal;
+      const bins=retained.map(b=>({...b,sol:b.sol*scale,token:b.token*scale,initialSol:b.initialSol*scale,initialPairedTokens:b.initialPairedTokens*scale}));
+      const bottom=Math.min(...bins.map(b=>b.priceSol)),top=Math.max(...bins.map(b=>b.priceSol));
+      range={shape:requested.shape,floorPriceSol:bottom,topPriceSol:top,binStep,binCount:bins.length,depthFraction:1-bottom/mark,bins,alignment:built.alignment,source:priceSol.source+' + Still paper range model',asOf:markAt,note:`${requested.shape==='Spot'?'Spot spreads evenly.':requested.shape==='Curve'?'Curve bunches near price.':'Bid-Ask puts more at the edges.'} ${oneSided?'SOL-only range below price.':'Two-sided paper inventory before token funding costs.'} Prices are aligned to the available grid; this paper demo caps the setup at 69 bins. The displayed floor and ceiling are the actual modelled range. ${native?'Native anchor verified.':'Native anchor unavailable; estimated grid.'} The floor is not a stop-loss.`};
+    }catch{range=null;}
+  }
   const rates = researchFeeRates(pool), hourly = marketCurrent && nonnegative(pool.ageHours) && pool.ageHours >= 1 && nonnegative(rates.h1) ? rates.h1 : null;
   const feeRateHourly = evidence(hourly, MARKET_SOURCE, pool.fetchedAt, 'Reported last-hour fees / current pool TVL. Pool-average fee density, not measured position earnings.');
   const expectedFeesPerDaySol = evidence(hourly === null ? null : sizeSol * hourly * 24, MODEL_SOURCE, pool.fetchedAt,
@@ -196,7 +213,7 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   const quoteData = quote?.economicEstimate && researchEconomicQuoteFresh(quote, now) ? quote.economicEstimate : quote;
   const exitValue = nonnegative(quoteData?.exitCostSol) ? quoteData!.exitCostSol! : null;
   const quoteAt = quoteData?.asOf ?? null;
-  const entryConversionSol = evidence(range ? 0 : null, 'Still SOL-only range allocation', range?.asOf ?? null, 'A SOL-only paper allocation buys no paired token at entry. This excludes unmeasured network fees and refundable account rent.');
+  const entryConversionSol = evidence(range && range.bins.every(b=>b.token===0) ? 0 : null, 'Still SOL-only range allocation', range?.asOf ?? null, 'A SOL-only paper allocation buys no paired token at entry. This excludes unmeasured network fees and refundable account rent.');
   const exitConversionSol = evidence(exitValue, 'Jupiter dated token-to-SOL quote', quoteAt,
     'Full-size reference conversion cost only. This is not an actual LP withdrawal quote, does not include network fees or additional withdrawal tax, and is not a future exit guarantee.');
   const networkCostSol = evidence<number>(null, 'Solana transaction fee simulation', null, 'No actual unsigned LP transaction has been simulated. Network and account setup costs are unavailable.');
@@ -223,21 +240,39 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   else if (policyCurrent && rpc?.transferFee?.configAuthority) verdict = {label: 'Skip', reason: 'The token transfer-fee authority can change the tax after entry.'};
   else if (hourly === 0) verdict = {label: 'Skip', reason: 'The last complete hour reports no pool fees, so there is no observed fee pace to compare with costs.'};
   else if (hourly !== null && exitValue !== null && sizeSol * hourly * 24 <= exitValue) verdict = {label: 'Skip', reason: 'Even the quoted conversion cost exceeds a full day at the current pool fee pace, before other costs.'};
-  return {pool: card, poolAddress: pool.address, name: pool.pair, sizeSol, fetchedAt: markAt, priceSol, range, feeRateHourly, expectedFeesPerDaySol,
+  const result: StillPreflight = {pool: card, poolAddress: pool.address, name: pool.pair, sizeSol, fetchedAt: markAt, priceSol, range, feeRateHourly, expectedFeesPerDaySol,
     transferFeeBps, entryCostSol, exitCostSol, entryConversionSol, exitConversionSol, networkCostSol, roundTripCostSol, scenarios, verdict, canOpen, missingEvidence,
     model: {kind: 'paper-monotonic-bin-model', note: 'Paper practice only. Fixed-price bins model a monotonic move; real partial fills, liquidity share and transaction execution are not reproduced. Missing costs keep net results unavailable.'},
     ledger: {priceSol: mark, feeRateHourly: hourly, entryCostsSol: null, exitCostsSol: null, transferFeeBps: bps, bins: range?.bins ?? null}};
+  result.options=options;
+  result.transferFeeChangeable=evidence(policyCurrent ? !!rpc!.transferFee?.configAuthority : null,'Solana RPC mint transfer-fee authority',rpc?.asOf||null,'Whether the observed fee-setting authority remains active.');
+  result.checks=stillChecks(result,detail,now);
+  // Stress scenarios describe consequences, not entry signals: a 50% fall is
+  // not itself a reason to reject every pool. Observed screening failures are.
+  const failed=result.checks.find(c=>!['half','drop20'].includes(c.id)&&c.status==='fail');
+  if(failed)result.verdict={label:'Skip',reason:failed.result};
+  result.missingEvidence=[...new Set([...result.missingEvidence,...result.checks.filter(c=>c.status==='unavailable').map(c=>c.label)])];
+  return result;
 }
 
 /** Fast path: pool snapshot and existing provider caches only. No user click waits
  * for a fanout of RPC/quote requests. An explicit detail refresh may enrich it. */
-export async function getStillPreflight(env: Env, poolAddress: string, sizeSol = 0.5): Promise<StillPreflight | null> {
+export async function getStillPreflight(env: Env, poolAddress: string, sizeSol = 0.5, options?: StillRangeOptions, live = false): Promise<StillPreflight | null> {
   const snapshot = await getSnapshot(env), pool = snapshot.pools.find(item => item.address === poolAddress || item.id === poolAddress);
   if (!pool || pool.venue !== 'meteora-dlmm' || !researchToken(pool)) return null;
+  if(live){
+    const context=researchReadContext(env),token=researchToken(pool)!;
+    const [freshPool,rpc,rug,candles]=await Promise.all([fetchMeteoraPool(pool.address).catch(()=>null),readMintSafety(token.mint,context),readRugSafety(token.mint,context),readResearchCandles(pool,context)]);
+    const current=freshPool&&researchToken(freshPool)?.mint===token.mint?freshPool:pool;
+    const anchor=await readResearchRangeAnchor(current,context,rpc,true);
+    const mark=anchor.status==='available'&&positive(anchor.activeBinPriceSol)&&anchor.asOf?{priceSol:anchor.activeBinPriceSol,asOf:anchor.asOf,source:'active-bin' as const}:null;
+    const quotes=await readResearchQuotes(current,context,rpc.decimals,mark,{sizes:[sizeSol],modes:['best'],freshOnly:true});
+    return buildStillPreflight({pool:current,quotes,safety:{rpc},rug,candles,rangeAnchor:anchor},sizeSol,Date.now(),options);
+  }
   const mint = researchToken(pool)!.mint;
   const rpc = await cachedMintSafety(mint, env);
   const quotes = await cachedResearchQuotes(pool, env, rpc.decimals);
-  return buildStillPreflight({pool, quotes, safety: {rpc}}, sizeSol);
+  return buildStillPreflight({pool, quotes, safety: {rpc}}, sizeSol,Date.now(),options);
 }
 export async function loadStillPreflight(pool: Pool, env: Env, sizeSol = 0.5, now = Date.now()): Promise<StillPreflight> {
   const detail: ResearchPoolDetail = await researchPool(pool, env);
@@ -265,7 +300,7 @@ export interface StillBasketPreflight {
 /** Aggregation never replaces an unavailable leg with zero. */
 export function combineStillBasketPreflight(basket: StillBasket, preflights: StillPreflight[], sizeSol: number): StillBasketPreflight {
   if (!positive(sizeSol) || sizeSol > 1000) throw new RangeError('Choose a paper amount greater than zero and no more than 1,000 SOL.');
-  const coherent = basket.status === 'available' && basket.legs.length >= 2 && basket.legs.length <= 3 &&
+  const coherent = basket.status === 'available' && basket.legs.length >= 1 && basket.legs.length <= 3 &&
     new Set(basket.legs.map(leg => leg.poolAddress)).size === basket.legs.length &&
     basket.legs.every(leg => Number.isInteger(leg.weightBps) && leg.weightBps > 0) &&
     basket.legs.reduce((sum, leg) => sum + leg.weightBps, 0) === 10_000;
@@ -280,7 +315,7 @@ export function combineStillBasketPreflight(basket: StillBasket, preflights: Sti
     const available = complete && values.every(value => value.status === 'available' && finite(value.value));
     return evidence(available ? values.reduce((total, value) => total + value.value!, 0) : null,
       'Sum of the displayed component evidence', values.length && values.every(value => value.asOf) ? values.map(value => value.asOf!).sort()[0] : null,
-      'Both component figures must be available. Each retains its own source and timestamp in the component pre-flight. This total is a paper model.');
+      'All component figures must be available. Each retains its own source and timestamp in the component pre-flight. This total is a paper model.');
   };
   const unknown = () => evidence<number>(null, 'Complete basket component evidence', null, 'A required component figure is unavailable.');
   const scenarios = [0.2, 0.5].map(dropFraction => {
@@ -298,16 +333,14 @@ export function combineStillBasketPreflight(basket: StillBasket, preflights: Sti
     entryCostSol: sum(item => item.entryCostSol), exitCostSol: sum(item => item.exitCostSol), roundTripCostSol: sum(item => item.roundTripCostSol), verdict,
     missingEvidence: !complete ? ['A current, complete basket allocation'] : [...new Set(components.flatMap(item => item.preflight.missingEvidence))]};
 }
-export async function getStillBasketPreflight(env: Env, basketId: string, sizeSol = 0.5): Promise<StillBasketPreflight | null> {
+export async function getStillBasketPreflight(env: Env, basketId: string, sizeSol = 0.5, live=false): Promise<StillBasketPreflight | null> {
   const basket = (await getStillBaskets(env)).find(item => item.id === basketId);
   if (!basket) return null;
   const preflights: StillPreflight[] = [];
   // Presets currently have two components. Hard cap protects against a bad cache or future unbounded definitions.
-  if (basket.status === 'available' && basket.legs.length >= 2 && basket.legs.length <= 3) {
-    for (const leg of basket.legs) {
-      const preflight = await getStillPreflight(env, leg.poolAddress, sizeSol * leg.weightBps / 10_000);
-      if (preflight) preflights.push(preflight);
-    }
+  if (basket.status === 'available' && basket.legs.length >= 1 && basket.legs.length <= 3) {
+    const reads=await Promise.all(basket.legs.map(leg=>getStillPreflight(env,leg.poolAddress,sizeSol*leg.weightBps/10_000,basket.range,live)));
+    for(const preflight of reads)if(preflight)preflights.push(preflight);
   }
   return combineStillBasketPreflight(basket, preflights, sizeSol);
 }

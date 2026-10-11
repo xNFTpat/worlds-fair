@@ -1,3 +1,4 @@
+import {parseStillRangeOptions} from './still-preflight-config';
 import type {Env} from './env';
 import {getSnapshot} from './refresh';
 import {listStillPools, buildStillBaskets, getStillPreflight, getStillBasketPreflight} from './still-preflight';
@@ -11,7 +12,7 @@ export async function stillDemoRoute(req: Request, env: Env): Promise<Response |
     if (url.pathname === '/api/still/pools' || url.pathname === '/api/baskets') {
       const snapshot = await getSnapshot(env);
       return json({paper: true, updatedAt: snapshot.updatedAt, ...(url.pathname === '/api/baskets'
-        ? {baskets: buildStillBaskets(snapshot)} : {pools: listStillPools(snapshot)})});
+        ? {baskets: buildStillBaskets(snapshot)} : {pools: listStillPools(snapshot),baskets:buildStillBaskets(snapshot)})});
     }
     const raw = url.searchParams.get('amountSol') ?? '0.5';
     if (!/^(?:0|[1-9]\d*)(?:\.\d{1,9})?$/.test(raw) || Number(raw) < 0.001 || Number(raw) > 10)
@@ -20,11 +21,12 @@ export async function stillDemoRoute(req: Request, env: Env): Promise<Response |
     if (url.pathname === '/api/still/preflight') {
       const address = url.searchParams.get('poolAddress') || '';
       if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return json({error: 'Choose a pool from the live list.'}, 400);
-      result = await getStillPreflight(env, address, Number(raw));
+      let options;try{options=parseStillRangeOptions(url.searchParams.has('range')?JSON.parse(url.searchParams.get('range')!):undefined);}catch{return json({error:'Choose a valid paper range and hold time.'},400);}
+      result = await getStillPreflight(env, address, Number(raw), options, true);
     } else {
       const id = url.searchParams.get('basketId') || '';
       if (!['steady', 'busy', 'spicy'].includes(id)) return json({error: 'Choose a current basket.'}, 400);
-      result = await getStillBasketPreflight(env, id, Number(raw));
+      result = await getStillBasketPreflight(env, id, Number(raw),true);
     }
     return result ? json(result) : json({error: 'This pool or basket is unavailable. Return to the list and choose a current one.'}, 404);
   } catch {

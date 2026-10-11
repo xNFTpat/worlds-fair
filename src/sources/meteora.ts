@@ -61,7 +61,25 @@ export async function fetchMeteora(venue:"meteora-dlmm"|"meteora-damm-v2"="meteo
   const data = [...new Map(good.flatMap(r => r.value).filter(p => p.is_blacklisted === false && Number(p.tvl) > 0).map(p => [p.address, p])).values()];
   const now = new Date().toISOString();
 
-  const pools = data.map((p): Pool => {
+  const pools = data.map(p => normaliseMeteoraPool(p, venue, now));
+  for(const p of pools)p.volumeSignal=volumeSignal(p);
+  return { pools, partial: good.length !== lists.length };
+}
+
+/** Same public source and normalisation as the catalogue, bounded to one exact pool. */
+export async function fetchMeteoraPool(address: string): Promise<Pool> {
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) throw Error('Invalid Meteora pool address');
+  const query = new URLSearchParams({page:'1',page_size:'1',filter_by:'pool_address='+address});
+  const response = await fetch(BASE+'/pools?'+query,{headers:{accept:'application/json'},signal:AbortSignal.timeout(6000)});
+  if (!response.ok) throw Error('Meteora pool unavailable');
+  const body = await response.json() as RawResponse;
+  const raw = body.data?.find(p=>p.address===address && p.is_blacklisted===false);
+  if (!raw) throw Error('Exact Meteora pool unavailable');
+  return normaliseMeteoraPool(raw,'meteora-dlmm',new Date().toISOString());
+}
+function normaliseMeteoraPool(p:RawPool,venue:'meteora-dlmm'|'meteora-damm-v2',now:string):Pool {
+  const damm=venue==='meteora-damm-v2';
+
     const tvl = num(p.tvl);
     const fees = num(p.fees?.["24h"]);
     const baseFeePct = num(p.pool_config?.base_fee_pct);
@@ -105,7 +123,5 @@ export async function fetchMeteora(venue:"meteora-dlmm"|"meteora-damm-v2"="meteo
       poolConfig: {concentrated:typeof p.pool_config?.concentrated_liquidity==="boolean"?p.pool_config.concentrated_liquidity:null,feeSchedulerActive:typeof p.pool_config?.is_fee_scheduler_active==="boolean"?p.pool_config.is_fee_scheduler_active:null,compoundingFeePct:num(p.pool_config?.compounding_fee_pct),launchpad:p.launchpad||null,binStep:num(p.pool_config?.bin_step),baseFee:pct(p.pool_config?.base_fee_pct),dynamicFee:pct(p.dynamic_fee_pct)},
       activity: { volume30m:num(p.volume?.["30m"]), volume4h:num(p.volume?.["4h"]), volume12h:num(p.volume?.["12h"]), fees30m: num(p.fees?.["30m"]), fees1h: num(p.fees?.["1h"]), fees4h: num(p.fees?.["4h"]), fees12h:num(p.fees?.["12h"]), volume1h: num(p.volume?.["1h"]) },
     };
-  });
-  for(const p of pools)p.volumeSignal=volumeSignal(p);
-  return { pools, partial: good.length !== lists.length };
+
 }

@@ -228,7 +228,7 @@ export async function cachedResearchQuotes(pool:Pool,env:Env,decimals:number|nul
  const token=researchToken(pool);
  return await Promise.all([.5,1].flatMap(size=>(['best','dlmm'] as const).map(async mode=>await economicQuote(pool,env,size,mode)||quoteResult(pool,size,mode,token?await cachedResearchRead<QuotePair>(env,quoteName(token.mint,size,mode)):unknown('SOL-pair quotes are unsupported for this pool.','unsupported'),decimals))));
 }
-export async function readResearchQuotes(pool:Pool,context:ResearchReadContext,decimals:number|null=null,quoteMark?:ResearchQuoteMark|null):Promise<ResearchQuote[]>{
+export async function readResearchQuotes(pool:Pool,context:ResearchReadContext,decimals:number|null=null,quoteMark?:ResearchQuoteMark|null,selection?:{sizes:number[];modes:('best'|'dlmm')[];freshOnly?:boolean}):Promise<ResearchQuote[]>{
  if(quoteMark!==undefined){
   const token=researchToken(pool),markAt=Date.parse(quoteMark?.asOf||''),markGood=quoteMark?.source==='active-bin'&&positive(quoteMark.priceSol)&&Number.isFinite(markAt)&&markAt<=Date.now()&&Date.now()-markAt<=RESEARCH_READ_LIMITS.anchorTtlMs;
   // Production explicitly passes a verified active-bin reference or null. A
@@ -237,8 +237,8 @@ export async function readResearchQuotes(pool:Pool,context:ResearchReadContext,d
  }
  const token=researchToken(pool);
  if(!token)return cachedResearchQuotes(pool,context.env,decimals);
- return await Promise.all([.5,1].flatMap(size=>(['best','dlmm'] as const).map(async mode=>{
-  const economic=await economicQuote(pool,context.env,size,mode);if(economic&&researchEconomicQuoteFresh(economic)){context.cacheHits++;return economic;}
+ return await Promise.all((selection?.sizes||[.5,1]).flatMap(size=>(selection?.modes||(['best','dlmm'] as const)).map(async mode=>{
+  const economic=await economicQuote(pool,context.env,size,mode);if(!selection?.freshOnly&&economic&&researchEconomicQuoteFresh(economic)){context.cacheHits++;return economic;}
   const retain=(output:ResearchQuote):ResearchQuote=>economic?{...economic,status:output.status,roundTripCostSol:null,exitCostSol:null,returnedSol:null,note:output.note+' Last good dated economic estimate retained.',economicEstimate:{...economic.economicEstimate!,status:'stale',retained:true,cached:true,note:'Last good dated economic estimate retained while refresh is unavailable. '+economic.economicEstimate!.note}}:output;
   const name=quoteName(token.mint,size,mode),cached=await cachedResearchRead<QuotePair>(context.env,name);
   if(cached.status==='available'){const pumpFees=cached.data?.sell?await readPumpSellFees(pool,cached.data.sell,context):new Map<string,PumpFee>(),output=quoteResult(pool,size,mode,cached,decimals,pumpFees);if(output.status==='quoted')return rememberEconomicQuote(pool,context.env,output,decimals);}

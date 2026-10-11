@@ -7,7 +7,8 @@ Product: **Still — Clarity before capital.** Public repository: [xNFTpat/world
 Current freeze: **Monday 12 October 2026 at 15:00 UK**, replacing the earlier deadline below. Scope remains the standalone public `worldsfair` branch and `lp-terminal-worldsfair` Worker, paper only.
 
 - [x] Stage (a): Claude Home and onboarding copy, Still ring, exact palette, Home/Pools/Positions/Follow/Grow navigation, footer-only Research, persisted pace preferences with blocked-storage fallback. Browser checked at 375px and 1280px.
-- [ ] Stage (b): live sourced pre-flight checks, threshold config, range controls, starter mixes, individual positions and polished states.
+- [x] Stage (b): live Meteora/Jupiter/RPC pre-flight checks, one threshold config, editable ranges, renamed starter mixes and individual positions. Full 67-script suite, TypeScript and three Worker runtimes passed; mobile custom Spot open/close confirmed without horizontal overflow.
+- [ ] Camera caveat: all-in transaction costs, net proceeds and fully classified holder concentration can remain unavailable. Do not script a guaranteed “Worth a look” or imply a Jupiter conversion quote is an all-in execution cost. Gross paper inventory settles separately.
 - [ ] Stage (c): seven forward-only paper strategies, source-post attribution, follow confirmations and custom bot controls.
 - [ ] Stage (d): paper profit allocations into pools, Cesto baskets and Backyard, with quote availability and atomic accounting.
 - [ ] Stage (e): eight lessons using the supplied copy, diagrams and contextual links.

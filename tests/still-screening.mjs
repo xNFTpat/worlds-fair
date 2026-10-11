@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const dir=await mkdtemp(join(tmpdir(),'still-screening-'));
+try{
+ await build({stdin:{contents:"export * from './src/still-preflight'; export * from './src/still-preflight-config';",resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',outfile:join(dir,'test.mjs')});
+ const {buildStillPreflight,parseStillRangeOptions}=await import(pathToFileURL(join(dir,'test.mjs')));
+ const now=Date.UTC(2026,9,11,12),at=new Date(now).toISOString(),mint='synthetic-mint';
+ const pool={id:'solana:synthetic',address:'synthetic',chain:'solana',venue:'meteora-dlmm',pair:'TEST/SOL',base:{address:mint,symbol:'TEST'},quote:{address:'So11111111111111111111111111111111111111112',symbol:'SOL'},tvlUsd:100000,priceQuote:.01,priceUsd:1,quotePriceUsd:100,ageHours:200,fetchedAt:at,activity:{fees1h:500},fees24hUsd:12000,poolConfig:{binStep:100},tags:[]};
+ const rpc={mint,status:'available',asOf:at,transferFeeStatus:'none',transferFee:null};
+ const detail={pool,safety:{rpc}};
+ const check=(d,id)=>buildStillPreflight(d,.5,now).checks.find(c=>c.id===id);
+ for(const [fees,status] of [[500,'pass'],[499,'caution'],[150,'caution'],[149,'fail'],[0,'fail']])assert.equal(check({...detail,pool:{...pool,activity:{fees1h:fees}}},'fees').status,status);
+ assert.equal(check(detail,'tax').status,'pass');
+ assert.equal(check({...detail,safety:{rpc:{...rpc,transferFeeStatus:'known',transferFee:{bps:0,maximumRaw:'100',configAuthority:'authority'}}}},'tax').status,'fail','Mutable zero tax still fails');
+ for(const [bps,status] of [[200,'caution'],[201,'fail']])assert.equal(check({...detail,safety:{rpc:{...rpc,transferFeeStatus:'known',transferFee:{bps,maximumRaw:'100',configAuthority:null}}}},'tax').status,status);
+ assert.equal(check(detail,'holders').status,'unavailable');
+ const holder={...rpc,holderSample:{status:'available',asOf:at,mint,supplyRaw:'1000',accounts:[{address:'pool-vault',owner:'pool-owner',amountRaw:'700'},{address:'retail',owner:'whale',amountRaw:'200'}],complete:false}};
+ const rug={mint,status:'available',asOf:at,holderExclusions:{mint,status:'available',asOf:at,addresses:['pool-vault']}};
+ assert.equal(check({...detail,safety:{rpc:holder},rug},'holders').status,'fail','Excludes pool vault but retains real whale');
+ holder.holderSample.accounts[1].amountRaw='100';
+ assert.equal(check({...detail,safety:{rpc:holder},rug},'holders').status,'unavailable','A low partial sample never passes');
+ const end=now/1000,candles={status:'available',asOf:at,note:'Meteora',candles:Array.from({length:24},(_,i)=>({t:end-(24-i)*3600,o:.01,c:.01,h:.011,l:.009,v:100}))};
+ assert.equal(check({...detail,candles},'spike').status,'pass');
+ assert.equal(check({...detail,candles:{...candles,candles:candles.candles.slice(0,23)}},'spike').status,'unavailable','Missing latest hour stays unknown');
+ const range={shape:'Spot',floorPct:10,ceilingPct:10,holdMinutes:30};
+ const custom=buildStillPreflight({...detail,candles},.5,now,range);
+ assert.equal(custom.range.shape,'Spot');assert(custom.range.topPriceSol>custom.priceSol.value);assert(custom.range.bins.length<=69);
+ assert(Math.abs(custom.range.bins.reduce((sum,b)=>sum+b.sol+b.token*.01,0)-.5)<1e-10,'Edited range conserves principal');
+ assert.equal(custom.entryConversionSol.value,null,'Two-sided funding is not claimed to cost zero');
+ assert.equal(custom.checks.find(c=>c.id==='floor').status,'fail');
+ assert.equal(custom.ledger.entryCostsSol,null);assert.equal(custom.ledger.exitCostsSol,null);
+ for(const patch of [{floorPct:NaN},{ceilingPct:-20},{shape:'custom'},{holdMinutes:0},{holdMinutes:3.5},{extra:'forged'}])assert.throws(()=>parseStillRangeOptions({...range,...patch}));
+ console.log('Still screening: threshold edges, mutable tax, excluded pools, partial holders, candle gaps, range funding and unavailable net passed.');
+}finally{await rm(dir,{recursive:true,force:true});}

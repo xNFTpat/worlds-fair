@@ -1,3 +1,4 @@
+import {parseStillRangeOptions, type StillRangeOptions} from './still-preflight-config';
 import type {Env} from './env';
 import {inventoryAtPrice} from './research-range';
 import {paperLamports, LAMPORTS_PER_SOL} from './worldsfair-paper-math';
@@ -197,11 +198,12 @@ export class StillPaperLedger {
           if (typeof input.positionId !== 'string' || !/^paper:[a-zA-Z0-9-]{8,80}$/.test(input.positionId)) throw new StillPaperError('Choose a saved paper position.');
           normalized = {positionId: input.positionId};
         } else if (action === 'still-open') {
-          inputFields(input, ['requestId', 'confirmed', 'poolAddress', 'amountSol']);
-          normalized = {poolAddress: address(input.poolAddress), amountLamports: amount(input.amountSol)};
+          inputFields(input, ['requestId', 'confirmed', 'poolAddress', 'amountSol', 'range']);
+          let range;try{range=parseStillRangeOptions(input.range);}catch(error){throw new StillPaperError((error as Error).message);}
+          normalized = {poolAddress: address(input.poolAddress), amountLamports: amount(input.amountSol), ...(range?{range}:{})};
         } else {
           inputFields(input, ['requestId', 'confirmed', 'basketId', 'poolAddresses', 'amountSol']);
-          if (typeof input.basketId !== 'string' || !/^[a-z0-9-]{1,40}$/.test(input.basketId) || !Array.isArray(input.poolAddresses) || input.poolAddresses.length < 2 || input.poolAddresses.length > 3)
+          if (typeof input.basketId !== 'string' || !/^[a-z0-9-]{1,40}$/.test(input.basketId) || !Array.isArray(input.poolAddresses) || input.poolAddresses.length < 1 || input.poolAddresses.length > 3)
             throw new StillPaperError('Review a complete basket before opening it.');
           normalized = {basketId: input.basketId, poolAddresses: input.poolAddresses.map(address), amountLamports: amount(input.amountSol)};
         }
@@ -278,12 +280,13 @@ export class StillPaperLedger {
     });
   }
   private async prepare(action: string, input: Record<string, unknown>): Promise<StillPaperPosition[]> {
+    let mixRange: StillRangeOptions|undefined;
     let legs: {poolAddress: string; weightBps: number}[], basketId: string | null = null, basketName: string | null = null;
     if (action === 'still-open') legs = [{poolAddress: input.poolAddress as string, weightBps: 10000}];
     else {
       const basket = (await this.deps.baskets(this.env)).find(basket => basket.id === input.basketId);
-      if (!basket || !Array.isArray(basket.legs) || basket.legs.length < 2 || basket.legs.length > 3) throw new StillPaperError('This basket does not yet have enough live pools. No positions were opened.', 409, 'still_basket_unavailable');
-      legs = basket.legs; basketId = basket.id; basketName = basket.name;
+      if (!basket || !Array.isArray(basket.legs) || basket.legs.length < 1 || basket.legs.length > 3) throw new StillPaperError('This basket does not yet have enough live pools. No positions were opened.', 409, 'still_basket_unavailable');
+      legs = basket.legs; mixRange=basket.range; basketId = basket.id; basketName = basket.name;
       if (JSON.stringify(legs.map(leg => leg.poolAddress)) !== JSON.stringify(input.poolAddresses)) throw new StillPaperError('The basket pools changed. Review its current pre-flight before confirming.', 409, 'still_basket_changed');
     }
     if (new Set(legs.map(leg => leg.poolAddress)).size !== legs.length || legs.some(leg => !Number.isSafeInteger(leg.weightBps) || leg.weightBps < 1) || legs.reduce((sum, leg) => sum + leg.weightBps, 0) !== 10000)
@@ -291,7 +294,7 @@ export class StillPaperLedger {
     const total = input.amountLamports as number; let remaining = total;
     const sizes = legs.map((leg, index) => {const size = index === legs.length - 1 ? remaining : Math.floor(total * leg.weightBps / 10000); remaining -= size; return size;});
     if (sizes.some(size => size < 1)) throw new StillPaperError('The paper amount is too small for this split.');
-    const results = await Promise.all(legs.map((leg, index) => this.deps.preflight(this.env, leg.poolAddress, sizes[index] / LAMPORTS_PER_SOL)));
+    const results = await Promise.all(legs.map((leg, index) => this.deps.preflight(this.env, leg.poolAddress, sizes[index] / LAMPORTS_PER_SOL,(input.range as StillRangeOptions|undefined)||mixRange)));
     const now = this.deps.now(), at = new Date(now).toISOString();
     return results.map((result, index) => {
       const leg = legs[index], size = sizes[index], ledger = result?.ledger;

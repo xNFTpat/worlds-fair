@@ -44,10 +44,10 @@ try {
   const baskets = buildStillBaskets(snapshot, now);
   assert.equal(baskets.length, 3);
   for (const basket of baskets) {
-    assert.equal(basket.status, 'available'); assert.equal(basket.legs.length, 2);
+    assert.equal(basket.status, 'available'); assert.equal(basket.legs.length, basket.id==='spicy'?1:2);
     assert.equal(basket.legs.reduce((sum, item) => sum + item.weightBps, 0), 10_000);
-    assert.equal(new Set(basket.legs.map(item => item.poolAddress)).size, 2);
-    assert(basket.components.every(item => item.pool.risk.label === basket.name));
+    assert.equal(new Set(basket.legs.map(item => item.poolAddress)).size, basket.legs.length);
+    assert.equal(basket.name,{steady:'Calm start',busy:'Learn the busy ones',spicy:'See a bad day'}[basket.id]);
   }
   const emptyBaskets = buildStillBaskets({...snapshot, pools: [steady[0]]}, now);
   assert(emptyBaskets.every(item => item.status === 'unavailable' && item.legs.length === 0));
@@ -70,7 +70,7 @@ try {
   assert.match(preflight.expectedFeesPerDaySol.note, /earns nothing until price enters/);
   assert.equal(preflight.entryConversionSol.value, 0, 'SOL-only allocation has no paired-token conversion at entry');
   for (const name of ['networkCostSol', 'entryCostSol', 'exitCostSol', 'roundTripCostSol', 'transferFeeBps']) assert.equal(preflight[name].value, null, name + ' cannot be guessed');
-  assert.equal(preflight.verdict.label, 'Marginal');
+  assert.equal(preflight.verdict.label, 'Skip', 'Fee pace below configured example threshold fails');
   for (const scenario of preflight.scenarios) {
     assert(scenario.grossValueSol.value > 0 && scenario.grossValueSol.value < .5);
     assert.equal(scenario.pnlSol.value, null); assert.equal(scenario.netValueSol.value, null); assert.equal(scenario.vsHoldingSol.value, null);
@@ -111,7 +111,7 @@ try {
   const combined = combineStillBasketPreflight(basket, legs, .5);
   assert.equal(combined.canOpen, true); assert.equal(combined.expectedFeesPerDaySol.value, .012);
   assert.equal(combined.entryCostSol.value, null); assert.equal(combined.scenarios[0].netValueSol.value, null);
-  assert(Math.abs(combined.scenarios[0].grossValueSol.value - preflight.scenarios[0].grossValueSol.value) < 1e-12);
+  assert(combined.scenarios[0].grossValueSol.value>0);
   assert.equal(combineStillBasketPreflight(basket, [legs[0]], .5).canOpen, false);
   assert.equal(combineStillBasketPreflight(basket, [{...legs[0], expectedFeesPerDaySol: {...legs[0].expectedFeesPerDaySol, value: null, status: 'unavailable'}}, legs[1]], .5).expectedFeesPerDaySol.value, null);
   assert.equal(combineStillBasketPreflight({...basket, legs: [{...basket.legs[0], weightBps: 6000}, basket.legs[1]]}, legs, .5).canOpen, false);

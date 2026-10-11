@@ -24,7 +24,9 @@ const accountA = 'a'.repeat(64), accountB = 'b'.repeat(64);
 const storage = new Storage(); let queue = Promise.resolve();
 const ctx = {storage, blockConcurrencyWhile(fn) {const result = queue.then(fn); queue = result.catch(() => {}); return result;}};
 const observation = poolAddress => ({poolAddress, name: 'TEST/SOL', priceSol: 1, fetchedAt: new Date(now).toISOString(), feeRateHourly: .002, feeRateAsOf: new Date(now).toISOString(), source: 'Synthetic test pool'});
-const preflight = async (_env, poolAddress, amountSol) => {
+let receivedRange;
+const preflight = async (_env, poolAddress, amountSol, range) => {
+  receivedRange=range;
   if (unavailablePool === poolAddress) return null;
   const asOf = new Date(now).toISOString();
   const bins = [.6, .8, .95].map(priceSol => ({priceSol, sol: amountSol / 3 * (invalidFunding ? 2 : 1), token: 0}));
@@ -171,6 +173,16 @@ const oldView = await call('still-account');
 assert.equal(oldView.body.account.positions.find(p => p.status === 'open').mark.grossPnlSol, null);
 assert.notEqual(oldView.body.account.positions.find(p => p.status === 'closed').mark.grossPnlSol, null, 'Closed observations remain historical records');
 now = originalNow;
+
+// A confirmed custom range reaches the model; replay cannot silently change the shape.
+const customRange={shape:'Spot',floorPct:10,ceilingPct:10,holdMinutes:60};
+const customOpen={...open('custom-range-001'),range:customRange};
+const customAccount='d'.repeat(64);
+assert.equal((await call('still-open',customOpen,customAccount)).status,200);
+assert.deepEqual(receivedRange,customRange);
+assert.equal((await call('still-open',customOpen,customAccount)).body.account.balanceSol,9.5);
+assert.equal((await call('still-open',{...customOpen,range:{...customRange,shape:'Curve'}},customAccount)).status,409);
+assert.equal((await call('still-open',{...open('bad-range-001'),range:{...customRange,floorPct:NaN}},customAccount)).status,400);
 
 // Public route keeps existing HttpOnly session and strict same-origin mutation checks.
 let forwarded;
