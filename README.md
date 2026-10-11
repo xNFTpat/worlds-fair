@@ -113,3 +113,18 @@ Still builds on the owner's existing **private LP Terminal**. This public reposi
 In the private source repository, both provenance tags point to `bccf1bb049dc58381a60b87356bde729a6b8fd06` (4 September 2026). Later working source lacked matching Git history. Its research, range mathematics, market integrations and strategy foundation are disclosed as **inherited**, and the available history cannot establish their exact relationship to the **14 September 2026, 14:00 UK** cutoff.
 
 New work is identified by the **5 October** task records and **9 October guided-demo changes** in [WORLDSFAIR_CHANGELOG.md](WORLDSFAIR_CHANGELOG.md). Earlier task SHAs refer to the private development repository, not public commits in this fresh export. No historical commits or public baseline tags have been fabricated.
+
+
+## Follow strategy attribution
+
+Seven new paper strategies are declared in `src/still-strategies.ts`. They use the same isolated guided paper ledger and range model as manual positions, with a Durable Object alarm, not the old research fleet’s history. Following explicitly authorises future paper entries and planned closes from the same 10-SOL practice balance. Each run has its own start time; no historical trades are copied or backfilled. Custom bots run on the same engine. Each run has at most one open position; the demo retains at most 40 positions and ten runs per browser. The shared runner processes eight active journals per minute, with a 128-journal capacity; checks can be delayed. A planned hold is checked against observations, not guaranteed execution time. Missing fee intervals and all-in costs remain unavailable.
+
+Source posts were located through the [LP Army strategy library](https://www.lparmy.com/strategies) on 11 October 2026. Exact thresholds and hold settings are Still examples supplied for this build, not a claim to reproduce the creators’ current trading. No creator return is a Still result.
+
+- TODO(permission): [@molusol — Heart attack inspiration](https://x.com/molusol/status/1966094407045886009).
+- TODO(permission): [@razzaer — Spot-range inspiration](https://x.com/razzaer/status/1974613647704887505).
+- TODO(permission): [@Eyyyys — public DLMM article](https://x.com/Eyyyys/status/2099817371372560521). Article title and source indexed by LP Army; full X article retrieval was unavailable.
+- TODO(permission): [@Jaypee_Sol — Bid-Ask explainer](https://x.com/Jaypee_Sol/status/1987773963619999966).
+- TODO(permission): [@VladimirKovacs — beginner LP checklist](https://x.com/VladimirKovacs/status/2104497731939033572).
+
+Every creator card discloses the inspiration and non-affiliation, and links a removal-request issue. Pat’s Overnight patience and Still’s Steady drip are house examples. No permission request has been sent on the user’s behalf.

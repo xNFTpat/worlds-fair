@@ -1,3 +1,6 @@
+import {getSnapshot} from './refresh';
+import {listStillPools} from './still-preflight';
+import {STILL_STRATEGIES,parseStillBot,botRange,strategySignal,type StillFollowRun} from './still-strategies';
 import {parseStillRangeOptions, type StillRangeOptions} from './still-preflight-config';
 import type {Env} from './env';
 import {inventoryAtPrice} from './research-range';
@@ -29,6 +32,7 @@ export interface StillPaperMark {
   distanceToFloorPct: number | null; unavailableReasons: string[];
 }
 export interface StillPaperPosition {
+  runId?:string; strategyName?:string; review?:string;
   id: string; positionAddress: string; poolAddress: string; name: string; basketId: string | null; basketName: string | null;
   status: 'open' | 'closed'; openedAt: string; closedAt: string | null;
   amountLamports: number; amountSol: number; entryPriceSol: number; entryAsOf: string;
@@ -42,10 +46,12 @@ export interface StillPaperAccount {
   version: 1; revision: number; seededLamports: number; balanceLamports: number;
   positions: StillPaperPosition[]; createdAt: string; updatedAt: string;
   latestBasket?: StillBasketProof;
+  runs?:StillFollowRun[];
   actionCount: number; activityWindow: {at: number; count: number};
 }
 interface Receipt {requestId: string; action: string; fingerprint: string; at: string; positionIds: string[]; amountSol: number; settledSol?: number; settlementNote: string; basket?: StillBasketEvidence}
 export interface StillPaperProviders {
+  snapshot:typeof getSnapshot;
   preflight: typeof getStillPreflight; baskets: typeof getStillBaskets; mark: typeof getStillPoolMark;
   now: () => number; id: () => string;
 }
@@ -159,7 +165,7 @@ export class StillPaperLedger {
   private deps: StillPaperProviders;
   private preparing = new Map<string, {fingerprint: string; promise: Promise<Response>}>();
   constructor(private ctx: DurableObjectState, private env: Env, deps: Partial<StillPaperProviders> = {}) {
-    this.deps = {preflight: getStillPreflight, baskets: getStillBaskets, mark: getStillPoolMark, now: Date.now, id: () => crypto.randomUUID(), ...deps};
+    this.deps = {snapshot:getSnapshot,preflight: getStillPreflight, baskets: getStillBaskets, mark: getStillPoolMark, now: Date.now, id: () => crypto.randomUUID(), ...deps};
   }
   private async lock<T>(fn: () => Promise<T>): Promise<T> {
     const result = await this.ctx.blockConcurrencyWhile(async () => {
@@ -171,7 +177,7 @@ export class StillPaperLedger {
   private async read(account: string) {
     return await this.ctx.storage.get<StillPaperAccount>(accountKey(account)) || initial(this.deps.now());
   }
-  private result(account: StillPaperAccount, receipt?: Receipt) {return json({paper: true, account: stillAccountView(account, this.deps.now()), ...(receipt ? {receipt} : {})});}
+  private result(account: StillPaperAccount, receipt?: Receipt) {return json({paper: true, strategies:STILL_STRATEGIES, account: stillAccountView(account, this.deps.now()), ...(receipt ? {receipt} : {})});}
   private async saved(account: string, id: string, fingerprint: string) {
     const receipt = await this.ctx.storage.get<Receipt>(receiptKey(account, id));
     if (!receipt) return null;
@@ -181,6 +187,7 @@ export class StillPaperLedger {
   async handle(account: string, action: string, input: Record<string, unknown> = {}): Promise<Response> {
     try {
       if (!/^[a-f0-9]{64}$/.test(account)) throw new StillPaperError('Invalid paper session.', 401);
+      if(['still-follow','still-unfollow','still-bot'].includes(action))return await this.follow(account,action,input);
       if (action === 'still-account') return this.lock(async () => {
         const state = await this.read(account);
         if (!await this.ctx.storage.get(accountKey(account))) await this.ctx.storage.put(accountKey(account), state);
@@ -321,4 +328,108 @@ export class StillPaperLedger {
         feeRateAsOf: result.feeRateHourly.asOf, source: result.priceSol.source}, now);
     });
   }
+  /** Durable alarm only; never exposed as an unauthenticated public mutation. */
+  async alarm() {
+    const index=await this.ctx.storage.get<string[]>('still:active-runs')||[];
+    if(!index.length)return;
+    await this.ctx.storage.setAlarm(this.deps.now()+60000);
+    const offset=(await this.ctx.storage.get<number>('still:run-cursor')||0)%index.length;
+    const selected=[...index.slice(offset),...index.slice(0,offset)].slice(0,8);
+    for(const account of selected)try{await this.tick(account);}catch{/* A later alarm retries; a failed read never earns paper fees. */}
+    await this.ctx.storage.put('still:run-cursor',(offset+selected.length)%index.length);
+  }
+  private async follow(account:string,action:string,input:Record<string,unknown>) {
+    const id=requestId(input);
+    if(input.confirmed!==true)throw new StillPaperError('Review and confirm this paper action first.');
+    inputFields(input,action==='still-bot'?['requestId','confirmed','bot']:action==='still-follow'?['requestId','confirmed','strategyId']:['requestId','confirmed','runId']);
+    let configuration:StillFollowRun['bot']|undefined,strategy:typeof STILL_STRATEGIES[number]|undefined;
+    if(action==='still-bot'){try{configuration=parseStillBot(input.bot);}catch(error){throw new StillPaperError((error as Error).message);}}
+    if(action==='still-follow'){strategy=STILL_STRATEGIES.find(s=>s.id===input.strategyId);if(!strategy)throw new StillPaperError('Choose a current paper strategy.');configuration=strategy.bot;}
+    if(action==='still-unfollow'&&(typeof input.runId!=='string'||!/^run:[a-zA-Z0-9-]{8,80}$/.test(input.runId)))throw new StillPaperError('Choose a saved paper run.');
+    const fingerprint=JSON.stringify({action,...(configuration?{bot:configuration,strategyId:strategy?.id||null}:{runId:input.runId})});
+    return this.lock(async()=>{
+      const saved=await this.saved(account,id,fingerprint);if(saved)return saved;
+      const state=await this.read(account),now=this.deps.now(),at=new Date(now).toISOString();takeRate(state,now);
+      if(state.actionCount>=MAX_RECEIPTS)throw new StillPaperError('This browser has reached its demo action limit.',409);
+      state.runs??=[];
+      if(action==='still-unfollow'){
+        const run=state.runs.find(r=>r.id===input.runId);if(!run)throw new StillPaperError('This run is not in your paper journal.',404);
+        run.active=false;run.note='Unfollowed. Existing positions keep their planned paper close; no new entries.';
+      }else{
+        if(state.runs.length>=10)throw new StillPaperError('This demo supports ten saved paper runs. Existing results are retained.',409);
+        if(strategy&&state.runs.some(r=>r.active&&r.strategyId===strategy.id))throw new StillPaperError('You are already following this strategy.',409);
+        state.runs.push({id:'run:'+this.deps.id(),strategyId:strategy?.id||null,bot:configuration!,mode:strategy?.mode,startedAt:at,active:true,lastCheckAt:null,note:'Waiting for the first fresh market check.',memory:{}});
+      }
+      const active=await this.ctx.storage.get<string[]>('still:active-runs')||[];
+      if(!active.includes(account)){if(active.length>=128)throw new StillPaperError('The paper runner is at capacity. Try again later.',503);active.push(account);}
+      // Schedule before commit: on a scheduling failure no follow is reported as saved.
+      await this.ctx.storage.setAlarm(now+1000);
+      state.revision++;state.actionCount++;state.updatedAt=at;validateStored(state);
+      const receipt:Receipt={requestId:id,action,fingerprint,at,positionIds:[],amountSol:0,settlementNote:STILL_SETTLEMENT_NOTE};
+      await this.ctx.storage.put({[accountKey(account)]:state,[receiptKey(account,id)]:receipt,'still:active-runs':active});
+      return this.result(state,receipt);
+    });
+  }
+  async tick(account:string) {
+    const original=await this.read(account);let now=this.deps.now();
+    if(!original.runs?.length||original.runs.every(r=>r.lastCheckAt&&now-Date.parse(r.lastCheckAt)<55000))return;
+    const snapshot=await this.deps.snapshot(this.env),next=structuredClone(original);let at=new Date(now).toISOString();
+    now=this.deps.now();
+    const candidates=listStillPools(snapshot,now);
+    const marks=new Map<string,Awaited<ReturnType<typeof getStillPoolMark>>>();
+    const poolsToRead=[...new Set([...next.positions.filter(p=>p.status==='open'&&p.runId).map(p=>p.poolAddress),...candidates.map(p=>p.address)])];
+    await Promise.all(poolsToRead.map(async address=>{try{marks.set(address,await this.deps.mark(this.env,address));}catch{marks.set(address,null);}}));
+    now=this.deps.now();at=new Date(now).toISOString();
+    for(const run of next.runs!){
+      run.lastCheckAt=at;
+      const open=next.positions.filter(p=>p.runId===run.id&&p.status==='open');
+      if(open.length){
+        for(const position of open){
+          const marked=markStillPosition(position,marks.get(position.poolAddress)||null,now);
+          Object.assign(position,marked);
+          const due=run.mode==='steady'?position.mark.inRange===false:now-Date.parse(position.openedAt)>=run.bot.holdMinutes*60000;
+          if(due&&position.mark.grossValueSol!==null&&fresh(position.mark.asOf,now)){
+            const settlement=Math.floor(position.mark.grossValueSol*LAMPORTS_PER_SOL);
+            if(Number.isSafeInteger(settlement)&&settlement>=0&&Number.isSafeInteger(next.balanceLamports+settlement)){
+              position.status='closed';position.closedAt=at;position.settledLamports=settlement;
+              position.review=run.mode==='steady'?'Closed at the first observed range exit.':'Closed at the first available observation after the planned hold.';
+              next.balanceLamports+=settlement;run.note=position.review+' Net costs remain unavailable where not measured.';
+            }
+          }else run.note=due?'Planned close is waiting for a fresh price.':'Watching the saved paper position.';
+        }
+        continue; // A close and re-entry never happen on the same scan.
+      }
+      if(!run.active)continue;
+      if(next.positions.length>=MAX_POSITIONS){run.note='Journal full. New entries paused; saved results retained.';run.active=false;continue;}
+      if(run.lastEntryAt&&now-Date.parse(run.lastEntryAt)<Math.max(300000,run.bot.holdMinutes*60000)){run.note='Waiting between paper entries.';continue;}
+      let chosen:string|null=null;
+      const memory:StillFollowRun['memory']={};
+      for(const candidate of candidates){
+        const pool=snapshot.pools.find(p=>p.address===candidate.address),mark=marks.get(candidate.address);
+        if(!pool||!mark?.priceSol||!fresh(mark.fetchedAt,now))continue;
+        const signal=strategySignal(run,pool,mark.priceSol,now);memory[pool.address]=signal.memory;
+        if(signal.ready&&!chosen)chosen=pool.address;
+        if(!chosen)run.note=signal.reason;
+      }
+      run.memory=memory;
+      if(!candidates.length)run.note='Live pool data unavailable. No paper entry.';
+      if(!chosen)continue;
+      const amountLamports=Math.round(run.bot.sizeSol*LAMPORTS_PER_SOL);
+      if(amountLamports>next.balanceLamports){run.note='Not enough practice SOL. Close a position or reduce the next bot size.';continue;}
+      try{
+        const [position]=await this.prepare('still-open',{poolAddress:chosen,amountLamports,range:botRange(run.bot,run.mode)});
+        position.runId=run.id;position.strategyName=run.bot.name;
+        next.positions.push(position);next.balanceLamports-=amountLamports;run.lastEntryAt=at;
+        run.note='Opened a new paper position. Actual range follows the pool grid; see Positions.';
+      }catch{run.note='The selected pool has no usable current range. No practice SOL was spent.';}
+    }
+    await this.lock(async()=>{
+      const current=await this.read(account);if(current.revision!==original.revision)return;
+      next.updatedAt=at;next.revision++;validateStored(next);
+      const active=await this.ctx.storage.get<string[]>('still:active-runs')||[];
+      const keep=next.runs!.some(r=>r.active)||next.positions.some(p=>p.runId&&p.status==='open');
+      await this.ctx.storage.put({[accountKey(account)]:next,'still:active-runs':keep?active:active.filter(id=>id!==account)});
+    });
+  }
+
 }

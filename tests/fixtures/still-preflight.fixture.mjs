@@ -12,3 +12,5 @@ export async function getStillPreflight(_env,poolAddress,sizeSol) {
 export async function getStillPoolMark(_env,poolAddress) {
  return pools.includes(poolAddress)?{poolAddress,name:'SYNTHETIC/SOL',priceSol:1,fetchedAt:new Date().toISOString(),feeRateHourly:.001,feeRateAsOf:new Date().toISOString(),source:'Synthetic runtime fixture'}:null;
 }
+
+export function listStillPools(){return [];}

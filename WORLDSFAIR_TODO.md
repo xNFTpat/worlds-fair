@@ -9,7 +9,9 @@ Current freeze: **Monday 12 October 2026 at 15:00 UK**, replacing the earlier de
 - [x] Stage (a): Claude Home and onboarding copy, Still ring, exact palette, Home/Pools/Positions/Follow/Grow navigation, footer-only Research, persisted pace preferences with blocked-storage fallback. Browser checked at 375px and 1280px.
 - [x] Stage (b): live Meteora/Jupiter/RPC pre-flight checks, one threshold config, editable ranges, renamed starter mixes and individual positions. Full 67-script suite, TypeScript and three Worker runtimes passed; mobile custom Spot open/close confirmed without horizontal overflow.
 - [ ] Camera caveat: all-in transaction costs, net proceeds and fully classified holder concentration can remain unavailable. Do not script a guaranteed “Worth a look” or imply a Jupiter conversion quote is an all-in execution cost. Gross paper inventory settles separately.
-- [ ] Stage (c): seven forward-only paper strategies, source-post attribution, follow confirmations and custom bot controls.
+- [x] Stage (c): seven creator/house cards, source-post and removal links, confirmed follow/unfollow, a working custom bot builder, and durable forward-only paper runs on the guided position engine. No backfill or reuse of old fleet outcomes.
+- [ ] TODO(permission): Pat to review attribution with @molusol, @razzaer, @Eyyyys, @Jaypee_Sol and @VladimirKovacs. No messages sent. Exact run parameters are labelled Still examples; the public sources establish the inspiration rather than endorsement.
+- [ ] Follow camera caveat: new runs show “Too early to judge” until five closed paper trades. The runner waits for fresh qualifying market evidence, so following need not open a position immediately. Checks are normally minute-based; capacity, source outages and stale marks may delay a close.
 - [ ] Stage (d): paper profit allocations into pools, Cesto baskets and Backyard, with quote availability and atomic accounting.
 - [ ] Stage (e): eight lessons using the supplied copy, diagrams and contextual links.
 - [ ] Stage (f): all-page mobile/desktop, state and accessibility review.
