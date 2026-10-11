@@ -100,9 +100,10 @@ try {
     assert.equal(httpCalls, 0);
   }
   records.clear(); httpCalls = 0;
-  globalThis.fetch = async () => {httpCalls++; return new Response('{}', {status: 429, headers: {'retry-after': '120'}});};
+  globalThis.fetch = async () => {httpCalls++; return new Response('{}', {status: 429, headers: {'retry-after': '120','x-still-rpc-failure':'json; rpc code -32005; rate-limit','authorization':'never-store-this'}});};
   assert.equal(await readStillNetwork(cooldownEnv, true), null);
   assert.equal(httpCalls, 1); assert.equal(records.get(scopeKey)?.until, now + 120000);
+  assert.match(records.get(scopeKey)?.diagnostic,/getLatestBlockhash.*json; rpc code -32005; rate-limit/);assert.doesNotMatch(records.get(scopeKey)?.diagnostic,/never-store-this|authorization/);
   assert.equal(await readStillNetwork({...cooldownEnv}, true), null);
   assert.equal(httpCalls, 1, 'a network 429 persists cooldown across independent fee read contexts');
   assert.equal(records.has('still:network-fees:v1'), false, 'rate limit is never stored as fee evidence');

@@ -9,7 +9,8 @@ const READ_METHODS = new Set(['getAccountInfo','getMultipleAccounts','getEpochIn
 interface RpcRead {jsonrpc: '2.0'; id: number | string; method: string; params?: unknown[]}
 interface Options {deadline?: number; onRequest?: () => void; env?:PublicRpcBudgetEnv}
 const json = (value: unknown, status = 200, headers: Record<string,string> = {}) => new Response(JSON.stringify(value), {status, headers: {'content-type':'application/json',...headers}});
-const unavailable = (reads: RpcRead[], batch: boolean, message: string, status = 503, retrySeconds?: number, diagnostic?: string) => json(batch ? reads.map(r=>({jsonrpc:'2.0',id:r.id,error:{code:-32004,message}})) : {jsonrpc:'2.0',id:reads[0]?.id??null,error:{code:-32004,message}}, status, {...(retrySeconds===undefined?{}:{'retry-after':String(Math.max(1,Math.ceil(retrySeconds)))}),...(diagnostic?{'x-still-rpc-failure':diagnostic}:{})});
+const localReasons:Record<string,string>={'Shared public RPC allowance is unavailable.':'budget-unavailable','Public Solana reads are busy. Retry shortly.':'isolate-busy','Shared public RPC queue is busy.':'queue-busy','Shared public RPC allowance expired before dispatch.':'grant-expired','Solana mainnet identity could not be verified.':'mainnet-proof','Solana read response identities could not be verified.':'rpc-identity','Public Solana provider is cooling down.':'provider-cooldown','Credentials cannot be used with the fixed public RPC endpoint.':'public-auth'};
+const unavailable = (reads: RpcRead[], batch: boolean, message: string, status = 503, retrySeconds?: number, diagnostic?: string, localReason=localReasons[message]) => json(batch ? reads.map(r=>({jsonrpc:'2.0',id:r.id,error:{code:-32004,message}})) : {jsonrpc:'2.0',id:reads[0]?.id??null,error:{code:-32004,message}}, status, {...(retrySeconds===undefined?{}:{'retry-after':String(Math.max(1,Math.ceil(retrySeconds)))}),...(diagnostic?{'x-still-rpc-failure':diagnostic}:{}),...(localReason?{'x-still-rpc-local':localReason}:{})});
 /** Classify only the fixed public endpoint's bounded error prefix. Never retain
  * or reflect provider prose, URLs, addresses, credentials or request payloads. */
 async function classifyPublicFailure(response:Response):Promise<string>{
@@ -45,7 +46,7 @@ export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => n
   const fetcher=deps.fetcher||globalThis.fetch;
   // Preserve private/keyed/custom provider selection, headers and response shape.
   if(!publicMode){options.onRequest?.();return fetcher(input,init);}
-  if(onfinality&&!options.env?.RANGE_ALERTS)return unavailable(reads,batch,'Shared public RPC allowance is unavailable.');
+  if(onfinality&&!options.env?.RANGE_ALERTS)return unavailable(reads,batch,'Shared public RPC allowance is unavailable.',503,undefined,undefined,'budget-unbound');
   const deadline=options.deadline??now()+8000;
   const assertTime=()=>{if(init.signal?.aborted||now()>=deadline)throw Error('Solana read deadline reached.');};
   assertTime();
@@ -57,6 +58,7 @@ export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => n
   if(active>=3)return unavailable(reads,batch,'Public Solana reads are busy. Retry shortly.');
   active++;
   try {
+   let lastDiagnostic:string|undefined,lastReason:string|undefined;
    endpointLoop: for(const endpoint of endpoints){
     assertTime();
     const cooling=circuits.get(endpoint);
@@ -85,7 +87,7 @@ export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => n
      for(let waits=0;waits<10;waits++){
       assertTime();const reservation=await reservePublicRpc(options.env!,chunk.length,deadline);assertTime();
       if(reservation.allowed){accepted=true;dispatchUntil=reservation.dispatchUntil;break;}
-      if(reservation.reason!=='budget'||!reservation.retryAt||reservation.retryAt>=deadline)return unavailable(reads,batch,reservation.reason==='cooldown'?'Public Solana provider is cooling down.':'Shared public RPC allowance is unavailable.',reservation.reason==='cooldown'?429:503,reservation.retryAt?(reservation.retryAt-now())/1000:undefined);
+      if(reservation.reason!=='budget'||!reservation.retryAt||reservation.retryAt>=deadline)return unavailable(reads,batch,reservation.reason==='cooldown'?'Public Solana provider is cooling down.':'Shared public RPC allowance is unavailable.',reservation.reason==='cooldown'?429:503,reservation.retryAt?(reservation.retryAt-now())/1000:undefined,undefined,reservation.detail||(reservation.reason==='budget'?'budget-deadline':reservation.reason==='cooldown'?'provider-cooldown':'budget-unavailable'));
       const wait=Math.max(1,reservation.retryAt-now());if(wait>1500)return unavailable(reads,batch,'Shared public RPC queue is busy.');
       await new Promise<void>((resolve,reject)=>{const timer=setTimeout(done,wait);function done(){init.signal?.removeEventListener('abort',aborted);resolve();}function aborted(){clearTimeout(timer);init.signal?.removeEventListener('abort',aborted);reject(Error('Solana read aborted.'));}init.signal?.addEventListener('abort',aborted,{once:true});if(init.signal?.aborted)aborted();});
      }
@@ -100,12 +102,13 @@ export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => n
      assertTime();if(onfinality&&(!dispatchUntil||now()>=dispatchUntil))return unavailable(reads,batch,'Shared public RPC allowance expired before dispatch.');
      response=await fetcher(endpoint,{method:'POST',headers:{'content-type':'application/json',accept:'application/json'},body:JSON.stringify(batch||chunk.length>1?chunk:chunk[0]),signal:init.signal?AbortSignal.any([init.signal,signal]):signal,redirect:'manual'});
     } catch {
-     assertTime();circuits.set(endpoint,{until:now()+30000,status:503});continue endpointLoop;
+     assertTime();circuits.set(endpoint,{until:now()+30000,status:503});lastReason='provider-transport';continue endpointLoop;
     }
     assertTime();
     if(!response.ok){
      const status=response.status, retry=response.headers.get('retry-after'), seconds=Number(retry), retryAt=Number.isFinite(seconds)&&seconds>0?now()+seconds*1000:Date.parse(retry||'');
      const diagnostic=await classifyPublicFailure(response);
+     lastDiagnostic=diagnostic;lastReason='provider-http';
      let until=now()+(onfinality?Math.max(30000,Number.isFinite(retryAt)?retryAt-now():0):Math.min(900000,Math.max(status===403||status===401?300000:30000,Number.isFinite(retryAt)?retryAt-now():0)));
      if(onfinality&&status===429){const shared=await notePublicRpcRateLimit(options.env!,response.headers);if(shared.retryAt)until=Math.max(until,shared.retryAt);}
      if([401,403,429,500,502,503,504].includes(status))circuits.set(endpoint,{until,status});
@@ -116,7 +119,7 @@ export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => n
      continue endpointLoop;
     }
     let parsed:any;
-    try {const text=await response.text();if(text.length>4000000)throw Error();parsed=JSON.parse(text);}catch {circuits.set(endpoint,{until:now()+30000,status:503});continue endpointLoop;}
+    try {const text=await response.text();if(text.length>4000000)throw Error();parsed=JSON.parse(text);}catch {circuits.set(endpoint,{until:now()+30000,status:503});lastReason='provider-unreadable';continue endpointLoop;}
     assertTime();
     const values=Array.isArray(parsed)?parsed:[parsed];
     if(values.length!==chunk.length||chunk.some(r=>values.filter(x=>x?.jsonrpc==='2.0'&&x.id===r.id).length!==1))return unavailable(reads,batch,'Solana read response identities could not be verified.');
@@ -129,7 +132,7 @@ export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => n
     }
     return json(batch?result:result[0]);
    }
-   return unavailable(reads,batch,'Public Solana reads are temporarily unavailable.');
+   return unavailable(reads,batch,'Public Solana reads are temporarily unavailable.',503,undefined,lastDiagnostic,lastReason||'provider-circuit');
   } finally {active--;}
  };
 }

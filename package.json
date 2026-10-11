@@ -12,7 +12,7 @@
     "build": "esbuild src/research-range.ts --bundle --platform=browser --format=esm --outfile=public/research-range.js --minify && esbuild src/research-paper.ts --bundle --platform=browser --format=esm --outfile=public/research-paper.js --minify && esbuild src/research-position.ts --bundle --platform=browser --format=esm --outfile=public/research-position.js --minify && node scripts/build-devnet.mjs && node scripts/build-version.mjs",
     "test:scanner-runtime": "node tests/scanner-runtime.mjs",
     "verify": "npm test && npm run check && npm run test:scanner-runtime && npm run test:worldsfair-runtime",
-    "test:worldsfair-runtime": "node tests/worldsfair-paper-runtime.mjs && node tests/worldsfair-devnet-runtime.mjs && node tests/still-follow-runtime.mjs"
+    "test:worldsfair-runtime": "node tests/worldsfair-paper-runtime.mjs && node tests/worldsfair-devnet-runtime.mjs && node tests/still-follow-runtime.mjs && node tests/public-rpc-runtime.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260831.1",

@@ -23,7 +23,13 @@ const number=(n:unknown):number|null=>{if(n==null||typeof n==='boolean'||n==='')
 const key=(name:string)=>'research:v1:'+name;
 async function keyHash(value:string){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return Array.from(new Uint8Array(bytes).slice(0,16),n=>n.toString(16).padStart(2,'0')).join('');}
 const unknown=<T>(note:string,status:ResearchReadStatus='unknown'):ResearchRead<T>=>({status,data:null,asOf:null,cached:false,note});
-interface ProviderBackoff {until:number;attempts:number;last429At:number}
+interface ProviderBackoff {until:number;attempts:number;last429At:number;diagnostic?:string}
+function rpcDiagnostic(headers:Headers){
+ const diagnostic=headers.get('x-still-rpc-failure')||'',local=headers.get('x-still-rpc-local')||'';
+ const safe=diagnostic.length<=256&&/^(?:empty|json|html|text|unreadable)(?:; (?:rpc code -?\d{1,7}|rate-limit|batch-mentioned|method-mentioned|ip-mentioned|cloudflare-mentioned|authentication-mentioned|capacity-mentioned|truncated))*$/.test(diagnostic);
+ const known=['budget-unbound','budget-deadline','budget-storage','budget-route','budget-response','budget-transport','budget-unavailable','grant-future','grant-expired','isolate-busy','queue-busy','mainnet-proof','rpc-identity','provider-cooldown','public-auth','provider-transport','provider-unreadable','provider-http','provider-circuit'];
+ return (safe?' Public response: '+diagnostic+'.':'')+(known.includes(local)?' Read boundary: '+local+'.':'');
+}
 const normalizedRpcUrl=(url:string)=>{try{return new URL(url).href;}catch{return url;}};
 async function rpcBackoffKeys(url:string){const legacy=key('backoff:Solana RPC');return {legacy,scoped:legacy+':'+await keyHash(normalizedRpcUrl(url))};}
 /** Shared by mint/range research and the unsigned network-fee reader. A valid
@@ -33,11 +39,12 @@ export async function readResearchRpcCooldown(env:Env,url:string):Promise<number
  const until=Math.max(0,...records.map(r=>typeof r?.until==='number'&&Number.isFinite(r.until)?r.until:0));
  return until>Date.now()?until:null;
 }
-export async function noteResearchRpcRateLimit(env:Env,url:string,headers:Headers):Promise<void>{
+export async function noteResearchRpcRateLimit(env:Env,url:string,headers:Headers,methods:string[]=[]):Promise<void>{
  const names=await rpcBackoffKeys(url),now=Date.now();
  let previous:ProviderBackoff|null=null;try{previous=await env.LP_CACHE.get<ProviderBackoff>(names.scoped,'json');}catch{}
  // Several in-flight reads observing one incident must not each double its wait.
  const next=previous&&previous.until>now?{...previous,until:Math.max(previous.until,researchBackoff(null,headers,now).until)}:researchBackoff(previous,headers,now);
+ next.diagnostic=(methods.filter(m=>/^get[A-Z][A-Za-z]{1,48}$/.test(m)).slice(0,8).join(', ')+rpcDiagnostic(headers)).trim().slice(0,256);
  try{await env.LP_CACHE.put(names.scoped,JSON.stringify(next),{expirationTtl:86400});}catch{}
 }
 export function researchBackoff(previous:ProviderBackoff|null,headers:Headers,now=Date.now()):ProviderBackoff{
@@ -108,9 +115,7 @@ async function readJson<T>(context:ResearchReadContext,options:{name:string;prov
     let detail='';
     if(options.provider==='Solana RPC'){
      const methods=new Set<string>();try{const parsed=JSON.parse(String(options.init?.body));for(const r of Array.isArray(parsed)?parsed:[parsed])if(typeof r?.method==='string'&&/^get[A-Z][A-Za-z]{1,48}$/.test(r.method))methods.add(r.method);}catch{}
-     const diagnostic=response.headers.get('x-still-rpc-failure')||'';
-     const safe=diagnostic.length<=256&&/^(?:empty|json|html|text|unreadable)(?:; (?:rpc code -?\d{1,7}|rate-limit|batch-mentioned|method-mentioned|ip-mentioned|cloudflare-mentioned|authentication-mentioned|capacity-mentioned|truncated))*$/.test(diagnostic);
-     detail=(methods.size?' Read methods: '+[...methods].slice(0,8).join(', ')+'.':'')+(safe?' Public response: '+diagnostic+'.':'');
+     detail=((methods.size?' Read methods: '+[...methods].slice(0,8).join(', ')+'.':'')+rpcDiagnostic(response.headers)).slice(0,256);
     }
     const note=options.provider+' returned HTTP '+response.status+'.'+detail;
     // Preserve the date of stale data, never attach a fresh date to its value.

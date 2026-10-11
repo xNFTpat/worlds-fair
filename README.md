@@ -87,7 +87,7 @@ npm run check
 npm run verify
 ```
 
-`verify` runs 80 test scripts, TypeScript checks and four local Worker runtime suites, including independent same-pool positions, recovery/idempotency, strategy parsing/scheduling, unavailable evidence and atomic Park rounding/quote failures. Runtime tests bind localhost; signing/provider fixtures are synthetic and submit no transactions. [Accessibility checks](docs/ACCESSIBILITY.md) record Home's Lighthouse 100/100 result and responsive/keyboard coverage.
+`verify` runs 80 test scripts, TypeScript checks and five local Worker runtime suites, including independent same-pool positions, recovery/idempotency, strategy parsing/scheduling, unavailable evidence and atomic Park rounding/quote failures. Runtime tests bind localhost; signing/provider fixtures are synthetic and submit no transactions. [Accessibility checks](docs/ACCESSIBILITY.md) record Home's Lighthouse 100/100 result and responsive/keyboard coverage.
 
 To deploy after tests, commit and push the reviewed work, then run `npm run deploy`. The guard requires a clean worldsfair branch and the exact public origin, runs the publication audit, uses `wrangler.worldsfair.toml`, stamps the real Git SHA and writes a receipt to the isolated demo KV. Verify `/api/version` matches the commit. Never use an unqualified deployment command or touch `lp-agg` / the personal terminal.
 
