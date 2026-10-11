@@ -1,12 +1,15 @@
 import {readFetch} from './sources/read-fetch';
 import {raydiumPoolUrl} from './pool-links';
+import {solanaReadFetch} from './solana-read-rpc';
+import type {Env} from './env';
 const DLMM='LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo';
 const DAMM='cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG';
 const CPMM='CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C';
-export async function lookupPool(address:string,rpc:string) {
+export async function lookupPool(address:string,rpc:string,env?:Env) {
   if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address))throw Error('Paste a valid Solana pool address.');
-  const request=async(url:string,init?:RequestInit)=>{const r=await readFetch(url,init);if(!r.ok)throw Error('Pool lookup provider unavailable. Try again shortly.');return await r.json() as any;};
-  const account=await request(rpc,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'getAccountInfo',params:[address,{encoding:'base64',dataSlice:{offset:0,length:0}}]})});
+  const request=async(url:string,init?:RequestInit,rpcRead=false)=>{const deadline=Date.now()+8000;const r=rpcRead&&env?await solanaReadFetch(url,{...init,signal:AbortSignal.timeout(8000)},{deadline,env}):await readFetch(url,init);if(!r.ok){await r.body?.cancel();throw Error('Pool lookup provider unavailable. Try again shortly.');}return await r.json() as any;};
+  const account=await request(rpc,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'getAccountInfo',params:[address,{encoding:'base64',dataSlice:{offset:0,length:0}}]})},true);
+  if(env&&(account?.jsonrpc!=='2.0'||account?.id!==1))throw Error('The chain read identity could not be verified. Try again shortly.');
   if(account.error)throw Error('The chain read is unavailable. Try this pool lookup again.');
   const owner=account.result?.value?.owner;
   if(!owner)throw Error('No live account found at this address. A closed position may no longer exist.');

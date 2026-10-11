@@ -1,4 +1,7 @@
 import { Pool } from "./schema";
+import type {Env} from './env';
+import {solanaReadFetch} from './solana-read-rpc';
+import {reserveResearchJupiter,noteResearchJupiterRateLimit} from './research-quote-budget';
 
 // Swap sanity: cheap, read-only checks that catch the tokens that fail a $10 buy on the UI
 // with "try adjusting slippage". Nothing here signs or sends.
@@ -30,10 +33,12 @@ const SIGNATURES: Record<string, [string, string][]> = {
   mint: [["mint(address,uint256)","40c10f19"]],
 };
 
-async function rpc<T = string>(method: string, params: unknown[], url = RPC()): Promise<T> {
-  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
-  const j = (await r.json()) as { result?: T; error?: { message: string; data?: string } };
+async function rpc<T = string>(method: string, params: unknown[], url = RPC(), env?:Env): Promise<T> {
+  const init={method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method,params})};
+  const r=env?await solanaReadFetch(url,{...init,signal:AbortSignal.timeout(8000)},{deadline:Date.now()+8000,env}):await fetch(url,init);
+  if(env&&!r.ok){await r.body?.cancel();throw Error('Read-only Solana RPC is unavailable. Try again shortly.');}
+  const j = (await r.json()) as { jsonrpc?:string;id?:number;result?: T; error?: { message: string; data?: string } };
+  if(env&&(j.jsonrpc!=='2.0'||j.id!==1||j.error))throw Error('The read-only Solana result could not be verified. Try again shortly.');
   if (j.error) throw new Error(j.error.message + (j.error.data ? ` ${String(j.error.data).slice(0, 80)}` : ""));
   return j.result as T;
 }
@@ -114,7 +119,7 @@ async function evmSanity(pool: Pool, wallet: string): Promise<Sanity> {
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const JUP = "https://lite-api.jup.ag/swap/v1/quote";
 
-async function solanaSanity(pool: Pool, solRpc: string): Promise<Sanity> {
+async function solanaSanity(pool: Pool, solRpc: string,env?:Env): Promise<Sanity> {
   const f: Finding[] = [];
   // Symbols are not identity: e.g. Upside Down Cat also uses USDC.
   const isQuote = (address: string) => [SOL_MINT, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"].includes(address);
@@ -124,7 +129,7 @@ async function solanaSanity(pool: Pool, solRpc: string): Promise<Sanity> {
 
   // 1. Mint program + extensions + authorities
   try {
-    const info = await rpc<any>("getAccountInfo", [mint, { encoding: "jsonParsed" }], solRpc);
+    const info = await rpc<any>("getAccountInfo", [mint, { encoding: "jsonParsed" }], solRpc,env);
     const owner: string = info?.value?.owner ?? "";
     const parsed = info?.value?.data?.parsed?.info ?? {};
     const is2022 = owner === "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -134,7 +139,7 @@ async function solanaSanity(pool: Pool, solRpc: string): Promise<Sanity> {
       const exts: any[] = parsed.extensions ?? [];
       const fee = exts.find((e) => e.extension === "transferFeeConfig");
       if (fee) {
-        const epoch = await rpc<{epoch: number}>('getEpochInfo', [], solRpc);
+        const epoch = await rpc<{epoch: number}>('getEpochInfo', [], solRpc,env);
         const newer = fee.state?.newerTransferFee, older = fee.state?.olderTransferFee;
         const current = newer && Number(newer.epoch) <= epoch.epoch ? newer : older;
         const bps = current?.transferFeeBasisPoints;
@@ -157,10 +162,17 @@ async function solanaSanity(pool: Pool, solRpc: string): Promise<Sanity> {
   try {
     const amountIn = 50_000_000; // 0.05 SOL in lamports
     const quote = async (url: string) => {
-      const r = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
+      if(env){const permit=await reserveResearchJupiter(env);if(!permit.allowed)throw Error('Shared quote allowance is busy. Try again shortly.');}
+      // Still uses the same endpoint, key and shared allowance as its other
+      // quote-only reads. Personal callers retain their original provider.
+      const target=env?url.replace(JUP,'https://api.jup.ag/swap/v1/quote'):url;
+      const r = await fetch(target, { headers: { accept: 'application/json',...(env?.JUPITER_API_KEY?{'x-api-key':env.JUPITER_API_KEY}:{}) }, signal: AbortSignal.timeout(12000),...(env?{redirect:'manual' as const}:{}) });
+      if(env&&r.status===429)await noteResearchJupiterRateLimit(env,r.headers);
+      if(env&&!r.ok)await r.body?.cancel();
       if (!r.ok) throw new Error(`Quote provider returned ${r.status}`);
       const q: any = await r.json();
       if (!/^\d+$/.test(String(q.outAmount)) || Number(q.outAmount) <= 0) throw new Error('No usable quote returned');
+      if(env){const query=new URL(target).searchParams;if(q.inputMint!==query.get('inputMint')||q.outputMint!==query.get('outputMint')||q.inAmount!==query.get('amount')||!Array.isArray(q.routePlan)||!q.routePlan.length)throw Error('The quote token identities or input amount could not be verified.');}
       return q;
     };
     const q1 = await quote(`${JUP}?inputMint=${SOL_MINT}&outputMint=${mint}&amount=${amountIn}&slippageBps=100`);
@@ -177,6 +189,6 @@ async function solanaSanity(pool: Pool, solRpc: string): Promise<Sanity> {
   return { pool: pool.id, chain: pool.chain, token: mint, findings: f, verdict, ranAt: new Date().toISOString() };
 }
 
-export async function sanityCheck(pool: Pool, evmWallet: string, solRpc: string): Promise<Sanity> {
-  return pool.chain === "solana" ? solanaSanity(pool, solRpc) : evmSanity(pool, evmWallet);
+export async function sanityCheck(pool: Pool, evmWallet: string, solRpc: string,env?:Env): Promise<Sanity> {
+  return pool.chain === "solana" ? solanaSanity(pool, solRpc,env) : evmSanity(pool, evmWallet);
 }

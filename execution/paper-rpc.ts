@@ -1,6 +1,7 @@
 // One bounded read queue per fleet scan. URLs, request bodies and keys never enter telemetry.
 import {solanaReadFetch} from '../src/solana-read-rpc';
-export function paperRpcTransport(options:{fetcher?:typeof fetch;now?:()=>number;sleep?:(ms:number)=>Promise<void>;intervalMs?:number;maxRequests?:number;maxDurationMs?:number}={}){
+import type {PublicRpcBudgetEnv} from '../src/public-rpc-budget';
+export function paperRpcTransport(options:{env?:PublicRpcBudgetEnv;fetcher?:typeof fetch;now?:()=>number;sleep?:(ms:number)=>Promise<void>;intervalMs?:number;maxRequests?:number;maxDurationMs?:number}={}){
  const now=options.now||Date.now,sleep=options.sleep||(ms=>new Promise(r=>setTimeout(r,ms)));
  const start=now(),stats={requests:0,rateLimits:0,failed:0,elapsedMs:0};let tail=Promise.resolve(),next=0;
  const transport:typeof fetch=(url,init)=>{
@@ -12,7 +13,7 @@ export function paperRpcTransport(options:{fetcher?:typeof fetch;now?:()=>number
     const remaining=Math.max(1,(options.maxDurationMs??55000)-(now()-start));
     const request={...init,signal:AbortSignal.timeout(Math.min(12000,remaining))};
     const countRequest=()=>{if(stats.requests>=(options.maxRequests??120))throw Error('Paper read budget reached; retained for next observation');stats.requests++;};
-    const response=options.fetcher?await (countRequest(),options.fetcher(url,request)):await solanaReadFetch(url,request,{deadline:Date.now()+remaining,onRequest:countRequest});
+    const response=options.fetcher?await (countRequest(),options.fetcher(url,request)):await solanaReadFetch(url,request,{deadline:Date.now()+remaining,onRequest:countRequest,env:options.env});
     if(response.status===429){stats.rateLimits++;const header=response.headers.get('retry-after');let delay=Number(header);if(!Number.isFinite(delay))delay=(Date.parse(header||'')-now())/1000;next=Math.max(next,now()+Math.min(60000,Math.max(2000,Number.isFinite(delay)?delay*1000:2000)));}
     if(!response.ok)stats.failed++;return response;
    }catch(e){stats.failed++;throw e;}finally{stats.elapsedMs=now()-start;}

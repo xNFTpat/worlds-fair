@@ -2,7 +2,7 @@ import type {Env} from '../env';
 import type {Pool} from '../schema';
 import type {Candle} from '../suggest';
 import {reserveResearchJupiter,noteResearchJupiterRateLimit} from '../research-quote-budget';
-import {solanaReadFetch,PUBLIC_SOLANA_READ_RPC} from '../solana-read-rpc';
+import {solanaReadFetch,PUBLIC_SOLANA_READ_RPC,ONFINALITY_SOLANA_READ_RPC} from '../solana-read-rpc';
 
 // Research reads only. No swap construction, transaction signing or broadcasting.
 // Jupiter: https://dev.jup.ag/api-reference/swap/quote
@@ -100,7 +100,7 @@ async function readJson<T>(context:ResearchReadContext,options:{name:string;prov
   try{
    const countRequest=()=>{if(context.requests>=context.maxRequests)throw Error('Research request budget reached.');context.requests++;};
    const init={...options.init,signal:AbortSignal.timeout(timeout)};
-   const response=options.provider==='Solana RPC'?await solanaReadFetch(options.url,init,{deadline:Math.min(context.deadline,Date.now()+timeout),onRequest:countRequest}):await (countRequest(),globalThis.fetch(options.url,init));
+   const response=options.provider==='Solana RPC'?await solanaReadFetch(options.url,init,{deadline:Math.min(context.deadline,Date.now()+timeout),onRequest:countRequest,env:context.env}):await (countRequest(),globalThis.fetch(options.url,init));
    if(!response.ok){
     let ttl=60000,status:ResearchReadStatus='unavailable';
     if(response.status===429){status='rate-limited';const backoff=researchBackoff(cooldown,response.headers);ttl=backoff.until-Date.now();if(options.provider==='Jupiter'){const shared=await noteResearchJupiterRateLimit(context.env,response.headers);context.jupiterRetryAt=Math.max(context.jupiterRetryAt||0,backoff.until,shared.retryAt||0);}try{await context.env.LP_CACHE.put(backoffKey,JSON.stringify(backoff),{expirationTtl:86400});}catch{}}
@@ -387,16 +387,23 @@ async function withMintEpoch(read:ResearchRead<RpcResponse[]>,env:Env,context?:R
  if(epoch.status!=='available'||!Number.isFinite(epochAt)||epochAt>Date.now()||Date.now()-epochAt>30000||!read.asOf||epoch.data?.id!==2||epoch.data.error||!Number.isSafeInteger(epoch.data.result?.epoch)||epoch.data.result.epoch<0)return read;
  return {...read,data:[...read.data!,epoch.data],asOf:[read.asOf,epoch.asOf].sort()[0]};
 }
-export async function cachedMintSafety(mint:string,env:Env):Promise<MintSafety>{const [rawRead,owners]=await Promise.all([cachedResearchRead<RpcResponse[]|RpcResponse>(env,'mint:'+mint),cachedResearchRead<OwnerRead>(env,'mint-owners:'+mint)]);return mintSafety(await withMintEpoch(mintRows(rawRead),env),mint,owners);}
+async function withMintLargest(read:ResearchRead<RpcResponse[]>,mint:string,env:Env,context?:ResearchReadContext):Promise<ResearchRead<RpcResponse[]>>{
+ if(normalizedRpcUrl(env.SOLANA_RPC||'')!==ONFINALITY_SOLANA_READ_RPC||read.status!=='available'||read.data?.some(r=>r.id===3&&!r.error))return read;
+ const largest=context?await readJson<RpcResponse>(context,{name:'mint-largest:'+mint,provider:'Solana RPC',url:env.SOLANA_RPC!,ttl:RESEARCH_READ_LIMITS.mintTtlMs,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:3,method:'getTokenLargestAccounts',params:[mint,{commitment:'confirmed'}]})}}):await cachedResearchRead<RpcResponse>(env,'mint-largest:'+mint);
+ const at=Date.parse(largest.asOf||'');
+ if(largest.status!=='available'||!Number.isFinite(at)||at>Date.now()||Date.now()-at>RESEARCH_READ_LIMITS.mintTtlMs||largest.data?.id!==3||largest.data.error||!read.asOf)return {...read,note:read.note+' Largest-holder enumeration is unavailable: '+largest.note};
+ return {...read,data:[...read.data!,largest.data],asOf:[read.asOf,largest.asOf!].sort()[0]};
+}
+export async function cachedMintSafety(mint:string,env:Env):Promise<MintSafety>{const [rawRead,owners]=await Promise.all([cachedResearchRead<RpcResponse[]|RpcResponse>(env,'mint:'+mint),cachedResearchRead<OwnerRead>(env,'mint-owners:'+mint)]);return mintSafety(await withMintLargest(await withMintEpoch(mintRows(rawRead),env),mint,env),mint,owners);}
 export async function readMintSafety(mint:string,context:ResearchReadContext):Promise<MintSafety>{
- const url=context.env.SOLANA_RPC||'https://api.mainnet-beta.solana.com',publicNode=normalizedRpcUrl(url)===PUBLIC_SOLANA_READ_RPC+'/';
+ const url=context.env.SOLANA_RPC||'https://api.mainnet-beta.solana.com',publicNode=normalizedRpcUrl(url)===PUBLIC_SOLANA_READ_RPC+'/',onfinality=normalizedRpcUrl(url)===ONFINALITY_SOLANA_READ_RPC;
  const account={jsonrpc:'2.0',id:1,method:'getAccountInfo',params:[mint,{encoding:'jsonParsed',commitment:'confirmed'}]};
- // The free public endpoint does not enumerate holders. A legacy SPL mint has
- // no transfer-fee extension, so do not couple its one account read to an epoch
- // request. Token-2022 transfer-fee policies still require a fresh epoch below.
- const body=publicNode?account:[account,{jsonrpc:'2.0',id:2,method:'getEpochInfo',params:[{commitment:'confirmed'}]},{jsonrpc:'2.0',id:3,method:'getTokenLargestAccounts',params:[mint,{commitment:'confirmed'}]}];
+ // Public mint policy is independent of optional holder enumeration and epoch.
+ // Legacy SPL has no transfer-fee extension; Token-2022 taxes require a fresh
+ // epoch below. OnFinality holder reads run separately under the same budget.
+ const body=publicNode||onfinality?account:[account,{jsonrpc:'2.0',id:2,method:'getEpochInfo',params:[{commitment:'confirmed'}]},{jsonrpc:'2.0',id:3,method:'getTokenLargestAccounts',params:[mint,{commitment:'confirmed'}]}];
  const rawRead=await readJson<RpcResponse[]|RpcResponse>(context,{name:'mint:'+mint,provider:'Solana RPC',url,ttl:RESEARCH_READ_LIMITS.mintTtlMs,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}});
- const read=await withMintEpoch(mintRows(rawRead),context.env,context);
+ const read=await withMintLargest(await withMintEpoch(mintRows(rawRead),context.env,context),mint,context.env,context);
  let owners=await cachedResearchRead<OwnerRead>(context.env,'mint-owners:'+mint);
  const largest=Array.isArray(read.data)?read.data.find(r=>r.id===3&&!r.error)?.result?.value:null;
  const addresses=Array.isArray(largest)?largest.slice(0,20).flatMap((r:any)=>typeof r.address==='string'?[r.address]:[]):[];

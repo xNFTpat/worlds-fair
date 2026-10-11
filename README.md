@@ -55,11 +55,11 @@ The browser's random Secure, HttpOnly, SameSite=Strict cookie identifies its iso
 
 ## Data sources and architecture
 
-Static HTML, CSS and JavaScript call a Cloudflare Worker. Durable Objects serialize paper accounts, schedule strategy observations and enforce a shared quote budget. The isolated Workers KV namespace stores source caches and earlier research journals. This build uses **branch `worldsfair`**, **Worker `lp-terminal-worldsfair`**, and the standalone **xNFTpat/worlds-fair** repository only.
+Static HTML, CSS and JavaScript call a Cloudflare Worker. Durable Objects serialize paper accounts, schedule strategy observations and enforce shared quote and public-RPC budgets. The isolated Workers KV namespace stores source caches and earlier research journals. This build uses **branch `worldsfair`**, **Worker `lp-terminal-worldsfair`**, and the standalone **xNFTpat/worlds-fair** repository only.
 
 - **Meteora DLMM Data API:** pools, liquidity, fees, timestamps, bin configuration and exact-pool hourly candles. Existing bounded candle fallback can use GeckoTerminal when its pair identity verifies.
 - **Jupiter:** size-matched quote-only token conversions and dated marks, under the shared allowance. No swaps are submitted.
-- **Solana read RPC:** mint extensions, native active-bin evidence, largest accounts and owners. Observed network base fees are reused for at most ten minutes with their original timestamp. Provider cooldowns are respected; incomplete coverage stays unavailable. Existing RugCheck evidence supplies verified exclusion addresses.
+- **Solana read RPC:** mint extensions, native active-bin evidence, largest accounts and owners. Still explicitly selects [OnFinality public mainnet](https://www.onfinality.io/en/networks/solana) and shares a conservative four-method-per-second allowance across Worker instances, including mainnet identity checks. Short-lived dispatch grants count batch methods separately; provider rate limits trigger a shared cooldown without rotating endpoints. Observed network base fees are reused for at most ten minutes with their original timestamp. Provider cooldowns are respected; incomplete coverage stays unavailable. Existing RugCheck evidence supplies verified exclusion addresses.
 - **Cesto:** public basket catalogue and allocation weights. Paper units require verified Solana mints and fresh Jupiter quotes.
 - **Backyard:** public vault directory, asset metadata and rate quotes. **DefiLlama** indexes the JitoSOL, mSOL and JupSOL rates used by the inherited staking reader. These are provider quotes, not live accrued balances.
 - **LP Army / creator public posts:** strategy inspiration and attribution, never a source of Still performance.
@@ -87,7 +87,7 @@ npm run check
 npm run verify
 ```
 
-`verify` runs 70 test scripts, TypeScript checks and four local Worker runtime suites, including independent same-pool positions, recovery/idempotency, strategy parsing/scheduling, unavailable evidence and atomic Park rounding/quote failures. Runtime tests bind localhost; signing/provider fixtures are synthetic and submit no transactions. [Accessibility checks](docs/ACCESSIBILITY.md) record Home's Lighthouse 100/100 result and responsive/keyboard coverage.
+`verify` runs 80 test scripts, TypeScript checks and four local Worker runtime suites, including independent same-pool positions, recovery/idempotency, strategy parsing/scheduling, unavailable evidence and atomic Park rounding/quote failures. Runtime tests bind localhost; signing/provider fixtures are synthetic and submit no transactions. [Accessibility checks](docs/ACCESSIBILITY.md) record Home's Lighthouse 100/100 result and responsive/keyboard coverage.
 
 To deploy after tests, commit and push the reviewed work, then run `npm run deploy`. The guard requires a clean worldsfair branch and the exact public origin, runs the publication audit, uses `wrangler.worldsfair.toml`, stamps the real Git SHA and writes a receipt to the isolated demo KV. Verify `/api/version` matches the commit. Never use an unqualified deployment command or touch `lp-agg` / the personal terminal.
 

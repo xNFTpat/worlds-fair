@@ -403,6 +403,27 @@ publicEpoch=9;const afterEpochChange=await readMintSafety(pairedMint,researchRea
 publicEpoch=null;const missingEpoch=await readMintSafety(pairedMint,researchReadContext(publicEnv()));assert.equal(missingEpoch.status,'available');assert.equal(missingEpoch.transferFeeStatus,'unknown');assert.equal(missingEpoch.transferFee,null,'missing epoch never becomes a zero transfer-fee policy');
 const futureEpoch=JSON.parse(feePublic.LP_CACHE.values.get('research:v1:mint-epoch'));futureEpoch.at=at(Date.now()+MINUTE);futureEpoch.expiresAt=Date.now()+2*MINUTE;feePublic.LP_CACHE.values.set('research:v1:mint-epoch',JSON.stringify(futureEpoch));assert.equal((await cachedMintSafety(pairedMint,feePublic)).transferFeeStatus,'unknown','future epoch evidence cannot select a transfer policy');
 
+// OnFinality supports holders: request them separately, and do not let failure
+// of that optional observation erase a successful mandatory mint-policy read.
+const holderAddress=new web3.PublicKey(new Uint8Array(32).fill(9)).toBase58(),holderOwner=new web3.PublicKey(new Uint8Array(32).fill(10)).toBase58();
+let holderFails=false,onMethods=[];
+const onEnv=()=>({...env(),SOLANA_RPC:'https://solana.api.onfinality.io/public',RANGE_ALERTS:{idFromName:name=>{assert.equal(name,'still-public-rpc-budget-v1');return name;},get:()=>({fetch:async request=>{assert.equal(new URL(request.url).pathname,'/public-rpc/reserve');const {count}=await request.json();assert.ok(count>=1&&count<=4);const now=Date.now();return json({allowed:true,reason:'allowed',retryAt:null,reservedAt:now,dispatchUntil:now+250});}})}});
+globalThis.fetch=async(input,init)=>{
+ assert.equal(String(input),'https://solana.api.onfinality.io/public');const body=JSON.parse(init.body),batch=Array.isArray(body),rows=batch?body:[body];onMethods.push(rows.map(r=>r.method));
+ const results=rows.map(r=>{
+  if(r.method==='getGenesisHash')return {jsonrpc:'2.0',id:r.id,result:'5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d'};
+  if(r.method==='getAccountInfo')return {jsonrpc:'2.0',id:r.id,result:{value:{owner:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',data:{parsed:{type:'mint',info:{decimals:6,supply:'1000000',mintAuthority:null,freezeAuthority:null}}}}}};
+  if(r.method==='getTokenLargestAccounts')return holderFails?{jsonrpc:'2.0',id:r.id,error:{code:-32000,message:'holders unavailable'}}:{jsonrpc:'2.0',id:r.id,result:{value:[{address:holderAddress,amount:'1000000'}]}};
+  assert.equal(r.method,'getMultipleAccounts');assert.deepEqual(r.params[0],[holderAddress]);return {jsonrpc:'2.0',id:r.id,result:{value:[{owner:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',data:{parsed:{type:'account',info:{mint:pairedMint,owner:holderOwner,tokenAmount:{amount:'1000000'}}}}}]}};
+ });return json(batch?results:results[0]);
+};
+const completeEnv=onEnv(),completeMint=await readMintSafety(pairedMint,researchReadContext(completeEnv));
+assert.equal(completeMint.status,'available');assert.equal(completeMint.transferFeeStatus,'none');assert.equal(completeMint.holderSample.status,'available');assert.equal(completeMint.holderSample.complete,true);
+assert.deepEqual(onMethods,[['getGenesisHash','getAccountInfo'],['getTokenLargestAccounts'],['getMultipleAccounts']]);
+assert.equal((await cachedMintSafety(pairedMint,completeEnv)).holderSample.status,'available');assert.equal(onMethods.length,3,'cached split evidence preserves genuine holders without provider traffic');
+holderFails=true;onMethods=[];const failedHolders=await readMintSafety(pairedMint,researchReadContext(onEnv()));assert.equal(failedHolders.status,'available');assert.equal(failedHolders.transferFeeStatus,'none');assert.equal(failedHolders.holderSample.status,'unavailable');assert.match(failedHolders.note,/Largest-holder enumeration is unavailable/);assert.deepEqual(onMethods,[['getAccountInfo'],['getTokenLargestAccounts']]);
+holderFails=false;onMethods=[];const mintOnlyContext=researchReadContext(onEnv());mintOnlyContext.maxRequests=1;const mintOnly=await readMintSafety(pairedMint,mintOnlyContext);assert.equal(mintOnly.status,'available');assert.equal(mintOnly.transferFeeStatus,'none');assert.equal(mintOnly.holderSample.status,'unavailable');assert.deepEqual(onMethods,[['getAccountInfo']],'exhausted optional holder budget cannot poison or repeat the mandatory mint read');
+
 // Meteora normalisation preserves the reported twelve-hour windows and configuration.
 globalThis.fetch=async()=>json({data:[{address:'native-pool',token_x:{address:'mint',symbol:'A',price:1},token_y:{address:SOL,symbol:'SOL',price:100},tvl:100000,current_price:.01,created_at:now-48*HOUR,volume:{'1h':100,'4h':400,'12h':1200,'24h':2400},fees:{'1h':1,'4h':4,'12h':12,'24h':24},fee_tvl_ratio:{'1h':.001,'4h':.004,'24h':.024},pool_config:{bin_step:20,base_fee_pct:.3},dynamic_fee_pct:.1,is_blacklisted:false}]});
 const normalised=(await fetchMeteora()).pools[0];assert.equal(normalised.activity.fees12h,12);assert.equal(normalised.activity.volume12h,1200);assert.equal(normalised.poolConfig.binStep,20);assert.equal(normalised.poolConfig.baseFee,.003);assert.equal(normalised.poolConfig.dynamicFee,.001);

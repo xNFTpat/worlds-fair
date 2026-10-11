@@ -3,6 +3,7 @@ import DLMM, {wrapPosition, getPriceOfBinByBinId} from '@meteora-ag/dlmm';
 import {Connection, PublicKey} from '@solana/web3.js';
 import {NATIVE_MINT, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getExtensionTypes, ExtensionType, getTransferFeeConfig} from '@solana/spl-token';
 import {paperRpcTransport} from './paper-rpc';
+import type {PublicRpcBudgetEnv} from '../src/public-rpc-budget';
 
 export interface WalletBin {nativeBinId:number;priceSol:number;sol:number;token:number}
 export interface WalletBinRead {
@@ -51,9 +52,9 @@ export function normaliseWalletBins(input:{address:string;poolAddress:string;pos
     feesSol:input.feesOwned&&Number.isFinite(feeValue)?feeValue:null,pairedRaw:(solX?y:x).toString(),pairedWithdrawableRaw:(solX?wy:wx).toString(),solRaw:(solX?x:y).toString(),
     transferFeeBps:input.transferFeeBps,transferFeeChangeable:input.transferFeeChangeable,modelSupported:input.modelSupported,policyNote:input.policyNote};
 }
-export async function readWalletBins(rpc:string,address:string,poolAddress:string,positionAddress:string):Promise<WalletBinRead> {
+export async function readWalletBins(rpc:string,address:string,poolAddress:string,positionAddress:string,env?:PublicRpcBudgetEnv):Promise<WalletBinRead> {
   [address,poolAddress,positionAddress].forEach(walletPublicKey);
-  const transport=paperRpcTransport({maxRequests:22,maxDurationMs:16000,intervalMs:60});
+  const transport=paperRpcTransport({env,maxRequests:22,maxDurationMs:16000,intervalMs:60});
   const conn=new Connection(rpc,{commitment:'confirmed',disableRetryOnRateLimit:true,fetch:transport.fetch as any}),owner=new PublicKey(address),pool=new PublicKey(poolAddress),position=new PublicKey(positionAddress);
   const [dlmm,account]=await Promise.all([DLMM.create(conn,pool),conn.getAccountInfo(position,'confirmed')]);
   if(!account||!account.owner.equals(dlmm.program.programId))throw Error('This position is no longer open.');

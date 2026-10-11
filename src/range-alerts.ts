@@ -1,5 +1,6 @@
 import {reserveGecko,GECKO_DAILY_LIMIT,type DataBudget} from './data-budget';
 import {researchJupiterBudgetRequest} from './research-quote-budget';
+import {publicRpcBudgetRequest} from './public-rpc-budget';
 import {advanceFleet,controlFleet,fleetSummary,type FleetRead} from './paper-fleet';
 import {loadFleet,fleetRecords,fleetScanRecords} from './paper-fleet-storage';
 import {checkVolume, type VolumeState, type VolumeEvent} from './volume';
@@ -20,6 +21,7 @@ export class RangeInbox {
   async fetch(request:Request):Promise<Response> {
     const url=new URL(request.url);
     const jupiter=await researchJupiterBudgetRequest(this.ctx,request);if(jupiter)return jupiter;
+    const rpc=await publicRpcBudgetRequest(this.ctx,request);if(rpc)return rpc;
     if(url.pathname==='/reserve'&&request.method==='POST')return this.ctx.blockConcurrencyWhile(async()=>{
       const result=reserveGecko(await this.ctx.storage.get<DataBudget>('gecko-budget'));
       if(result.allowed)await this.ctx.storage.put('gecko-budget',result.state);

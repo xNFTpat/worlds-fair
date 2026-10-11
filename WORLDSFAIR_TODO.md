@@ -8,9 +8,9 @@ Deadline: **Monday 12 October 2026 at 13:00 UK**. This supersedes the dates in t
 
 - [x] Phase 1: core path, exact wording, supplied logo/head tags, dated Jupiter conversion drag and RPC-observed base-fee model. Commit `7d64516eac95b413a79e86c63270fca8cdd6bfa5`. Local desktop/375px flow checked; live RPC provider failure found during deployment smoke check and tracked in Phase 2.
 - [x] Phase 2 implementation: public-key-only Phantom/paste address, actual Meteora position identities, read-only bin checks, independently funded paper copies and no public signing routes. Direct-entry, connection races, missing data, clone idempotency and privacy checks pass. Deployed commit `e8020ebc03d7`; live read-only fallback checked with no console errors. A Workers redirect-mode compatibility fix is included in Phase 3 after production-runtime reproduction.
-- [ ] Verify the top five live SOL pool cost reads after the public RPC correction and pausing archived scan loops. Do not substitute a guessed cost for unavailable provider evidence.
+- [ ] Verify five live SOL pool cost reads after the RPC reliability repair. PublicNode produced one complete live USDC result but rate-limited CTM; an explicitly configured, documented public replacement with a shared request limiter is being verified. Do not substitute a guessed cost for unavailable provider evidence.
 - [x] Phase 3 implementation: verdict-first cards from at most eight cached evidence reads, exact brand palette and horizon layout, local fonts, lazy lessons, and bounded motion with reduced-motion support. Deployed as `6c8dcf785dd0960048f9868b4f79ade0f0625883`. Mobile cost/verdict card is first. Live Home Lighthouse mobile: performance 99, accessibility 100. The production wallet empty-state read succeeded after the redirect-mode fix.
-- [ ] Phase 3b last: locally cached creator/partner/token assets, visible attribution and real public basket previews.
+- [x] Phase 3b: deployed `dc8d4dc2c8315f4c9d1f99594ec707341dd74f19` after Phases 1–3. Five cached creator portraits, three official partner logos, 41 exact-mint token icons, visible attribution/removal and two dated Cesto allocation previews. Missing token art uses a neutral circle. Live phone Follow/Grow show no horizontal overflow; logos and actual allocations verified. Final Home Lighthouse mobile remains 99 performance / 100 accessibility.
 - [ ] Capture the final live Home, Pre-flight and Positions at phone and desktop widths.
 - [ ] Pat: test the public-key-only Phantom connection in your own wallet; automated tests cover connection rejection and prove no signing methods are accessed. No signature is requested or needed.
 
@@ -18,7 +18,7 @@ Cost scope: displayed net is a **paper estimate** using dated conversion drag an
 
 ## 11 October — Claude copy and UI pass
 
-Current freeze: **Monday 12 October 2026 at 15:00 UK**, replacing the earlier deadline below. Scope remains the standalone public `worldsfair` branch and `lp-terminal-worldsfair` Worker, paper only.
+Historical copy-pass deadline: **Monday 12 October 2026 at 15:00 UK**. The current final MVP deadline above is **13:00 UK** and takes precedence. Scope remains the standalone public `worldsfair` branch and `lp-terminal-worldsfair` Worker, paper only.
 
 - [x] Stage (a): Claude Home and onboarding copy, Still ring, exact palette, Home/Pools/Positions/Follow/Grow navigation, footer-only Research, persisted pace preferences with blocked-storage fallback. Browser checked at 375px and 1280px.
 - [x] Stage (b): live Meteora/Jupiter/RPC pre-flight checks, one threshold config, editable ranges, renamed starter mixes and individual positions. Full 67-script suite, TypeScript and three Worker runtimes passed; mobile custom Spot open/close confirmed without horizontal overflow.
@@ -73,7 +73,8 @@ There is **no missing Jupiter key blocker**. Public quote and Price reads are su
 
 Banked at the user’s request; the reminder was delivered in this chat on **Tuesday 6 October 2026**. No completed upload, recording or claimed profile has been recorded here, so the four assets remain open.
 
-- [ ] Polish the chosen Still logo and export the upload-ready asset; upload it to the Colosseum project when ready.
+- [x] Apply the supplied final Still logo pack and export-ready brand assets to the site.
+- [ ] Pat: upload the supplied Still logo image to the Colosseum project.
 - [ ] Record a **product demo of at most three minutes**, preferably with Loom, using the actual product. Use the README’s new guided clicks: one pool, its pre-flight, a confirmed paper position and a combined basket. Show costs/net figures as unavailable where needed and state the actual devnet status. Do not present a synthetic fixture as live activity or a completed real signing flow.
 - [ ] Record a **separate founder pitch of at most two minutes**. Keep it distinct from the product walkthrough.
 - [ ] Confirm the X profile to use in the submission. Do not infer it from inherited project branding.
@@ -107,4 +108,4 @@ Park supports an atomic, confirmed split into qualified pools, quoted Cesto toke
 - [x] Direct Home → Pick a pool; exact launch wording; visible check chips and Paper labels; missing range data does not draw zero.
 - [x] Replace unconditional cost gaps with dated quote drag plus an explicit unsigned RPC-priced paper fee plan; preserve hard safety verdicts and cost evidence on positions. This does not complete actual LP transaction simulation or make future stressed net proceeds known.
 - [x] Update all seven Follow strategies and public source links; use only observed five-minute volume or bounded cumulative deltas.
-- [ ] Read-only Phantom/paste wallet, visual pass, then real faces and logos.
+- [x] Read-only Phantom/paste wallet, visual pass, then real faces and logos; current deployment evidence is recorded at the top of this file.

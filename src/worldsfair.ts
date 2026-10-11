@@ -2,7 +2,10 @@ import legacyWorker from './index';
 import type {Env} from './env';
 import type {Pool, Snapshot} from './schema';
 import {selectPools} from './discovery';
-import {getSnapshot} from './refresh';
+import {getSnapshot,singleFlight} from './refresh';
+import {lookupPool} from './pool-lookup';
+import {sanityCheck} from './sanity';
+import {publicError} from './health';
 import {StillBackgroundScanner} from './still-background';
 import {worldsfairPaperRoute} from './worldsfair-paper';
 import {stillDemoRoute} from './still-demo-routes';
@@ -133,6 +136,22 @@ async function fetchPaper(req: Request, env: Env, ctx?: ExecutionContext): Promi
     if (path === '/api/stats') return json(snapshotStats(snapshot));
     try { return json({...snapshot, ...selectPools(snapshot.pools, url.searchParams), stats: snapshotStats(snapshot), paper: true}); }
     catch { return json({error: 'Check the pool filter values.'}, 400); }
+  }
+  // Keep public Research useful without its legacy RPC/quote retry paths.
+  // Supplying Env opts only this Worker into shared provider budgets.
+  if(path==='/api/pool-lookup'){
+    const address=url.searchParams.get('address')||'';
+    if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address))return json({error:'Paste a valid Solana pool address.'},400);
+    try{const key='pool-lookup:v1:'+address,cached=await safeEnv.LP_CACHE.get(key,'json');if(cached)return json(cached);
+      const result=await singleFlight(safeEnv,key,()=>lookupPool(address,safeEnv.SOLANA_RPC||'https://api.mainnet-beta.solana.com',safeEnv));
+      await safeEnv.LP_CACHE.put(key,JSON.stringify(result),{expirationTtl:60});return json(result);
+    }catch(error){return json({error:publicError(error)},400);}
+  }
+  if(path==='/api/check'){
+    const snapshot=await getSnapshot(safeEnv),pool=snapshot.pools.find(pool=>pool.id===url.searchParams.get('pool'));
+    if(!pool)return json({error:'unknown pool'},404);
+    if(pool.chain==='solana')try{return json(await sanityCheck(pool,'',safeEnv.SOLANA_RPC||'https://api.mainnet-beta.solana.com',safeEnv));}
+    catch(error){return json({error:publicError(error)},502);}
   }
   // HEAD is evaluated as GET so legacy method checks remain read-only.
   const response = await legacyWorker.fetch(new Request(url, {method: 'GET', headers: req.headers}), safeEnv, ctx);

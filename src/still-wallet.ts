@@ -138,7 +138,7 @@ export async function readStillWalletPosition(env:Env,address:string,poolAddress
   const deps:WalletDeps={readBins:readWalletBins,pool:fetchMeteoraPool,candles:readResearchCandles,now:Date.now,quote:readWalletExitQuote,...overrides};
   const context=researchReadContext(env),poolPromise=deps.pool(poolAddress).catch(()=>null),candlesPromise=poolPromise.then(pool=>pool?deps.candles(pool,context).catch(()=>null):null);
   try{
-    const [read,pool]=await Promise.all([deps.readBins(env.SOLANA_RPC||'https://api.mainnet-beta.solana.com',address,poolAddress,positionAddress),poolPromise]);
+    const [read,pool]=await Promise.all([deps.readBins(env.SOLANA_RPC||'https://api.mainnet-beta.solana.com',address,poolAddress,positionAddress,env),poolPromise]);
     if(read.address!==address||read.poolAddress!==poolAddress||read.positionAddress!==positionAddress||!fresh(read.asOf,deps.now()))throw Error('Position identities or read time could not be verified.');
     if(pool&&(pool.address!==poolAddress||pool.base.address!==read.mintX||pool.quote.address!==read.mintY||pool.poolConfig?.binStep!==read.binStep))throw Error('Pool mint identities or bin step do not match the position.');
     const [exitQuote,candles]=await Promise.all([deps.quote(env,read).catch(()=>blankExit('The exit quote is unavailable.')),candlesPromise]);

@@ -27,9 +27,11 @@ new_sqlite_classes = ["RangeInbox", "BackgroundScanner"]
 MIN_TVL_USD = "5000"
 ROBINHOOD_CHAIN_ID = "4663"
 WALLETS = ""
-# Still explicitly uses the documented PublicNode mainnet read endpoint. A 429
-# remains a cooldown, never an instruction to rotate through public providers.
-SOLANA_RPC = "https://solana-rpc.publicnode.com"
+# Explicit mainnet provider selection after PublicNode's intermittent read limits.
+# https://www.onfinality.io/en/networks/solana publishes 5 requests/sec. Still's
+# private shared budget allows at most 4 JSON-RPC methods/sec, including proof.
+# A 429 remains a cooldown; no provider rotation or signing is performed.
+SOLANA_RPC = "https://solana.api.onfinality.io/public"
 
 [version_metadata]
 binding = "CF_VERSION_METADATA"
