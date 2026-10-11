@@ -7,7 +7,7 @@ import {pathToFileURL} from 'node:url';
 const dir=await mkdtemp(join(tmpdir(),'still-cost-verdict-')),originalFetch=globalThis.fetch;
 try {
  await build({stdin:{contents:"export * from './src/sources/research-reads';export * from './src/still-preflight';export * from './src/still-demo-pools';export * from './src/still-checks';",resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',outfile:join(dir,'test.mjs')});
- const {readStillSwapQuote,stillQuoteConversion,stillProjectedFeeRate,researchReadContext,buildStillPreflight,readStillHotPools,listStillPools,STILL_THIN_DEMO,STILL_KNOWN_ISSUERS}=await import(pathToFileURL(join(dir,'test.mjs')));
+ const {readStillSwapQuote,stillQuoteConversion,stillProjectedFeeRate,researchReadContext,buildStillPreflight,readStillHotPools,listStillPools,STILL_THIN_DEMO,STILL_KNOWN_ISSUERS,STILL_CBBTC_MINT}=await import(pathToFileURL(join(dir,'test.mjs')));
  const SOL='So11111111111111111111111111111111111111112',mint='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',now=Date.now(),at=new Date(now).toISOString();
  const pool={id:'solana:pool',address:'1'.repeat(32),pair:'USDC/SOL',chain:'solana',venue:'meteora-dlmm',base:{address:mint},quote:{address:SOL},priceQuote:.01,priceUsd:1,quotePriceUsd:100,fetchedAt:at,tvlUsd:100000,ageHours:200,volume24hUsd:240000,activity:{fees1h:1000,volume1h:10000},poolConfig:{binStep:100},tags:[]};
  const store=new Map(),env={LP_CACHE:{get:async k=>store.get(k)??null,put:async(k,v,options)=>{store.set(k,JSON.parse(v));if(k==='still:hot-sol-pools:v1')assert.equal(options.expirationTtl,300);}},RANGE_ALERTS:{idFromName:n=>n,get:()=>({fetch:async()=>Response.json({allowed:true,reason:'allowed',retryAt:null})})}};
@@ -39,9 +39,10 @@ try {
  const p=buildStillPreflight(detail,.5,Date.now());assert(Math.abs(p.exitCostSol.value-.000635)<1e-12);assert.equal(p.entryCostSol.value,.00001);
  for(const mint of STILL_KNOWN_ISSUERS){
   const d={...detail,pool:{...pool,base:{address:mint}},safety:{rpc:{...rpc,mint,freezeAuthority:'active'}}};
-  const check=buildStillPreflight(d,.5,now).checks.find(c=>c.id==='freeze');assert.equal(check.status,'caution');assert.equal(check.result,'Known issuer');
+  const check=buildStillPreflight(d,.5,now).checks.find(c=>c.id==='freeze');assert.equal(check.status,'caution');assert.equal(check.result,mint===STILL_CBBTC_MINT?'Freeze authority: known issuer (Coinbase)':'Known issuer');if(mint===STILL_CBBTC_MINT)assert.equal(check.shortReason,'known issuer (Coinbase)');
  }
- const impostor=buildStillPreflight({...detail,pool:{...pool,base:{address:'not-a-known-mint'}},safety:{rpc:{...rpc,mint:'not-a-known-mint',freezeAuthority:'active'}}},.5,now);
+ assert(STILL_KNOWN_ISSUERS.has('cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij'));
+ const impostor=buildStillPreflight({...detail,pool:{...pool,pair:'cbBTC/SOL',base:{address:'not-a-known-mint'}},safety:{rpc:{...rpc,mint:'not-a-known-mint',freezeAuthority:'active'}}},.5,now);
  assert.equal(impostor.checks.find(c=>c.id==='freeze').status,'fail','Ticker/name do not grant an issuer exception');
  for(kind of ['missing-fee','missing-impact','missing-route-plan','failure']){
   store.clear();const q=await read();

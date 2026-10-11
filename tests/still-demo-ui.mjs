@@ -7,6 +7,8 @@ const lessons = await readFile('public/still-lessons.js', 'utf8');
 const walletClient = await readFile('public/still-wallet-client.js','utf8');
 const browserSource = walletClient.replace(/^export /gm,'') + lessons.replace(/^export /gm, '') + source.replace(/let STILL_LESSONS=\[\];\nconst loadLessons=.*?;\n/, 'const loadLessons=()=>Promise.resolve();\n').replace(/let visualAssets=null,creatorAssets=null,visualLoading=null;\nconst loadVisualAssets=.*?;\n/, 'let visualAssets=null,creatorAssets=null;const loadVisualAssets=()=>Promise.resolve();\n').replace(/^import .*from '\.\/still-(lessons|wallet-client).js';$/gm, '').replace(/^export /gm, '');
 const helpers = runInNewContext(browserSource + '\n({esc,number,sol,money,netSummary,ticketSentence,groupPositions,requestFingerprint,readOnboarding,sortForPreference})', {Intl});
+assert(source.includes("costRow('Entry swap cost · fees and price impact',data.entryConversionSol)"));
+assert(source.includes('Known issuer · Caution'));
 assert.equal(helpers.sol(null), 'Unavailable');
 assert.equal(helpers.sol(0), '0 SOL');
 assert.equal(helpers.sol(Infinity), 'Unavailable');

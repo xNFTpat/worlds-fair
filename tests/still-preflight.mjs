@@ -191,11 +191,11 @@ try {
     else assert(result.roundTripCostSol.value > 0, 'observed zero-tax costs remain visible even when mutable policy separately fails');
   }
   const twoSidedRange = {shape: 'Spot', floorPct: 10, ceilingPct: 10, holdMinutes: 30};
-  function fundedInput(size) {
-    const detail = {...healthyInput, quotes: [{...quote, sizeSol: Math.round(size*.5*1e9)/1e9}]}, preliminary = buildStillPreflight(detail, size, now, twoSidedRange);
+  function fundedInput(size, rangeOptions=twoSidedRange) {
+    const detail = {...healthyInput, quotes: [{...quote, sizeSol: Math.round(size*.5*1e9)/1e9}]}, preliminary = buildStillPreflight(detail, size, now, rangeOptions);
     const funding = Math.round(preliminary.range.bins.reduce((sum, b) => sum + b.token * .01, 0) * 1e9) / 1e9;
     assert(funding > .001 && funding < size, 'two-sided range needs a genuine partial token purchase');
-    const fundingQuote = {...quote, sizeSol: funding, inputRaw: String(Math.round(funding * 1e9)), tokenRaw: String(Math.floor((funding - .001) / .01 * 1e6))};
+    const fundingQuote = {...quote, direction:'entry', sizeSol: funding, inputRaw: String(Math.round(funding * 1e9)), tokenRaw: String(Math.floor((funding - .001) / .01 * 1e6))};
     return {...detail, accountCosts:{...accountCosts,rangeKey:'-1,0'}, entryQuotes: [fundingQuote]};
   }
   const fundedDetail = fundedInput(.5), funded = buildStillPreflight(fundedDetail, .5, now, twoSidedRange), fundingQuote = fundedDetail.entryQuotes[0];
@@ -204,10 +204,24 @@ try {
   closeTo(funded.entryCostSol.value, quotedEntryLoss + .000015, 'two-sided entry includes one funding-swap base fee');
   closeTo(funded.networkCostSol.value, .000025, 'declared open, entry swap, close and exit swap base fees');
   assert.equal(funded.entryConversionSol.asOf, at); assert(funded.paperCostModel.netAfterHoldSol.value !== null);
-  for (const change of [{sizeSol: fundingQuote.sizeSol + .001}, {status: 'stale'}, {expiresAt: now - 1}, {tokenRaw: 'NaN'}, {inputRaw: '-1'}]) {
+  for (const change of [{sizeSol: fundingQuote.sizeSol + .001}, {status: 'stale'}, {expiresAt: now - 1}, {tokenRaw: 'NaN'}, {inputRaw: '-1'}, {inputRaw: String(BigInt(fundingQuote.inputRaw)+1n)}, {direction:'exit'}, {direction:undefined}, {tokenRaw:'0'}]) {
     const result = buildStillPreflight({...fundedDetail, entryQuotes: [{...fundingQuote, ...change}]}, .5, now, twoSidedRange);
     assert.equal(result.entryCostSol.value, null, 'invalid or mismatched funding quotes never imply free entry');
     assert.equal(result.paperCostModel.netAfterHoldSol.value, null);
+  }
+
+  for(const shape of ['Spot','Curve','BidAsk']) {
+    const rangeOptions={...twoSidedRange,shape}, input=fundedInput(.5,rangeOptions);
+    const result=buildStillPreflight(input,.5,now,rangeOptions);
+    assert(result.entrySwapAmountSol.value>0&&result.entrySwapAmountSol.value<.5);
+    assert(result.entryCostSol.value>result.entryTransactionFeeSol.value,'Every two-sided shape includes actual quoted conversion loss');
+    assert.equal(result.entrySwapAmountSol.value,input.entryQuotes[0].sizeSol);
+    const failed=buildStillPreflight({...input,entryQuotes:[]},.5,now,rangeOptions);
+    assert.equal(failed.entryCostSol.value,null,'No route must not fall back to network-only entry');
+    assert.equal(failed.entryConversionSol.value,null);
+    const solOnly=buildStillPreflight({...input,entryQuotes:[]},.5,now,{...rangeOptions,ceilingPct:0});
+    assert.equal(solOnly.entrySwapAmountSol.value,0);
+    assert.equal(solOnly.entryCostSol.value,.00001,'Inventory, not the shape name, decides whether a funding swap is needed');
   }
 
   const basket = baskets[0], memberPools = basket.legs.map(leg => snapshot.pools.find(item => item.address === leg.poolAddress));
@@ -237,12 +251,12 @@ try {
     const cardInput = {...healthyInput,accountCosts:{...accountCosts,poolAddress:firstAddress}, pool: {...healthyPool, id: cards[0].id, address: firstAddress}};
     const cardEnv = {LP_CACHE: {async get(key) {
       cardKeys.push(key);
-      return key === 'still:preflight-input:v6:' + firstAddress + ':500000000:null' ? {at, input: cardInput} : null;
+      return key === 'still:preflight-input:v7:' + firstAddress + ':500000000:null' ? {at, input: cardInput} : null;
     }}};
     const summaries = await listStillPoolsWithSummaries(snapshot, cardEnv, now);
     assert.equal(summaries.length, 8); assert.equal(cardKeys.length, 8);
     assert.equal(new Set(cardKeys).size, 8);
-    assert.deepEqual(cardKeys, cards.map(card => 'still:preflight-input:v6:' + card.address + ':500000000:null'));
+    assert.deepEqual(cardKeys, cards.map(card => 'still:preflight-input:v7:' + card.address + ':500000000:null'));
     assert.equal(summaries[0].cardSummary.verdict.label, 'Worth it', 'fresh default evidence may produce a real passing card');
     for (const card of summaries) {
       assert.equal(card.cardSummary.sizeSol, .5); assert.equal(card.cardSummary.scope, '0.5 paper SOL · default range');
@@ -260,7 +274,7 @@ try {
     async function oneSummary(saved) {
       let reads = 0;
       const result = await listStillPoolsWithSummaries(singleSnapshot, {LP_CACHE: {async get(key) {
-        reads++; assert.equal(key, 'still:preflight-input:v6:steady-a:500000000:null');
+        reads++; assert.equal(key, 'still:preflight-input:v7:steady-a:500000000:null');
         if (saved instanceof Error) throw saved;
         return saved;
       }}}, now);
@@ -304,7 +318,7 @@ try {
     assert.equal(fetches, 0, 'card summaries make no provider calls, even on cache misses or corrupt evidence');
     // A live pre-flight's exact evidence survives the cached-only paper-open path.
     const cachedRange = twoSidedRange, cachedSize = .37, cachedInput = fundedInput(cachedSize);
-    const cacheKey = 'still:preflight-input:v6:steady-a:370000000:' + JSON.stringify(cachedRange);
+    const cacheKey = 'still:preflight-input:v7:steady-a:370000000:' + JSON.stringify(cachedRange);
     let savedInput = {at, input: cachedInput};
     const cachedEnv = {LP_CACHE: {async get(key) {return key === 'snapshot:v1' ? snapshot : key === cacheKey ? savedInput : null;}}};
     const cached = await getStillPreflight(cachedEnv, 'steady-a', cachedSize, cachedRange);

@@ -1,8 +1,10 @@
 import {RESEARCH_READ_LIMITS} from './sources/research-reads';
 import {STILL_PREFLIGHT_THRESHOLDS as T} from './still-preflight-config';
 import type {StillPreflight,StillPreflightInput} from './still-preflight';
-// Exact canonical mints, never names or ticker symbols. Source: Solana payments docs.
-export const STILL_KNOWN_ISSUERS=new Set(['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v','Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB']);
+// Exact canonical mints, never names or ticker symbols. Stablecoins: Solana payments docs.
+// Coinbase cbBTC Solana mint: https://www.coinbase.com/cbbtc (verified 11 October 2026).
+export const STILL_CBBTC_MINT='cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij';
+export const STILL_KNOWN_ISSUERS=new Set(['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v','Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',STILL_CBBTC_MINT]);
 export const isStillKnownIssuer=(mint:string|null|undefined)=>!!mint&&STILL_KNOWN_ISSUERS.has(mint);
 export type StillCheckStatus='pass'|'caution'|'fail'|'unavailable';
 export interface StillCheck {id:string;label:string;status:StillCheckStatus;result:string;shortReason?:string;source:string;asOf:string|null;tooltip:string;lesson:number}
@@ -18,7 +20,7 @@ export function stillChecks(p:StillPreflight,d:StillPreflightInput,now:number):S
  if(finite(liquidity))add('liquidity','Liquidity',liquidity<5000?'fail':'pass',liquidity<5000?'Liquidity under $5k':'Liquidity meets $5k minimum',p.pool.tvlUsd.source,p.pool.tvlUsd.asOf,'Pools below the existing $5,000 minimum are direct-view examples only; they cannot be picked or opened.',3);
  else unknown('liquidity','Liquidity',p.pool.tvlUsd.source,'A current liquidity observation is required.',3);
  const policy=d.safety?.rpc;
- if(policy?.status==='available'&&policy.mint===p.pool.pairedMint&&fresh(policy.asOf,now,RESEARCH_READ_LIMITS.mintTtlMs)&&policy.freezeAuthority)add('freeze','Freeze authority',isStillKnownIssuer(policy.mint)?'caution':'fail',isStillKnownIssuer(policy.mint)?'Known issuer':'The token has an active freeze authority.','Confirmed Solana RPC mint policy',policy.asOf,'An active authority can freeze token accounts. Exact canonical issuer identity changes the warning, not that capability.',4);
+ if(policy?.status==='available'&&policy.mint===p.pool.pairedMint&&fresh(policy.asOf,now,RESEARCH_READ_LIMITS.mintTtlMs)&&policy.freezeAuthority)add('freeze','Freeze authority',isStillKnownIssuer(policy.mint)?'caution':'fail',isStillKnownIssuer(policy.mint)?policy.mint===STILL_CBBTC_MINT?'Freeze authority: known issuer (Coinbase)':'Known issuer':'The token has an active freeze authority.','Confirmed Solana RPC mint policy',policy.asOf,'An active authority can freeze token accounts. Exact canonical issuer identity changes the warning, not that capability.',4);
  const fee=p.feeRateHourly.value,cost=p.exitCostSol.value,day=p.expectedFeesPerDaySol.value;
  if(finite(fee)){
   const status=fee>=T.feePace.pass?'pass':fee>=T.feePace.caution?'caution':'fail';
@@ -71,6 +73,7 @@ export function stillChecks(p:StillPreflight,d:StillPreflightInput,now:number):S
  for(const c of checks){
   const reasons:Record<string,string[]>={liquidity:['Liquidity meets minimum','Liquidity needs checking','Liquidity under $5k'],freeze:['No freeze authority','Known issuer','Freeze authority active'],fees:['Fee pace passes','Fee pace borderline','Fee pace too slow'],cost:['Costs fit the hold','Exit cost elevated','Exit too costly'],tax:['No transfer tax','Transfer tax applies','Transfer tax too high or changeable'],holders:['Holders spread out','Holders concentrated','Holders too concentrated'],spike:['No price spike','Price moving sharply','Price spike too large'],floor:['Range has room','Range close to usual swing','Range too narrow for usual swings'],half:['Inside range','Near or above range','Outside range'],drop20:['Inside range','Near or above range','Outside range']};
   const age=d.pool.ageHours;
+  if(c.id==='freeze'&&c.status==='caution'&&policy?.mint===STILL_CBBTC_MINT){c.shortReason='known issuer (Coinbase)';continue;}
   c.shortReason=c.status==='unavailable'?c.id==='spike'&&finite(age)&&age<6?'Pool too young for 6h check':c.id==='floor'&&finite(age)&&age<24?'Pool too young for 24h check':`${c.label} unavailable`:(reasons[c.id]||['Check passes','Check needs review','Check fails'])[['pass','caution','fail'].indexOf(c.status)];
  }
  return checks;

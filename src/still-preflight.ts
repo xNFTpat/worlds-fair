@@ -39,7 +39,7 @@ export function stillQuoteConversion(q:ResearchQuote|undefined,direction:'entry'
   if(!q||q.status!=='quoted'||!stillQuoteFresh(q,now)||q.direction&&q.direction!==direction||!positive(q.priceMark?.priceSol)||!recent(q.priceMark?.asOf,q.priceMark?.source==='active-bin'?60000:45000,now))return null;
   if(Math.abs(Date.parse(q.asOf!)-Date.parse(q.priceMark!.asOf))>10000)return null;
   const d=q.tokenDecimals??decimals;
-  if(!Number.isInteger(d)||d!<0||d!>18||!/^\d{1,78}$/.test(q.tokenRaw||''))return null;
+  if(!Number.isInteger(d)||d!<0||d!>18||!/^\d{1,78}$/.test(q.tokenRaw||'')||BigInt(q.tokenRaw!)<=0n)return null;
   const midValue=Number(q.tokenRaw)/10**d!*q.priceMark!.priceSol;
   const value=direction==='exit'&&positive(q.returnedSol)?midValue-q.returnedSol:direction==='entry'&&/^\d{1,78}$/.test(q.inputRaw||'')?Number(q.inputRaw)/1e9-midValue:null;
   return finite(value)?Math.round(value*1e9)/1e9:null;
@@ -160,7 +160,7 @@ export interface StillScenario {
   grossPnlSol: StillEvidence<number>; netValueSol: StillEvidence<number>; pnlSol: StillEvidence<number>; vsHoldingSol: StillEvidence<number>;
 }
 export interface StillPreflight {
-  betterThanMid?:boolean; thinExampleOnly?:boolean; exitPoolFeeSol?:StillEvidence<number>;
+  entrySwapAmountSol?:StillEvidence<number>; betterThanMid?:boolean; thinExampleOnly?:boolean; exitPoolFeeSol?:StillEvidence<number>;
   solPriceUsd: StillEvidence<number>; positionRentSol: StillEvidence<number>; setupCostSol: StillEvidence<number>; entryTransactionFeeSol: StillEvidence<number>; exitTransferFeeSol: StillEvidence<number>; exitCostComplete:boolean; netReturnPct:StillEvidence<number>; breakEvenHours:StillEvidence<number>; breakEvenStatus:'covered'|'never'|'unavailable';
   paperCostModel?:{label:string;note:string;asOf:string|null;netAfterHoldSol:StillEvidence<number>};
   checks?: StillCheck[]; options?: StillRangeOptions; transferFeeChangeable?: StillEvidence<boolean>;
@@ -245,7 +245,11 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
     'Half-position token-to-SOL reference: raw token input at the pool active price fetched alongside the quote, minus SOL returned by Jupiter, floored at the current selected-pool base plus dynamic fee. Optional per-hop fields are not required. Better-than-mid proceeds do not reduce costs below this floor.');
   const netRead=detail.network,netFresh=netRead&&recent(netRead.asOf,STILL_NETWORK_MAX_AGE_MS,now)&&Number.isSafeInteger(netRead.singleLamports)&&netRead.singleLamports>=0&&Number.isSafeInteger(netRead.doubleLamports)&&netRead.doubleLamports>=0;
   const oneSided=!!range&&range.bins.every(b=>b.token===0),tokenFunding=range&&mark?Math.round(range.bins.reduce((n,b)=>n+b.token*mark,0)*1e9)/1e9:null;
-  const entryQuote=(detail.entryQuotes||[]).find(q=>q.sizeSol===tokenFunding&&q.status==='quoted'&&stillQuoteFresh(q,now)&&q.tokenRaw&&q.inputRaw&&rpc?.decimals!=null);
+  // Match the actual SOL input, not only the quote's size label. Missing or
+  // wrong-direction funding quotes must never become network-only entry.
+  const fundingRaw=positive(tokenFunding)?String(Math.round(tokenFunding*1e9)):null;
+  const entryQuote=(detail.entryQuotes||[]).find(q=>q.direction==='entry'&&q.sizeSol===tokenFunding&&q.inputRaw===fundingRaw&&q.status==='quoted'&&stillQuoteFresh(q,now)&&q.tokenRaw&&rpc?.decimals!=null);
+  const entrySwapAmountSol=evidence(tokenFunding,'Still paper range allocation',range?.asOf||null,oneSided?'SOL-only inventory: no entry swap required.':'SOL allocated to the paired-token purchase, quoted with Jupiter ExactIn. This is principal exchanged, not a fee.');
   const entryDifference=stillQuoteConversion(entryQuote,'entry',rpc?.decimals,now),entrySwap=oneSided?0:entryDifference===null?null:Math.max(0,entryDifference);
   const oldest=(...dates:(string|null|undefined)[])=>dates.every(d=>d&&Number.isFinite(Date.parse(d)))?(dates as string[]).sort()[0]:null;
   const entryAt=oneSided?oldest(netRead?.asOf,range?.asOf):oldest(netRead?.asOf,rpc?.asOf,entryQuote?.asOf,priceSol.asOf);
@@ -305,7 +309,7 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   else if (policyCurrent && rpc?.transferFee?.configAuthority) verdict = {label: 'Skip', reason: 'The token transfer-fee authority can change the tax after entry.'};
   else if (hourly === 0) verdict = {label: 'Skip', reason: 'The last complete hour reports no pool fees, so there is no observed fee pace to compare with costs.'};
   else if (hourly !== null && exitValue !== null && sizeSol * hourly * 24 <= exitValue) verdict = {label: 'Skip', reason: 'Even the quoted conversion cost exceeds a full day at the current pool fee pace, before other costs.'};
-  const result: StillPreflight = {pool: card, poolAddress: pool.address, name: pool.pair, sizeSol, fetchedAt: markAt, priceSol, range, feeRateHourly, expectedFeesPerDaySol,
+  const result: StillPreflight = {entrySwapAmountSol,pool: card, poolAddress: pool.address, name: pool.pair, sizeSol, fetchedAt: markAt, priceSol, range, feeRateHourly, expectedFeesPerDaySol,
     betterThanMid,thinExampleOnly,exitPoolFeeSol:evidence(poolFee,'Concurrent Meteora selected-pool base + dynamic fee × quoted token mid-value',quote?.priceMark?.asOf||null,'Minimum conversion cost even when Jupiter beats mid; network and LP withdrawal transfer fees are added separately.'),solPriceUsd,positionRentSol,setupCostSol,entryTransactionFeeSol,exitTransferFeeSol,exitCostComplete,netReturnPct,breakEvenHours,breakEvenStatus,transferFeeBps, entryCostSol, exitCostSol, entryConversionSol, exitConversionSol, networkCostSol, roundTripCostSol, scenarios, verdict, canOpen, missingEvidence,
     model: {kind: 'paper-monotonic-bin-model', note: 'Paper practice only. Fixed-price bins model a monotonic move; real partial fills, liquidity share and transaction execution are not reproduced. Missing costs keep net results unavailable.'},
     ledger: {priceSol: mark, feeRateHourly: hourly, entryCostsSol: entryCostSol.value!==null&&setupValue!==null?entryCostSol.value+setupValue:null, exitCostsSol: exitCostComplete?exitCostSol.value:null, transferFeeBps: bps, bins: range?.bins ?? null}};
@@ -334,7 +338,7 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
 }
 
 const preflightInputKey = (poolAddress: string, sizeSol: number, options?: StillRangeOptions) =>
-  'still:preflight-input:v6:' + poolAddress + ':' + Math.round(sizeSol * 1e9) + ':' + JSON.stringify(options || null);
+  'still:preflight-input:v7:' + poolAddress + ':' + Math.round(sizeSol * 1e9) + ':' + JSON.stringify(options || null);
 
 /** One exact default-size KV read per card, at most eight. Never refreshes the
  * snapshot or calls providers: list views must not fan out into RPC or quotes. */

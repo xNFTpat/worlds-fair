@@ -29,7 +29,7 @@ try {
     if(key==='cesto:v1:/products')return {readAt:now,data:[]};
     if(key==='cesto:v1:/products/analytics')return {readAt:now,data:{}};
     if(key.startsWith('long-game:v1:'))return {readAt:at,items:[]};
-    const pool=pools.find(p=>key==='still:preflight-input:v6:'+p.address+':500000000:null');
+    const pool=pools.find(p=>key==='still:preflight-input:v7:'+p.address+':500000000:null');
     if(!pool||cacheMode==='missing')return null;
     const detail=input(pool);
     if(cacheMode==='expired-quote')detail.quotes=[{...quote,expiresAt:now-1}];
