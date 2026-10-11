@@ -1,51 +1,55 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script>try{var t=localStorage.getItem('still-theme')}catch(e){}if(!/^(dawn|noon|dusk|midnight)$/.test(t||'')){var h=new Date().getHours();t=h>=5&&h<10?'dawn':h>=10&&h<17?'noon':h>=17&&h<21?'dusk':'midnight'}document.documentElement.dataset.stillTheme=t</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Still · Clarity before capital</title>
 <meta name="description" content="See the fees, costs and downside of a Solana liquidity pool before you deposit. Try a pool on paper with Still.">
-<meta name="theme-color" content="#F3F0E5">
-<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#0B1B2A">
+
 <link rel="icon" href="/favicon.ico" sizes="48x48">
 <link rel="icon" href="/still-favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/apple-touch-icon-180.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="twitter:site" content="@usestillxyz">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Still">
 <meta property="og:url" content="https://lp-terminal-worldsfair.pat-862.workers.dev/">
 <meta property="og:title" content="Still · Clarity before capital.">
-<meta property="og:description" content="The calm way to LP on Solana: see the fees, costs and downside before you deposit, practise on paper, then put your profits somewhere sensible.">
+<meta property="og:description" content="See the fees, costs and downside before you deposit. Practise on paper first. Paper only. Not advice.">
 <meta property="og:image" content="https://lp-terminal-worldsfair.pat-862.workers.dev/still-og-1200x630.png">
 <meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Still. Clarity before capital. The calm way to LP on Solana.">
+<meta property="og:image:alt" content="Still. Clarity before capital. A calm pool of deep water under a bold arc mark.">
 <meta name="twitter:title" content="Still · Clarity before capital.">
 <meta name="twitter:description" content="See the fees, costs and downside before you deposit. Paper only. Not advice.">
-<meta name="twitter:image:alt" content="Still. Clarity before capital. The calm way to LP on Solana.">
+<meta name="twitter:image:alt" content="Still. Clarity before capital. A calm pool of deep water under a bold arc mark.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://lp-terminal-worldsfair.pat-862.workers.dev/still-og-1200x630.png">
-<link rel="preload" href="/fonts/instrument-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/fonts/instrument-serif-regular-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/fonts/instrument-serif-italic-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/bricolage-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/fraunces-900.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/still-app.css">
 <script src="/still-app-motion.js" defer></script>
 <script type="module" src="/still-demo.js"></script>
 </head>
-<body>
+<body class="still-page">
 <a class="skip-link" href="#main">Skip to demo</a>
 <header class="site-header wrap still-header still-glass still-glass--header">
-<a class="brand" href="#home" aria-label="Still home"><img class="still-header__logo" src="/motion/svg/still-header-lockup.svg" width="74" height="26" alt="Still"></a>
+<a class="brand still-header__lockup" href="#home" aria-label="Still home"><svg viewBox="2.5 11 27 13" aria-hidden="true"><path d="M7 22a9 9 0 0 1 18 0" fill="none" stroke="currentColor" stroke-width="3"/><path d="M4.5 22H27.5" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>Still</a>
 <nav class="primary-nav" aria-label="Main navigation"><button data-go="home">Home</button><button data-go="pools">Pools</button><button data-go="positions">Positions</button><button data-go="follow">Follow</button><button data-go="park">Grow</button></nav>
+<button class="still-theme-btn" type="button" data-still-theme-button aria-label="Theme"></button>
 <div class="mode"><i aria-hidden="true"></i>Paper demo <span>· Solana</span></div>
 </header>
+<script src="/motion/still-theme.js"></script>
 <main id="main" class="wrap" tabindex="-1">
 <section id="home" class="hero still-glow" aria-labelledby="hero-title">
 <p class="eyebrow">A clearer way to provide liquidity</p>
 <h1 id="hero-title" class="still-intro">Clarity before<br><em>capital.</em></h1>
-<p class="hero-copy">The calm way to LP on Solana: see the fees, costs and downside before you deposit, practise on paper, then put your profits somewhere sensible.</p>
+<p class="hero-copy">See the fees, costs and downside before you deposit. Practise on paper first. Paper only. Not advice.</p>
 <button class="primary hero-cta" data-go="pools" data-ripple>Pick a pool <span aria-hidden="true">↗</span></button><a class="hero-secondary" href="#onboarding">How it works</a>
 <p class="quiet">Paper only. No real funds move. Not financial advice.</p>
 <div class="hero-bottom"><span>01 &nbsp; Pick a pool</span><span>02 &nbsp; See the trade-offs</span><span>03 &nbsp; Practise the position</span></div>
-<div class="hero-art water-art" aria-hidden="true"><div class="water-ring"></div><div class="water-horizon"></div><span>A little perspective.<br>Before you take a position.</span></div>
+<div class="hero-art water-art" aria-hidden="true"><div class="hero-water"></div><span>A little perspective.<br>Before you take a position.</span></div>
 </section>
 <section id="pillars" class="pillars" aria-label="Four ways to begin">
 <a href="#learn"><h2>Learn</h2><p>Short lessons, one for each step.</p><span>Start a lesson ↗</span></a>
@@ -62,7 +66,7 @@
 <nav class="mobile-nav" aria-label="Mobile navigation"><button data-go="home">Home</button><button data-go="pools">Pools</button><button data-go="positions">Positions</button><button data-go="follow">Follow</button><button data-go="park">Grow</button></nav>
 <footer class="wrap"><p>Paper only. No real funds move. Not financial advice.<br>Still is a paper tool for Meteora liquidity providers.<br>Logos belong to their owners. Still is not affiliated.<br>Data from Meteora, Jupiter and Solana RPC. Every number shows its source and time.</p><p><a href="https://github.com/xNFTpat/worlds-fair">Open source on GitHub</a> · <a href="/advanced#alpha">Research</a> · Built by <a href="https://x.com/patdotxyz">@patdotxyz</a> for the Colosseum Crypto World's Fair<br><button class="text-button" data-action="preferences">Settings</button> <span id="build-version"></span></p></footer>
 <dialog class="still-sheet" id="confirmation" aria-labelledby="confirm-title"><form method="dialog"><button class="dialog-close" value="cancel" aria-label="Cancel">×</button></form><div class="still-sheet__grab" aria-hidden="true"></div><div id="confirm-content"></div><p id="confirm-error" role="alert" hidden></p><div class="dialog-actions still-sheet__actions"><button id="confirm-cancel" class="secondary">Keep reviewing</button><button id="confirm-submit" class="primary">Confirm paper deposit</button></div></dialog>
-<dialog id="range-dialog" aria-labelledby="range-title"><form id="range-form"><div id="range-content"></div></form></dialog>
+<dialog class="still-sheet" id="range-dialog" aria-labelledby="range-title"><form id="range-form"><div id="range-content"></div></form></dialog>
 <div id="notice" class="toast" role="status" hidden></div>
 <noscript><p class="wrap">Enable JavaScript to compare live pools and open a paper position. <a href="https://github.com/xNFTpat/worlds-fair">Read about Still on GitHub.</a></p></noscript>
 </body>

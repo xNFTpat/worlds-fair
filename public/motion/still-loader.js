@@ -17,7 +17,7 @@
 <g clip-path="url(#sl-below-ID)"><ellipse class="sl-rf" cx="60" cy="37" rx="34" ry="34"/></g>
 <g clip-path="url(#sl-above-ID)"><circle class="sl-ring sl-b" cx="60" cy="36" r="34"/><circle class="sl-ring sl-a" cx="60" cy="36" r="34"/></g>
 <circle class="sl-drop" cx="60" cy="30" r="4.2"/>
-<path class="sl-mark" fill="currentColor" d="M44,36 A16,16 0 0 1 76,36 H71.4 A11.4,11.4 0 0 0 48.6,36 Z"/>
+<path class="sl-mark" fill="none" stroke="currentColor" stroke-width="5" d="M46,36 A14,14 0 0 1 74,36"/>
 <rect class="sl-line" x="8" y="35" width="104" height="2" rx="1"/>
 </svg>`;
   let n = 0;
@@ -31,11 +31,8 @@
         this.setAttribute('aria-live', 'polite');
         this.setAttribute('aria-label', this.getAttribute('label') || 'Loading');
         this._built = true;
-        this._media = matchMedia('(prefers-reduced-motion: reduce)');
-        this._preferenceChange = () => { if (this.getAttribute('aria-busy') === 'true') this.start(); };
         if (!this.dataset.state) this.dataset.state = 'idle';
       }
-      this._media.addEventListener?.('change', this._preferenceChange);
       if (this.hasAttribute('autoplay')) this.start();
     }
     start() {
@@ -53,11 +50,11 @@
         this._swap = setTimeout(() => { i = (i + 1) % lines.length; this._status.textContent = lines[i]; this._status.classList.remove('is-out'); }, 300);
       };
       const toContact = (TEMPO - (performance.now() % TEMPO) + TEMPO * 0.24) % TEMPO || TEMPO;
-      clearTimeout(this._t0); clearTimeout(this._swap); clearInterval(this._iv); this._status.classList.remove('is-out');
+      clearTimeout(this._t0); clearInterval(this._iv);
       this._t0 = setTimeout(() => { next(); this._iv = setInterval(next, TEMPO); }, toContact + TEMPO);
     }
     _statusStop() { clearTimeout(this._t0); clearTimeout(this._swap); clearInterval(this._iv); }
-    disconnectedCallback() { this._statusStop(); this._media?.removeEventListener?.('change', this._preferenceChange); }
+    disconnectedCallback() { this._statusStop(); }
     finish() {
       this._statusStop(); this._status.classList.add('is-out');
       const mark = this.querySelector('.sl-mark');

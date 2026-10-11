@@ -1,0 +1,149 @@
+/* Still · water pieces (v6): horizon, pool gauge with draggable bin-snapped edges, position pools, legacy wheel,
+   shape tiles, mini pool, verdict panel. Load after still-motion.css. All colours come from the theme tokens there. */
+
+/* ---------- the horizon: a layout element in gaps, never across text ---------- */
+.still-horizon{ position:relative; height:48px; margin-bottom:calc(var(--still-horizon-overlap,16px) * -1); pointer-events:none; }
+.still-horizon::before{ content:""; position:absolute; left:calc(50% - 50vw); right:calc(50% - 50vw); bottom:var(--still-horizon-overlap,16px); height:1px;
+  background:linear-gradient(90deg,transparent,var(--still-ground) 12%,var(--still-ground) 88%,transparent); }
+.still-horizon::after{ content:""; position:absolute; left:var(--still-ripple-x,74%); bottom:var(--still-horizon-overlap,16px); width:48px; height:24px; translate:-50% 0;
+  border:2px solid var(--still-mark); border-bottom:0; border-radius:24px 24px 0 0; opacity:.6; }
+.still-horizon + *{ position:relative; z-index:1; }
+
+/* ---------- <still-range-gauge>: the range as a pool of deep water ---------- */
+still-range-gauge{ position:relative; display:block; width:100%; min-width:240px; max-width:640px; font:400 14px/24px var(--still-sans); font-variant-numeric:tabular-nums; color:var(--still-text); --ripple-period:2.5s; }
+still-range-gauge .g-head,still-range-gauge .g-foot{ display:flex; justify-content:space-between; align-items:baseline; gap:var(--s2); }
+still-range-gauge .g-head{ margin-bottom:var(--s1); }
+still-range-gauge .g-foot{ margin-top:var(--s1); color:var(--still-text-2); flex-wrap:wrap; row-gap:0; }
+still-range-gauge .g-shape{ white-space:nowrap; }
+still-range-gauge .g-state{ font-weight:600; display:inline-flex; align-items:center; gap:var(--s1); }
+still-range-gauge .g-state::before{ content:""; width:8px; height:8px; border-radius:50%; background:var(--still-text-2); }
+still-range-gauge[data-range="in"] .g-state::before{ background:var(--still-live-line); }
+still-range-gauge[data-range="below"] .g-state{ color:var(--still-caution); }
+still-range-gauge[data-range="below"] .g-state::before{ background:var(--still-caution); }
+still-range-gauge .g-price{ font-weight:600; color:var(--still-text); }
+/* the one live number on screen: only the gauge marked primary shows its price in the live colour */
+still-range-gauge[primary] .g-price{ color:var(--still-live); }
+still-range-gauge svg{ display:block; width:100%; overflow:visible; }
+/* water: one vertical depth gradient (userSpaceOnUse, surface to the deepest possible bin), so deeper bins are darker */
+still-range-gauge .gd0,still-mini-chart .gd0{ stop-color:var(--still-water-0); }
+still-range-gauge .gd1,still-mini-chart .gd1{ stop-color:var(--still-water-1); }
+still-range-gauge .gd2,still-mini-chart .gd2{ stop-color:var(--still-water-2); }
+still-range-gauge .g-floor{fill:none;stroke:none}
+still-range-gauge .g-ground{ fill:none; stroke:var(--still-ground); stroke-width:1; }
+still-range-gauge .gh{ stop-color:var(--still-highlight); }
+still-range-gauge .g-surface{ stroke-width:2; stroke-linecap:round; }
+/* caustic light: a static pattern drifting slowly, only in the shallows (masked), paused off-screen or when the tab is hidden */
+still-range-gauge .g-caus{ opacity:var(--still-caustic); }
+still-range-gauge .g-caus-a{ animation:g-drift 18s linear infinite; }
+still-range-gauge .g-caus-b{ animation:g-drift 26s linear infinite reverse; opacity:.6; }
+@keyframes g-drift{ from{ transform:translateX(0); } to{ transform:translateX(-96px); } }
+still-range-gauge[data-paused] .g-caus *,still-range-gauge[data-paused] .g-rip{ animation-play-state:paused !important; }
+still-range-gauge .g-drop{ fill:var(--still-live-line); transition:transform .6s var(--still-settle); }
+still-range-gauge .g-chev{ fill:none; stroke:var(--still-caution); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+still-range-gauge .g-tick{ fill:var(--still-text-2); font:400 13px var(--still-sans); font-variant-numeric:tabular-nums; }
+/* ripples: thin rings rising from the price at the pool's fee rate; the leading ring carries the faint Solana gradient */
+still-range-gauge .g-rip{ fill:none; stroke:var(--still-live-line); stroke-width:1.5; vector-effect:non-scaling-stroke; opacity:0; transform-box:fill-box; transform-origin:50% 100%; }
+still-range-gauge .g-rip--sol{ stroke-opacity:.8; }
+still-range-gauge[data-state="playing"] .g-rip{ animation:g-rip calc(var(--ripple-period) * 3) cubic-bezier(.16,1,.3,1) infinite; }
+still-range-gauge[data-state="playing"] .g-rip:nth-of-type(2){ animation-delay:calc(var(--ripple-period) * -1); }
+still-range-gauge[data-state="playing"] .g-rip:nth-of-type(3){ animation-delay:calc(var(--ripple-period) * -2); }
+still-range-gauge[data-state="reduced-motion"][data-range="in"][data-fees="known"] .g-rip:nth-of-type(-n+2){ opacity:.5; }
+still-range-gauge[data-state="reduced-motion"] .g-rip:nth-of-type(2){ transform:scale(.55); }
+@keyframes g-rip{ 0%{ opacity:.95; transform:scale(.1); } 70%{ opacity:.3; } 100%{ opacity:0; transform:scale(1); } }
+still-range-gauge .g-pulse{ fill:none; stroke:var(--still-live-line); stroke-width:2; opacity:0; transform-box:fill-box; transform-origin:50% 100%; }
+/* edge handles: small visible dot, 44px-wide hit area. Only the handle blocks scrolling (touch-action:none). */
+still-range-gauge .g-handle{ cursor:ew-resize; outline:none; touch-action:none; }
+still-range-gauge .g-handle .h-hit{ fill:transparent; touch-action:none; }
+still-range-gauge .g-handle .h-knob{ fill:var(--still-text); stroke:var(--still-bg-solid); stroke-width:2; transition:r .2s var(--still-settle); }
+still-range-gauge .g-handle .h-stem{ stroke:var(--still-text); stroke-width:1; opacity:.5; }
+still-range-gauge .g-handle .h-ring{ fill:none; stroke:none; }
+still-range-gauge .g-handle:is(:hover,.is-drag) .h-knob{ r:7; }
+still-range-gauge .g-handle:is(:focus-visible,.is-drag) .h-ring{ stroke:var(--still-live-line); stroke-width:1.5; stroke-opacity:.6; }
+/* the fine readout while an edge moves: the real bin price and the pool's bin step */
+still-range-gauge .g-read{ position:absolute; z-index:2; top:0; left:0; translate:-50% 0; padding:0 var(--s1); height:24px; border-radius:12px; white-space:nowrap; pointer-events:none;
+  font:400 12px/24px var(--still-sans); font-variant-numeric:tabular-nums; color:var(--still-text); background:var(--still-glass-solid); border:1px solid var(--still-glass-edge); opacity:0; transition:opacity .15s; }
+still-range-gauge .g-read[data-on]{ opacity:1; }
+still-range-gauge .g-note{ margin:var(--s2) 0 0; padding:var(--s1) var(--s2); border-radius:16px; font:400 14px/24px var(--still-sans); color:var(--still-text); background:var(--still-glass); border:1px solid var(--still-glass-edge); }
+still-range-gauge .g-note:empty{ display:none; }
+still-range-gauge[compact] .g-foot{ display:none; }
+still-range-gauge[compact] .g-price{ font-weight:400; color:var(--still-text-2); }
+
+/* ---------- <still-pool-list>: one small pool per position address ---------- */
+still-pool-list{ display:grid; gap:0; }
+still-pool-list .p-item{ display:grid; gap:var(--s1); padding:var(--s3) 0 var(--s2); border-top:1px solid var(--still-hair); color:inherit; text-decoration:none; }
+still-pool-list .p-item:last-child{ border-bottom:1px solid var(--still-hair); }
+still-pool-list .p-top{ display:flex; justify-content:space-between; align-items:baseline; gap:var(--s2); }
+still-pool-list .p-name{ font:600 18px/24px var(--still-sans); }
+still-pool-list .p-addr{ font:400 13px/16px var(--still-sans); color:var(--still-text-2); }
+still-pool-list .p-item:focus-visible{ outline:2px solid var(--still-text); outline-offset:2px; border-radius:16px; }
+
+/* ---------- <still-wheel>: legacy range picker ---------- */
+still-wheel{ display:block; position:relative; height:var(--w-h,304px); --w-item:64px; outline:none; }
+still-wheel .w-list{ position:absolute; inset:0; overflow-y:auto; scroll-snap-type:y mandatory; scrollbar-width:none; overscroll-behavior:contain;
+  padding-block:calc((var(--w-h,304px) - var(--w-item)) / 2); margin:0; list-style:none;
+  -webkit-mask:linear-gradient(#0000,#000 32%,#000 68%,#0000); mask:linear-gradient(#0000,#000 32%,#000 68%,#0000); }
+still-wheel .w-list::-webkit-scrollbar{ display:none; }
+still-wheel .w-item{ height:var(--w-item); scroll-snap-align:center; display:flex; align-items:center; justify-content:center; gap:var(--s1); font:400 28px/1 var(--still-sans); font-variant-numeric:tabular-nums; color:var(--still-text-2); transition:transform .25s var(--still-settle),color .25s,opacity .25s; transform:scale(.86); }
+still-wheel .w-item.is-sel{ color:transparent; transform:none; }
+still-wheel .w-item.is-blocked{ opacity:.35; text-decoration:line-through; text-decoration-thickness:1px; }
+still-wheel .w-pill{ position:absolute; left:0; right:0; top:50%; height:calc(var(--w-item) + 32px); translate:0 -50%; border-radius:24px; pointer-events:none;
+  display:grid; grid-template-columns:1fr auto; grid-template-rows:auto auto; align-items:center; column-gap:var(--s2); padding:0 var(--s3); }
+still-wheel .w-label{ grid-column:1/-1; font:400 14px/16px var(--still-sans); color:var(--still-text-2); }
+still-wheel .w-val{ font:600 36px/1 var(--still-sans); font-variant-numeric:tabular-nums; letter-spacing:-.02em; color:var(--still-text); }
+still-wheel .w-chg{ font:400 14px/1 var(--still-sans); color:var(--still-text-2); justify-self:end; }
+still-wheel .w-chg[data-dir="up"]{ color:var(--still-pass); } still-wheel .w-chg[data-dir="down"]{ color:var(--still-fail); }
+still-wheel:focus-visible .w-pill{ outline:2px solid var(--still-text); outline-offset:3px; }
+still-wheel + .w-note,still-wheel .w-note{ display:block; min-height:24px; margin:var(--s1) 0 0; font:400 14px/24px var(--still-sans); color:var(--still-text-2); text-align:center; }
+
+/* ---------- shape selector tiles + <still-mini-chart>: equal 16px padding on every option ---------- */
+.still-tiles{ display:grid; grid-template-columns:repeat(auto-fit,minmax(144px,1fr)); gap:var(--s1); }
+.still-tile{ position:relative; display:flex; flex-direction:column; justify-content:space-between; gap:var(--s2); min-height:160px; padding:var(--s2); box-sizing:border-box; border-radius:24px; text-align:left; cursor:pointer; font:inherit; color:var(--still-text);
+  background:var(--still-glass); border:1px solid var(--still-glass-edge); box-shadow:inset 0 1px 0 var(--still-glass-hi); transition:transform .25s var(--still-settle),background-color .2s,border-color .2s; }
+.still-tile:active{ transform:scale(.98); }
+.still-tile[aria-pressed="true"]{ border-color:var(--still-mark); background:var(--still-sel); }
+.still-tile .t-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:var(--s1); }
+.still-tile .t-arrow{ flex:none; width:32px; height:32px; border-radius:50%; display:grid; place-items:center; border:1px solid var(--still-glass-edge); color:var(--still-text); }
+.still-tile .t-arrow svg{ width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.still-tile .t-label{ font:600 18px/24px var(--still-sans); padding:0; margin:0; }
+.still-tile .t-label small{ display:block; font:400 14px/24px var(--still-sans); color:var(--still-text-2); }
+still-mini-chart{ display:block; flex:1 1 auto; min-width:0; max-width:96px; height:48px; }
+still-mini-chart svg{ display:block; width:100%; height:100%; overflow:visible; }
+still-mini-chart .m-ground{ fill:none; stroke:var(--still-ground); stroke-width:1.5; }
+still-mini-chart .m-drop{ fill:var(--still-live-line); }
+
+/* ---------- <still-verdict> (and <still-ticket>, same component): the Pre-flight verdict as one clean glass panel ---------- */
+:is(still-verdict,still-ticket){ display:block; }
+:is(still-verdict,still-ticket) still-check{ display:none; }
+:is(still-verdict,still-ticket) .tk{ padding:var(--s3); border-radius:var(--still-radius); background:var(--still-glass); border:1px solid var(--still-glass-edge);
+  box-shadow:inset 0 1px 0 var(--still-glass-hi),var(--still-shadow); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); color:var(--still-text); }
+:is(still-verdict,still-ticket) .tk-head{ display:flex; justify-content:space-between; align-items:baseline; gap:var(--s2); }
+:is(still-verdict,still-ticket) .tk-kicker{ font:400 14px/24px var(--still-sans); color:var(--still-text-2); }
+:is(still-verdict,still-ticket) .tk-title{ font:600 15px/24px var(--still-sans); color:var(--still-text); }
+:is(still-verdict,still-ticket) .tk-verdict{ margin:var(--s1) 0 0; font:900 40px/48px var(--still-serif); letter-spacing:-.02em; }
+:is(still-verdict,still-ticket) .tk-verdict[data-verdict="worth-a-look"]{ color:var(--still-pass); }
+:is(still-verdict,still-ticket) .tk-verdict[data-verdict="marginal"]{ color:var(--still-caution); }
+:is(still-verdict,still-ticket) .tk-verdict[data-verdict="skip-for-now"]{ color:var(--still-fail); }
+:is(still-verdict,still-ticket) .tk-verdict[data-verdict="unavailable"]{ color:var(--still-text-2); font-size:32px; line-height:40px; }
+:is(still-verdict,still-ticket) .tk-summary{ margin:var(--s1) 0 0; font:400 15px/24px var(--still-sans); color:var(--still-text-2); }
+:is(still-verdict,still-ticket) .tk-rows{ list-style:none; margin:var(--s2) 0 var(--s3); padding:0; border-top:1px solid var(--still-hair); }
+:is(still-verdict,still-ticket) .tk-row{ display:grid; grid-template-columns:auto 1fr auto; column-gap:var(--s1); row-gap:0; align-items:center; padding:var(--s2) 0; border-bottom:1px solid var(--still-hair); }
+:is(still-verdict,still-ticket) .tk-label{ font:600 15px/24px var(--still-sans); color:var(--still-text); }
+:is(still-verdict,still-ticket) .tk-val{ font:600 15px/24px var(--still-sans); font-variant-numeric:tabular-nums; color:var(--still-text); white-space:nowrap; text-align:right; }
+:is(still-verdict,still-ticket) .tk-val[data-missing]{ font-weight:400; color:var(--still-text-2); }
+:is(still-verdict,still-ticket) .tk-reason{ grid-column:1/-1; margin-top:var(--s1); font:400 14px/24px var(--still-sans); color:var(--still-text-2); }
+:is(still-verdict,still-ticket) .tk-chip-na{ color:var(--still-text-2); border-color:var(--still-hair); }
+:is(still-verdict,still-ticket) .tk-action{ width:100%; }
+
+@media (prefers-reduced-transparency:reduce){
+  still-wheel .w-pill{ background:var(--still-glass-solid); }
+  :is(still-verdict,still-ticket) .tk,.still-tile,still-range-gauge .g-note{ -webkit-backdrop-filter:none; backdrop-filter:none; background:var(--still-glass-solid); }
+  /* water: the same gradient as a solid fill, no caustic shimmer */
+  still-range-gauge .gd0,still-mini-chart .gd0{ stop-color:var(--still-water-0-solid); }
+  still-range-gauge .gd1,still-mini-chart .gd1{ stop-color:var(--still-water-1-solid); }
+  still-range-gauge .gd2,still-mini-chart .gd2{ stop-color:var(--still-water-2-solid); }
+  still-range-gauge .g-caus{ display:none; }
+}
+@media (prefers-reduced-motion:reduce){
+  still-range-gauge .g-caus *{ animation:none; }
+  still-wheel .w-item{ transition:none; }
+}

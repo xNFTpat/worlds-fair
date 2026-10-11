@@ -19,7 +19,7 @@ function setup({fine=true,coarse=false,reduced=false}={}) {
  let serial=0;const timers=new Map();const env={document,window,matchMedia:q=>medias[q.includes('reduced')?2:q.includes('coarse')?1:0],setTimeout:(fn,ms)=>{timers.set(++serial,{fn,ms});return serial;},clearTimeout:id=>timers.delete(id)};
  runInNewContext(source,env);
  const click=(extra={})=>document.fire('click',{button:0,detail:1,pointerType:'mouse',clientX:100,clientY:200,target:{closest:()=>null},...extra});
- return {document,window,medias,timers,env,click,overlay:()=>document.body.children[0],rings:()=>document.body.children[0]?.children.filter(el=>el.className==='still-pointer-ring')||[]};
+ return {document,window,medias,timers,env,click,overlay:()=>document.body.children[0],rings:()=>document.body.children[0]?.children.filter(el=>el.className==='still-cursor__ring')||[]};
 }
 const f=setup();assert.equal(f.document.body.children.length,1);assert.equal(f.overlay().attributes.popover,'manual');assert(f.overlay().open);
 runInNewContext(source,f.env);assert.equal(f.document.listeners.get('click').size,1,'No duplicate click handlers on repeated install');
@@ -31,12 +31,12 @@ f.click({clientX:500});assert.equal(f.rings().length,2,'Two clicks create exactl
 first.fire('animationend');assert.equal(f.rings().length,1);for(const {fn,ms} of [...f.timers.values()]){assert.equal(ms,400);fn();}assert.equal(f.rings().length,0);assert.equal(f.timers.size,0);
 f.click({detail:0});f.click({pointerType:'touch'});f.click({button:2});assert.equal(f.rings().length,0,'Keyboard, touch and secondary clicks do not create primary mouse ripples');
 f.click();f.medias[2].matches=true;f.medias[2].fire('change');assert.equal(f.rings().length,0);f.click();assert.equal(f.rings().length,0,'Reduced motion immediately removes and suppresses rings');
-f.medias[1].matches=true;f.medias[1].fire('change');assert.equal(f.overlay(),undefined);assert(!f.document.documentElement.classList.values.has('still-pointer-active'));
+f.medias[1].matches=true;f.medias[1].fire('change');assert.equal(f.overlay(),undefined);assert(!f.document.documentElement.classList.values.has('has-still-cursor'));
 assert.equal(setup({coarse:true}).overlay(),undefined,'Even a hybrid fine/coarse match creates no overlay');assert.equal(setup({fine:false}).overlay(),undefined);
 const reduced=setup({reduced:true});reduced.click();assert.equal(reduced.rings().length,0);
-const css=await readFile('public/motion/still-motion.css','utf8');
-assert.match(css,/\.still-pointer-overlay\{[^}]*position:fixed;[^}]*overflow:visible;[^}]*pointer-events:none;[^}]*z-index:2147483647/);
-assert.match(css,/\.still-pointer-dot,\.still-pointer-ring\{[^}]*border-radius:50%/);
-assert.match(css,/animation:still-pointer-click 350ms ease-out 1 both/);
+const css=await readFile('public/still-v6.css','utf8');
+assert.match(css,/\.still-cursor\{[^}]*position:fixed;[^}]*overflow:visible;[^}]*pointer-events:none;[^}]*z-index:2147483647/);
+assert.match(css,/\.still-cursor__dot,\.still-cursor__ring\{[^}]*border-radius:50%/);
+assert.match(css,/animation:still-cursor-click 350ms ease-out 1 both/);
 assert(!css.match(/still-pointer[^}]*border-bottom:0/));
 console.log('PASS single unclipped cursor overlay, exact one-shot rings, fixed click origin, expiry, duplicate install, reduced motion and coarse-pointer native behavior');

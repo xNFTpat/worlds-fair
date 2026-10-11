@@ -242,7 +242,7 @@ const poolCards=fixture({poolFields:{cardSummary}});await poolCards.click({go:'p
 const cardHtml=poolCards.elements['#screen'].innerHTML;
 const verdictStart=cardHtml.indexOf('class="pool-verdict pass"'),reasonStart=cardHtml.indexOf('class="pool-reasons"'),reasonEnd=cardHtml.indexOf('</ul>',reasonStart),actionStart=cardHtml.indexOf('data-pool=',reasonEnd),detailsStart=cardHtml.indexOf('class="pool-details"'),metricsStart=cardHtml.indexOf('class="metrics pool-metrics"');
 assert.ok(verdictStart>=0&&verdictStart<reasonStart&&reasonEnd<actionStart&&actionStart<detailsStart&&detailsStart<metricsStart,'Pool cards lead with verdict, three reasons and one action, ahead of secondary metrics');
-assert.match(cardHtml.slice(verdictStart,reasonStart),/<h4><img[^>]+alt="Worth a look"/,'The public overall verdict wording stays intact');
+assert.match(cardHtml.slice(verdictStart,reasonStart),/<h4><span class="verdict-label">Worth a look<\/span>/,'The public overall verdict wording stays intact');
 assert.equal((cardHtml.slice(reasonStart,reasonEnd).match(/<li>/g)||[]).length,3,'Only three observed reasons appear on the card');
 for(const reason of observedReasons.slice(0,3)){assert.ok(cardHtml.includes(reason.result));assert.ok(cardHtml.includes(reason.source));}
 assert.ok(!cardHtml.includes('Extra hidden reason'));
@@ -255,12 +255,12 @@ poolCards.setPool({cardSummary:{...cardSummary,verdict:{label:'Marginal',reason:
 await poolCards.click({go:'pools'});
 const refreshedCard=poolCards.elements['#screen'].innerHTML;
 assert.ok(!refreshedCard.includes('alt="Worth a look"'),'A new unavailable response cannot retain an earlier passing verdict');
-assert.match(refreshedCard,/<h4><span class="still-chip still-chip--caution">.*Caution<\/span>/);assert.ok(refreshedCard.includes('The previous quote has expired.'));
+assert.match(refreshedCard,/<h4><span class="verdict-label">Caution<\/span>/);assert.ok(refreshedCard.includes('The previous quote has expired.'));
 assert.ok(!refreshedCard.includes('Observed paper exit estimate is 0.001 SOL.'),'Earlier numeric cost evidence is replaced rather than carried forward');
 
 const noSummary=fixture({poolFields:{cardSummary:null,tvlUsd:{value:null,source:'Synthetic market read',asOf:null}}});await noSummary.click({go:'pools'});
 const missingCard=noSummary.elements['#screen'].innerHTML;
-assert.match(missingCard,/<h4>Unavailable<\/h4>/);assert.ok(missingCard.includes('Costs, token settings and downside are unavailable until checked.'));
+assert.match(missingCard,/<h4><span class="verdict-label">Unavailable<\/span><\/h4>/);assert.ok(missingCard.includes('Costs, token settings and downside are unavailable until checked.'));
 assert.ok(!missingCard.includes('data-still-number="null"'));assert.ok(!missingCard.includes('data-still-number="undefined"'));assert.ok(!missingCard.includes('data-still-number="NaN"'),'Missing metrics never become animated values');
 assert.ok(!missingCard.includes('alt="Worth a look"'),'No summary cannot invent a passing verdict');
 console.log('Still pool-card UI: dated observed reasons, verdict/action hierarchy, three-reason cap, source escaping, refreshed unknown evidence and finite-only motion values passed.');
@@ -271,7 +271,7 @@ await poolIdentity.click({go:'pools'});
 const identityHtml=poolIdentity.elements['#screen'].innerHTML;
 assert.equal((identityHtml.match(/class="pool-card(?: [^"]*)?"/g)||[]).length,2,'Pools sharing a pair name keep separate cards');
 assert.ok(identityHtml.includes('data-pool="'+'A'.repeat(32)+'"'));assert.ok(identityHtml.includes('data-pool="'+'B'.repeat(32)+'"'));
-assert.match(identityHtml,/<h4><img[^>]+alt="Worth a look"/);assert.match(identityHtml,/<h4><img[^>]+alt="Skip for now"/,'Each pool keeps its own observed summary');
+assert.match(identityHtml,/<h4><span class="verdict-label">Worth a look<\/span>/);assert.match(identityHtml,/<h4><span class="verdict-label">Skip for now<\/span>/,'Each pool keeps its own observed summary');
 await poolIdentity.click({pool:'B'.repeat(32)});
 const identityRead=poolIdentity.requests.find(request=>request.path.startsWith('/api/still/preflight?'));
 assert.equal(new URL('https://still.example'+identityRead.path).searchParams.get('poolAddress'),'B'.repeat(32),'Pre-flight navigation uses the selected pool address, never its shared display name');
@@ -307,8 +307,8 @@ for(const hours of [0,.00001,.01])assert.equal(helpers.netSummary({breakEvenStat
 const direct=fixture({initialHash:'#preflight',initialSearch:'?pool='+ 'B'.repeat(32),preflightFields:{canOpen:false,thinExampleOnly:true,betterThanMid:true,exitCostSol:{value:.14},verdict:{label:'Skip',reason:'Liquidity under $5k. Exit costs 28%.'},checks:[{id:'liquidity',label:'Liquidity',status:'fail',shortReason:'Liquidity under $5k',result:'Pool liquidity $566'},{id:'holders',label:'Top holders',status:'unavailable',shortReason:'Top holders unavailable',result:'Coverage unavailable'}]}});await flush();
 assert(direct.requests.some(r=>r.path.includes('poolAddress='+ 'B'.repeat(32))),'Direct pool URL does not need picker membership');
 const directHtml=direct.elements['#screen'].innerHTML,front=directHtml.split('<details class="still-ticket__fold">')[0];
-assert(front.includes('Liquidity under $5k'));assert(front.includes('0.14 SOL'));assert(front.includes('28%'));assert(front.includes('Better than mid'));assert(front.includes('Top holders unavailable'));assert(front.includes('still-chip--caution'));assert(front.includes('still-chip--fail'));
-assert(front.includes('visible-preflight-checks'),'All short check reasons are visible outside the numbers fold');
+assert(front.includes('Liquidity under $5k'));assert(front.includes('0.14 SOL'));assert(front.includes('28%'));assert(front.includes('Better than mid'));assert(front.includes('Top holders unavailable'));assert(front.includes('status="unavailable"'));assert(front.includes('status="fail"'));
+assert(front.includes('live-verdict'),'All short check reasons are visible outside the numbers fold');
 console.log('PASS positive cost presentation, sub-minute coverage, direct thin-example entry and visible deciding checks');
 
 for(const hours of [48.000001,49,44044.11]) {

@@ -22,23 +22,22 @@
       this.append(content, stage);
       this._content = content; this._stage = stage; this._loader = stage.firstElementChild;
       this.dataset.state = 'idle';
-      if (this.hasAttribute('autoplay')) this.start();
+      if (this.hasAttribute('autoplay')) requestAnimationFrame(() => this.start());
     }
     start() {
       this._stage.hidden = false;
-      this._content.setAttribute('aria-hidden', 'true'); this._content.inert = true;
+      this._content.setAttribute('aria-hidden', 'true');
       this._loader.start();
       this.dataset.state = reduce() ? 'reduced-motion' : 'playing';
     }
     reveal() {
       const content = this._content, stage = this._stage, rm = reduce() || this.dataset.state === 'reduced-motion';
       const finish = () => {
-        stage.hidden = true; content.removeAttribute('aria-hidden'); content.inert = false;
+        stage.hidden = true; content.removeAttribute('aria-hidden');
         this.dataset.state = 'done';
         this.dispatchEvent(new CustomEvent('still:done', { bubbles: true }));
       };
       if (rm) { // plain crossfade, 200ms
-        this._loader.finish();
         content.style.visibility = 'visible';
         stage.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, fill: 'forwards' });
         return content.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, fill: 'none' }).finished.then(finish);

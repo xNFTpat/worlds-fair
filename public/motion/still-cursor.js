@@ -1,4 +1,4 @@
-/* One viewport overlay; a full cursor circle and one finite ring per mouse click. */
+/* Claude v6 single fixed overlay markup, retaining tested click-only, reduced-motion and top-layer safeguards. */
 (() => {
   if (window.StillCursor) return;
   const fine = matchMedia('(hover: hover) and (pointer: fine)');
@@ -12,7 +12,7 @@
     for (const [ring, timer] of rings) { clearTimeout(timer); ring.remove(); }
     rings.clear();
   }
-  function leave() { if (dot) dot.hidden = true; root.classList.remove('still-pointer-active'); }
+  function leave() { if (dot) dot.hidden = true; root.classList.remove('has-still-cursor'); }
   function promote() {
     // The top layer also sits above native dialogs and transformed/clipped cards.
     if (!overlay?.showPopover) return;
@@ -24,10 +24,10 @@
       leave(); clearRings(); overlay?.remove(); overlay = dot = null; return;
     }
     if (overlay) return;
-    overlay = document.createElement('div'); overlay.className = 'still-pointer-overlay';
+    overlay = document.createElement('div'); overlay.className = 'still-cursor';
     overlay.setAttribute('aria-hidden', 'true');
     if (overlay.showPopover) overlay.setAttribute('popover', 'manual');
-    dot = document.createElement('span'); dot.className = 'still-pointer-dot'; dot.hidden = true;
+    dot = document.createElement('span'); dot.className = 'still-cursor__dot'; dot.hidden = true;
     overlay.appendChild(dot); document.body.appendChild(overlay); promote();
   }
   function move(event) {
@@ -35,14 +35,14 @@
     if (!dot) availability();
     if (!dot || event.target?.closest?.(native)) { leave(); return; }
     dot.style.left = `${event.clientX}px`; dot.style.top = `${event.clientY}px`;
-    dot.hidden = false; root.classList.add('still-pointer-active');
+    dot.hidden = false; root.classList.add('has-still-cursor');
   }
   function click(event) {
     if (!enabled() || reduce.matches || event.button !== 0 || event.detail === 0 || event.pointerType && event.pointerType !== 'mouse') return;
     if (!overlay) availability();
     if (!overlay) return;
     promote(); move({...event, pointerType:'mouse', target:event.target, clientX:event.clientX, clientY:event.clientY});
-    const ring = document.createElement('span'); ring.className = 'still-pointer-ring';
+    const ring = document.createElement('span'); ring.className = 'still-cursor__ring';
     ring.style.left = `${event.clientX}px`; ring.style.top = `${event.clientY}px`;
     overlay.appendChild(ring);
     const finish = () => { clearTimeout(rings.get(ring)); rings.delete(ring); ring.remove(); };

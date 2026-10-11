@@ -116,7 +116,9 @@ await writeFile('validation/paper-lab-ui-fixture.json',JSON.stringify(labSummary
 
 // v1 migration keeps the two prior matching bids and all outcomes, while allowing 202-bin reads.
 {
- const prior=structuredClone(seeded);prior.version='downside-lab-v1';prior.ruleChanges=[];prior.lastScanAt=at(-5);
+ const prior=structuredClone(seeded);
+  // Test migration within one day; UTC rollover is a separate reset behaviour.
+  prior.day=at(0).slice(0,10);prior.version='downside-lab-v1';prior.ruleChanges=[];prior.lastScanAt=at(-5);
  for(const p of prior.positions){delete p.experiment;p.mark.at=at(-5);}
  prior.portfolios[arms[0].id].entriesToday=12;prior.portfolios[arms[0].id].halted=true;
  const changed=advance(prior,snap(0),reads(prior,0),time(0));
@@ -169,7 +171,9 @@ await writeFile('validation/paper-lab-ui-fixture.json',JSON.stringify(labSummary
   let long=advance(longReady,mature(10),[{poolId:'solana:pool',arm:'longer-spot',entry:{...entry(10,'longer-spot'),pool:mature(10).pools[0]}}],time(10));
   long=advance(long,mature(490),reads(long,490),time(490));assert.equal(long.positions.length,1,'longer style retains its own 48h horizon');
   long=advance(long,mature(2890),reads(long,2890),time(2890));assert.equal(long.closed[0].reason,'48-hour holding limit');
-  const prior=structuredClone(seeded);prior.version='downside-lab-v2';prior.ruleChanges=[];
+  const prior=structuredClone(seeded);
+  // Test migration within one day; UTC rollover is a separate reset behaviour.
+  prior.day=at(15).slice(0,10);prior.version='downside-lab-v2';prior.ruleChanges=[];
   for(const a of allArms.filter(a=>a.group!=='range'))delete prior.portfolios[a.id];
   for(const p of prior.positions)p.experiment='downside-lab-v2';
   prior.portfolios[arms[0].id].halted=true;prior.portfolios[arms[0].id].entriesToday=20;
