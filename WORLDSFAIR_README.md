@@ -112,7 +112,7 @@ The earlier Task 6 mobile/desktop checks are recorded against their private deve
 
 The owner authorized a new public repository named **worlds-fair** while keeping the original LP Terminal repository private. This repository therefore starts with a sanitized source snapshot and fresh Git history. It does not mirror private history or claim that the entire initial public snapshot is newly authored hackathon work.
 
-In the private source repository, `worldsfair-baseline` and `pre-worldsfair-fork` both resolve to `bccf1bb049dc58381a60b87356bde729a6b8fd06`, dated **4 September 2026, 19:56 UK**. No later commit before the requested **14 September 2026, 14:00 UK** cutoff is present in the available history. These tags remain private; no equivalent public historical tags have been fabricated.
+In the private source repository, `worldsfair-baseline` and `pre-worldsfair-fork` both resolve to `bccf1bb049dc58381a60b87356bde729a6b8fd06`, dated **4 September 2026, 19:56 UK**. No later commit before the requested **14 September 2026, 14:00 UK** cutoff is present in the available history. These historical tags remain private. The public worldsfair-baseline tag instead identifies the explicitly disclosed 5 October public snapshot; it is not a reconstructed September history.
 
 The supplied later source lacked matching Git history. Private import commit `37a4a71441b1679cea4f59fe90560614d0ed9d71` preserved that snapshot on 5 October. It includes existing research screens, market integrations, range mathematics and strategy/fleet logic. Those foundations are **inherited**, not claimed as newly authored on the import date. The available evidence cannot establish their exact before/after-cutoff authorship.
 

@@ -12,10 +12,13 @@ Current freeze: **Monday 12 October 2026 at 15:00 UK**, replacing the earlier de
 - [x] Stage (c): seven creator/house cards, source-post and removal links, confirmed follow/unfollow, a working custom bot builder, and durable forward-only paper runs on the guided position engine. No backfill or reuse of old fleet outcomes.
 - [ ] TODO(permission): Pat to review attribution with @molusol, @razzaer, @Eyyyys, @Jaypee_Sol and @VladimirKovacs. No messages sent. Exact run parameters are labelled Still examples; the public sources establish the inspiration rather than endorsement.
 - [ ] Follow camera caveat: new runs show “Too early to judge” until five closed paper trades. The runner waits for fresh qualifying market evidence, so following need not open a position immediately. Checks are normally minute-based; capacity, source outages and stale marks may delay a close.
-- [ ] Stage (d): paper profit allocations into pools, Cesto baskets and Backyard, with quote availability and atomic accounting.
-- [ ] Stage (e): eight lessons using the supplied copy, diagrams and contextual links.
-- [ ] Stage (f): all-page mobile/desktop, state and accessibility review.
-- [ ] Stage (g): README, honest prior-work disclosure and final live release verification.
+- [x] Stage (d): atomic Park example allocations with verified Cesto quotes and Backyard estimates. A separate one-time 1 SOL example is used because complete earned net profit is unavailable.
+- [x] Stage (e): all eight supplied lessons, conceptual illustrations, contextual links and persisted read ticks.
+- [x] Stage (f): mobile/desktop and keyboard review; Home Lighthouse accessibility 100/100. See docs/ACCESSIBILITY.md for scope and untested assistive-technology limits.
+- [x] Stage (g): current README and submission access instructions, SHA-based prior-work disclosure, public snapshot baseline and explicit licence gaps. Release identity is checked after deployment.
+
+- [ ] Pat: choose/confirm a project-wide source licence. No root licence exists; public visibility alone does not grant reuse rights. Review Meteora zap-sdk package licensing before claiming full dependency clearance.
+- [ ] Camera caveat: use Grow → Try a 1 SOL example → Backyard only when current SOL staking rates are available. Do not call the example earned profits. Cesto can fail closed on any unverified mint or quote.
 
 ## 9 October — guided demo before feature freeze
 
