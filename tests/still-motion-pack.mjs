@@ -53,7 +53,7 @@ const html=await readFile('public/still-demo.html','utf8');
 const app=await readFile('public/still-demo.js','utf8');
 const builder=await readFile('scripts/build-still-motion.mjs','utf8');
 assert.ok(html.includes('src="/still-app-motion.js" defer'));
-assert.ok(html.includes('href="/still-app.css"'));
+assert.ok(html.includes('<style data-still-styles>'));
 assert.ok(builder.includes("['still-loader','still-reveal','still-splash','still-sheet','still-range-gauge','still-wheel','still-ticket','still-empty','still-shell','still-cursor']"),'Bundled components retain their dependency order');
 assert.ok(app.includes('See the numbers'));assert.ok(!app.includes("module.initStillMotion()"),'No duplicate legacy load ripple or custom cursor');
 console.log('Still motion pack: inclusive/missing/contrast gauge states, reconnect/reduced motion, native-sheet in-flight cancellation safety, and ordered runtime wiring passed.');

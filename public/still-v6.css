@@ -35,3 +35,5 @@ h1,h2,h3,h4,.pool-verdict h4,.still-verdict{font-family:var(--still-serif);font-
 svg.still-sheet__wave{position:absolute;top:0;left:0;margin:0;width:100%;height:auto;pointer-events:none;overflow:visible}
 svg.still-sheet__wave .w-glow{fill:none;stroke:var(--still-live-line);stroke-width:6;opacity:.15;filter:blur(3px)}svg.still-sheet__wave .w-line{fill:none;stroke:var(--still-glass-hi);stroke-width:1.5}
 @media(prefers-reduced-transparency:reduce){dialog::backdrop{backdrop-filter:none;-webkit-backdrop-filter:none}.still-tile,.live-verdict .tk,.still-theme-btn{background:var(--still-glass-solid);backdrop-filter:none;-webkit-backdrop-filter:none}}
+/* Disabled controls stay legible; state is conveyed by semantics and quiet fill. */
+button:disabled{opacity:1;color:var(--still-text-2);background:var(--still-glass-solid);border-color:var(--still-hair)}

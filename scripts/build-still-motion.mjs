@@ -8,3 +8,10 @@ const styles=await Promise.all(['public/fonts/still-fonts.css','public/motion/st
 const css=await transform(styles.join('\n'),{loader:'css',minify:true,target:['chrome115','safari17','firefox120']});
 await writeFile('public/still-app.css',css.code);
 console.log('Still component runtime and styles bundled locally.');
+// Inline the local theme runtime and bundled styles so the first paint does not
+// wait for two extra mobile network round trips. The approved theme starter stays first.
+const theme=await transform(await readFile('public/motion/still-theme.js','utf8'),{loader:'js',minify:true,target:'es2022'});
+let page=await readFile('public/still-demo.html','utf8');
+page=page.replace(/<link rel="stylesheet" href="\/still-app\.css">|<style data-still-styles>[\s\S]*?<\/style>/,()=>`<style data-still-styles>${css.code}</style>`);
+page=page.replace(/<script src="\/motion\/still-theme\.js"><\/script>|<script data-still-theme-runtime>[\s\S]*?<\/script>/,()=>`<script data-still-theme-runtime>${theme.code}</script>`);
+await writeFile('public/still-demo.html',page);
