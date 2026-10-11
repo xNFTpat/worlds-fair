@@ -9,7 +9,7 @@ import {createRequire} from 'node:module';
 const dir=await mkdtemp(join(tmpdir(),'lp-research-'));
 for(const [name,file] of [['research','src/lp-research.ts'],['reads','src/sources/research-reads.ts'],['meteora','src/sources/meteora.ts'],['paper','src/research-paper.ts']])await build({entryPoints:[file],bundle:true,platform:'node',format:'esm',outfile:join(dir,name+'.mjs')});
 const {researchFeeRates,researchNet,researchTransferTax,researchTrend,researchStructure,researchCatalogue,researchPool,recordResearchObservation,RESEARCH_HISTORY_LIMITS}=await import(pathToFileURL(join(dir,'research.mjs')));
-const {researchReadContext,researchQuoteFresh,cachedResearchQuotes,readResearchQuotes,readMintSafety,readResearchRangeAnchor,readRugSafety,readDexScreenerBatch,readResearchCandles,RESEARCH_SOL:SOL,RESEARCH_LB_PAIR_LAYOUT,RESEARCH_READ_LIMITS}=await import(pathToFileURL(join(dir,'reads.mjs')));
+const {researchReadContext,researchQuoteFresh,cachedResearchQuotes,readResearchQuotes,readMintSafety,cachedMintSafety,readResearchRangeAnchor,readRugSafety,readDexScreenerBatch,readResearchCandles,RESEARCH_SOL:SOL,RESEARCH_LB_PAIR_LAYOUT,RESEARCH_READ_LIMITS}=await import(pathToFileURL(join(dir,'reads.mjs')));
 const {fetchMeteora}=await import(pathToFileURL(join(dir,'meteora.mjs')));
 const {runResearchReplay,starterResearchBots}=await import(pathToFileURL(join(dir,'paper.mjs')));
 const HOUR=3600000,MINUTE=60000,now=Date.now(),at=t=>new Date(t).toISOString();
@@ -111,7 +111,7 @@ assert.equal((await readResearchRangeAnchor(anchorPool(false),researchReadContex
 let blockedReads=0;globalThis.fetch=async()=>{blockedReads++;return json(anchorRpc(binaryY));};const noBudget=researchReadContext(env());noBudget.maxRequests=0;
 assert.equal((await readResearchRangeAnchor(anchorPool(false),noBudget,anchorMint())).status,'unknown');assert.equal((await readResearchRangeAnchor(anchorPool(false),researchReadContext({...env(),SOLANA_RPC:''}),anchorMint())).status,'unknown');assert.equal(blockedReads,0,'anchor reads never bypass the shared request budget or configured RPC');
 const anchorRateEnv=env();globalThis.fetch=async()=>{blockedReads++;return new Response('',{status:429,headers:{'retry-after':'120'}});};
-assert.equal((await readResearchRangeAnchor(anchorPool(false),researchReadContext(anchorRateEnv),anchorMint())).status,'rate-limited');const beforeAnchorBackoff=blockedReads;
+const anchorLimited=await readResearchRangeAnchor(anchorPool(false),researchReadContext(anchorRateEnv),anchorMint());assert.equal(anchorLimited.status,'rate-limited');assert.match(anchorLimited.note,/Read methods: getAccountInfo\./);assert.ok(!anchorLimited.note.includes(nativePoolKey),'failure diagnostics never reflect an account address');const beforeAnchorBackoff=blockedReads;
 assert.equal((await readMintSafety(pairedMint,researchReadContext(anchorRateEnv))).status,'rate-limited');assert.equal(blockedReads,beforeAnchorBackoff,'anchor429 shares RPC cooldown with mint research');
 const rpcBackoffKeys=[...anchorRateEnv.LP_CACHE.values.keys()].filter(k=>k.startsWith('research:v1:backoff:Solana RPC'));
 assert.equal(rpcBackoffKeys.length,1);assert.match(rpcBackoffKeys[0],/^research:v1:backoff:Solana RPC:[a-f0-9]{32}$/,'new RPC backoffs are scoped to a hashed provider URL');
@@ -375,6 +375,33 @@ const rateEnv=env(true);const rate=await readResearchQuotes(pool(),researchReadC
 await readResearchQuotes(pool(),researchReadContext(rateEnv));assert.equal(attempts,firstAttempts,'429 provider backoff suppresses subsequent requests');
 attempts=0;globalThis.fetch=async()=>{attempts++;throw Error('network failure');};const boundedContext=researchReadContext(env(true));boundedContext.maxRequests=1;
 const budgeted=await readResearchQuotes(pool(),boundedContext);assert.equal(attempts,1);assert.ok(budgeted.every(q=>q.roundTripCostSol===null));
+
+// PublicNode mint checks ask only for the account; epoch is a separate shared
+// dependency only for an actual Token-2022 transfer-fee extension. Unsupported
+// holder enumeration can never poison the mandatory mint-policy observation.
+let publicKind='legacy',publicEpoch=8,publicCalls=0,publicMethods=[];
+const publicEnv=()=>({...env(),SOLANA_RPC:'https://solana-rpc.publicnode.com'});
+globalThis.fetch=async(input,init)=>{
+ assert.equal(String(input),'https://solana-rpc.publicnode.com');publicCalls++;
+ const body=JSON.parse(init.body),batch=Array.isArray(body),requests=batch?body:[body];
+ const rows=requests.map(r=>{
+  publicMethods.push(r.method);assert.notEqual(r.method,'getTokenLargestAccounts');
+  if(r.method==='getGenesisHash')return {jsonrpc:'2.0',id:r.id,result:'5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d'};
+  if(r.method==='getEpochInfo')return publicEpoch===null?{jsonrpc:'2.0',id:r.id,error:{code:-32000,message:'Epoch unavailable'}}:{jsonrpc:'2.0',id:r.id,result:{epoch:publicEpoch}};
+  assert.equal(r.method,'getAccountInfo');
+  const extensions=publicKind==='2022'?[{extension:'transferFeeConfig',state:{olderTransferFee:{epoch:0,transferFeeBasisPoints:100,maximumFee:'1000'},newerTransferFee:{epoch:9,transferFeeBasisPoints:250,maximumFee:'2000'},transferFeeConfigAuthority:null,withdrawWithheldAuthority:null}}]:[];
+  return {jsonrpc:'2.0',id:r.id,result:{value:{owner:publicKind==='legacy'?'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA':'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',data:{parsed:{type:'mint',info:{decimals:6,supply:'1000000',mintAuthority:null,freezeAuthority:null,extensions}}}}}};
+ });return json(batch?rows:rows[0]);
+};
+const legacyPublic=publicEnv(),legacyMint=await readMintSafety(pairedMint,researchReadContext(legacyPublic));
+assert.equal(legacyMint.status,'available');assert.equal(legacyMint.transferFeeStatus,'none');assert.equal(legacyMint.holderSample.status,'unavailable');assert.equal(publicCalls,1);assert.equal(publicMethods.includes('getEpochInfo'),false);
+assert.equal((await cachedMintSafety(pairedMint,legacyPublic)).transferFeeStatus,'none');assert.equal(publicCalls,1,'cached policy reads do not retry the public endpoint');
+publicKind='2022';publicCalls=0;publicMethods=[];const feePublic=publicEnv();
+const beforeEpochChange=await readMintSafety(pairedMint,researchReadContext(feePublic));assert.equal(beforeEpochChange.transferFee.bps,100);assert.equal(publicCalls,2);assert.deepEqual(publicMethods,['getAccountInfo','getEpochInfo']);
+assert.equal((await cachedMintSafety(pairedMint,feePublic)).transferFee.bps,100);assert.equal(publicCalls,2);
+publicEpoch=9;const afterEpochChange=await readMintSafety(pairedMint,researchReadContext(publicEnv()));assert.equal(afterEpochChange.transferFee.bps,250);
+publicEpoch=null;const missingEpoch=await readMintSafety(pairedMint,researchReadContext(publicEnv()));assert.equal(missingEpoch.status,'available');assert.equal(missingEpoch.transferFeeStatus,'unknown');assert.equal(missingEpoch.transferFee,null,'missing epoch never becomes a zero transfer-fee policy');
+const futureEpoch=JSON.parse(feePublic.LP_CACHE.values.get('research:v1:mint-epoch'));futureEpoch.at=at(Date.now()+MINUTE);futureEpoch.expiresAt=Date.now()+2*MINUTE;feePublic.LP_CACHE.values.set('research:v1:mint-epoch',JSON.stringify(futureEpoch));assert.equal((await cachedMintSafety(pairedMint,feePublic)).transferFeeStatus,'unknown','future epoch evidence cannot select a transfer policy');
 
 // Meteora normalisation preserves the reported twelve-hour windows and configuration.
 globalThis.fetch=async()=>json({data:[{address:'native-pool',token_x:{address:'mint',symbol:'A',price:1},token_y:{address:SOL,symbol:'SOL',price:100},tvl:100000,current_price:.01,created_at:now-48*HOUR,volume:{'1h':100,'4h':400,'12h':1200,'24h':2400},fees:{'1h':1,'4h':4,'12h':12,'24h':24},fee_tvl_ratio:{'1h':.001,'4h':.004,'24h':.024},pool_config:{bin_step:20,base_fee_pct:.3},dynamic_fee_pct:.1,is_blacklisted:false}]});

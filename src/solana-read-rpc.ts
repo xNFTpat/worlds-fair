@@ -7,7 +7,17 @@ const READ_METHODS = new Set(['getAccountInfo','getMultipleAccounts','getEpochIn
 interface RpcRead {jsonrpc: '2.0'; id: number | string; method: string; params?: unknown[]}
 interface Options {deadline?: number; onRequest?: () => void}
 const json = (value: unknown, status = 200, headers: Record<string,string> = {}) => new Response(JSON.stringify(value), {status, headers: {'content-type':'application/json',...headers}});
-const unavailable = (reads: RpcRead[], batch: boolean, message: string, status = 503, retrySeconds?: number) => json(batch ? reads.map(r=>({jsonrpc:'2.0',id:r.id,error:{code:-32004,message}})) : {jsonrpc:'2.0',id:reads[0]?.id??null,error:{code:-32004,message}}, status, retrySeconds===undefined?{}:{'retry-after':String(Math.max(1,Math.ceil(retrySeconds)))});
+const unavailable = (reads: RpcRead[], batch: boolean, message: string, status = 503, retrySeconds?: number, diagnostic?: string) => json(batch ? reads.map(r=>({jsonrpc:'2.0',id:r.id,error:{code:-32004,message}})) : {jsonrpc:'2.0',id:reads[0]?.id??null,error:{code:-32004,message}}, status, {...(retrySeconds===undefined?{}:{'retry-after':String(Math.max(1,Math.ceil(retrySeconds)))}),...(diagnostic?{'x-still-rpc-failure':diagnostic}:{})});
+/** Classify only the fixed public endpoint's bounded error prefix. Never retain
+ * or reflect provider prose, URLs, addresses, credentials or request payloads. */
+async function classifyPublicFailure(response:Response):Promise<string>{
+ let text='',truncated=false;const reader=response.body?.getReader();
+ try{if(reader){const chunks:Uint8Array[]=[];let length=0;while(length<2048){const part=await reader.read();if(part.done)break;const kept=part.value.subarray(0,2048-length);chunks.push(kept);length+=kept.length;if(kept.length<part.value.length||length===2048){truncated=true;break;}}const bytes=new Uint8Array(length);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}text=new TextDecoder().decode(bytes);}}catch{return 'unreadable';}finally{try{await reader?.cancel();}catch{}}
+ const trimmed=text.trim(),labels=[!trimmed?'empty':/^[\[{]/.test(trimmed)?'json':/^\s*</.test(trimmed)?'html':'text'];
+ if(labels[0]==='json'&&!truncated)try{const data=JSON.parse(trimmed),rows=Array.isArray(data)?data:[data];for(const row of rows){const code=row?.error?.code;if(Number.isSafeInteger(code)&&Math.abs(code)<=9999999){labels.push('rpc code '+code);break;}}}catch{}
+ for(const [label,pattern]of [['rate-limit',/rate.?limit|too many|quota/i],['batch-mentioned',/batch/i],['method-mentioned',/method|getAccountInfo|getEpochInfo/i],['ip-mentioned',/\bip\b|ip.?address/i],['cloudflare-mentioned',/cloudflare|cf-ray|challenge-platform/i],['authentication-mentioned',/unauthori[sz]ed|api.?key|authentication/i],['capacity-mentioned',/capacity|overload|try again/i]] as const)if(pattern.test(text))labels.push(label);
+ if(truncated)labels.push('truncated');return labels.join('; ').slice(0,256);
+}
 
 /** A small, isolate-local circuit and immutable block-time cache. No account data
  * is cached here: mutable mint authorities, pool anchors and balances retain the
@@ -68,12 +78,12 @@ export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => n
     assertTime();
     if(!response.ok){
      const status=response.status, retry=response.headers.get('retry-after'), seconds=Number(retry), retryAt=Number.isFinite(seconds)&&seconds>0?now()+seconds*1000:Date.parse(retry||'');
-     await response.body?.cancel();
+     const diagnostic=await classifyPublicFailure(response);
      if([401,403,429,500,502,503,504].includes(status))circuits.set(endpoint,{until:now()+Math.min(900000,Math.max(status===403||status===401?300000:30000,Number.isFinite(retryAt)?retryAt-now():0)),status});
      // Keep the remaining provider cooldown visible to callers that persist it
      // across Worker isolates. A synthetic response must not shorten that wait.
-     if(status===429)return unavailable(reads,batch,'Public Solana provider is rate limited.',429,(circuits.get(endpoint)!.until-now())/1000);
-     if(![401,403,500,502,503,504].includes(status))return unavailable(reads,batch,'Public Solana provider rejected this read.',status);
+     if(status===429)return unavailable(reads,batch,'Public Solana provider is rate limited.',429,(circuits.get(endpoint)!.until-now())/1000,diagnostic);
+     if(![401,403,500,502,503,504].includes(status))return unavailable(reads,batch,'Public Solana provider rejected this read.',status,undefined,diagnostic);
      continue;
     }
     let parsed:any;

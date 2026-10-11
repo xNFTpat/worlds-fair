@@ -4,6 +4,7 @@ import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {createHash} from 'node:crypto';
 
 const dir = await mkdtemp(join(tmpdir(), 'still-costs-'));
 const OriginalDate = Date, originalFetch = globalThis.fetch;
@@ -81,6 +82,40 @@ try {
   assert.equal(httpCalls, 2, 'concurrent pre-flights share one fee observation instead of flooding RPC');
   cacheWriteFails = true;
   assert.equal((await readStillNetwork(env, true))?.doubleLamports, 10000, 'a cache-write failure cannot erase successful RPC evidence');
+
+  const legacyKey = 'research:v1:backoff:Solana RPC';
+  const scopeKey = legacyKey + ':' + createHash('sha256').update(new URL(env.SOLANA_RPC).href).digest('hex').slice(0, 32);
+  const records = new Map();
+  const cooldownEnv = {...env, LP_CACHE: {
+    async get(key) {return records.get(key) ?? null;},
+    async put(key, value) {records.set(key, JSON.parse(value));}
+  }};
+  for (const key of [legacyKey, scopeKey]) {
+    records.clear(); records.set(key, {until: now + 120000, attempts: 1, last429At: now});
+    requests = []; httpCalls = 0;
+    assert.equal(await readStillNetwork(cooldownEnv, true), null);
+    assert.equal(httpCalls, 0, 'fee cache misses respect existing ' + key + ' cooldown');
+    records.set('still:network-fees:v1', read);
+    assert.deepEqual(await readStillNetwork(cooldownEnv, true), read, 'genuine dated fees remain usable during cooldown');
+    assert.equal(httpCalls, 0);
+  }
+  records.clear(); httpCalls = 0;
+  globalThis.fetch = async () => {httpCalls++; return new Response('{}', {status: 429, headers: {'retry-after': '120'}});};
+  assert.equal(await readStillNetwork(cooldownEnv, true), null);
+  assert.equal(httpCalls, 1); assert.equal(records.get(scopeKey)?.until, now + 120000);
+  assert.equal(await readStillNetwork({...cooldownEnv}, true), null);
+  assert.equal(httpCalls, 1, 'a network 429 persists cooldown across independent fee read contexts');
+  assert.equal(records.has('still:network-fees:v1'), false, 'rate limit is never stored as fee evidence');
+  records.clear(); httpCalls = 0;
+  globalThis.fetch = async (url, init) => {
+    httpCalls++; const request = JSON.parse(init.body);
+    assert.equal(request.method, 'getLatestBlockhash');
+    records.set(scopeKey, {until: now + 120000, attempts: 1, last429At: now});
+    return Response.json({jsonrpc: '2.0', id: request.id, result: {value: {blockhash}}});
+  };
+  assert.equal(await readStillNetwork(cooldownEnv, true), null);
+  assert.equal(httpCalls, 1, 'a cooldown observed after blockhash suppresses the fee batch too');
+  assert.equal(records.has('still:network-fees:v1'), false);
   console.log('Still costs: unsigned fee messages, read-only RPC methods, bounded custom requests, freshness, invalid provider data and best-effort caching passed');
 } finally {
   globalThis.Date = OriginalDate; globalThis.fetch = originalFetch;

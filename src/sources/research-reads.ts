@@ -2,7 +2,7 @@ import type {Env} from '../env';
 import type {Pool} from '../schema';
 import type {Candle} from '../suggest';
 import {reserveResearchJupiter,noteResearchJupiterRateLimit} from '../research-quote-budget';
-import {solanaReadFetch} from '../solana-read-rpc';
+import {solanaReadFetch,PUBLIC_SOLANA_READ_RPC} from '../solana-read-rpc';
 
 // Research reads only. No swap construction, transaction signing or broadcasting.
 // Jupiter: https://dev.jup.ag/api-reference/swap/quote
@@ -24,6 +24,22 @@ const key=(name:string)=>'research:v1:'+name;
 async function keyHash(value:string){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return Array.from(new Uint8Array(bytes).slice(0,16),n=>n.toString(16).padStart(2,'0')).join('');}
 const unknown=<T>(note:string,status:ResearchReadStatus='unknown'):ResearchRead<T>=>({status,data:null,asOf:null,cached:false,note});
 interface ProviderBackoff {until:number;attempts:number;last429At:number}
+const normalizedRpcUrl=(url:string)=>{try{return new URL(url).href;}catch{return url;}};
+async function rpcBackoffKeys(url:string){const legacy=key('backoff:Solana RPC');return {legacy,scoped:legacy+':'+await keyHash(normalizedRpcUrl(url))};}
+/** Shared by mint/range research and the unsigned network-fee reader. A valid
+ * cached observation may be reused; no live RPC should ignore this cooldown. */
+export async function readResearchRpcCooldown(env:Env,url:string):Promise<number|null>{
+ const names=await rpcBackoffKeys(url),records=await Promise.all([names.scoped,names.legacy].map(name=>env.LP_CACHE.get<ProviderBackoff>(name,'json').catch(()=>null)));
+ const until=Math.max(0,...records.map(r=>typeof r?.until==='number'&&Number.isFinite(r.until)?r.until:0));
+ return until>Date.now()?until:null;
+}
+export async function noteResearchRpcRateLimit(env:Env,url:string,headers:Headers):Promise<void>{
+ const names=await rpcBackoffKeys(url),now=Date.now();
+ let previous:ProviderBackoff|null=null;try{previous=await env.LP_CACHE.get<ProviderBackoff>(names.scoped,'json');}catch{}
+ // Several in-flight reads observing one incident must not each double its wait.
+ const next=previous&&previous.until>now?{...previous,until:Math.max(previous.until,researchBackoff(null,headers,now).until)}:researchBackoff(previous,headers,now);
+ try{await env.LP_CACHE.put(names.scoped,JSON.stringify(next),{expirationTtl:86400});}catch{}
+}
 export function researchBackoff(previous:ProviderBackoff|null,headers:Headers,now=Date.now()):ProviderBackoff{
  const attempts=Math.min(8,Math.max(0,previous?.attempts||0)+1),retry=Number(headers.get('retry-after')),reset=Number(headers.get('x-ratelimit-reset'))*1000,retryDate=Date.parse(headers.get('retry-after')||'');
  const exponential=Math.min(900000,30000*2**(attempts-1)),serverWait=Math.max(Number.isFinite(retry)&&retry>0?retry*1000:0,Number.isFinite(retryDate)?retryDate-now:0,Number.isFinite(reset)?reset-now:0),delay=Math.min(900000,Math.max(exponential,serverWait));
@@ -47,7 +63,7 @@ async function readJson<T>(context:ResearchReadContext,options:{name:string;prov
  const legacyBackoffKey=key('backoff:'+options.provider);
  // RPC cooldowns belong to the explicitly configured provider. Hash the full
  // normalized URL so private provider credentials never appear in KV key names.
- let providerUrl=options.url;try{providerUrl=new URL(providerUrl).href;}catch{/* The bounded fetch below reports an invalid configured URL as unavailable. */}
+ const providerUrl=normalizedRpcUrl(options.url);
  const rpcScope=options.provider==='Solana RPC'?await keyHash(providerUrl):null;
  const backoffKey=rpcScope?legacyBackoffKey+':'+rpcScope:legacyBackoffKey;
  const [cooldown,legacyCooldown]=await Promise.all([
@@ -89,7 +105,14 @@ async function readJson<T>(context:ResearchReadContext,options:{name:string;prov
     let ttl=60000,status:ResearchReadStatus='unavailable';
     if(response.status===429){status='rate-limited';const backoff=researchBackoff(cooldown,response.headers);ttl=backoff.until-Date.now();if(options.provider==='Jupiter'){const shared=await noteResearchJupiterRateLimit(context.env,response.headers);context.jupiterRetryAt=Math.max(context.jupiterRetryAt||0,backoff.until,shared.retryAt||0);}try{await context.env.LP_CACHE.put(backoffKey,JSON.stringify(backoff),{expirationTtl:86400});}catch{}}
     await response.body?.cancel();
-    const note=options.provider+' returned HTTP '+response.status+'.';
+    let detail='';
+    if(options.provider==='Solana RPC'){
+     const methods=new Set<string>();try{const parsed=JSON.parse(String(options.init?.body));for(const r of Array.isArray(parsed)?parsed:[parsed])if(typeof r?.method==='string'&&/^get[A-Z][A-Za-z]{1,48}$/.test(r.method))methods.add(r.method);}catch{}
+     const diagnostic=response.headers.get('x-still-rpc-failure')||'';
+     const safe=diagnostic.length<=256&&/^(?:empty|json|html|text|unreadable)(?:; (?:rpc code -?\d{1,7}|rate-limit|batch-mentioned|method-mentioned|ip-mentioned|cloudflare-mentioned|authentication-mentioned|capacity-mentioned|truncated))*$/.test(diagnostic);
+     detail=(methods.size?' Read methods: '+[...methods].slice(0,8).join(', ')+'.':'')+(safe?' Public response: '+diagnostic+'.':'');
+    }
+    const note=options.provider+' returned HTTP '+response.status+'.'+detail;
     // Preserve the date of stale data, never attach a fresh date to its value.
     await saveRead(context.env,options.name,{data:saved?.data??null,at:saved?.at??new Date().toISOString(),expiresAt:Date.now()+ttl,status,note},ttl);
     return {status,data:saved?.data??null,asOf:saved?.at??null,cached:!!saved,note};
@@ -354,10 +377,26 @@ function mintSafety(read:ResearchRead<RpcResponse[]>,mint:string,owners:Research
  const holderSample:ResearchHolderSample={status:sampleValid?'available':'unavailable',asOf:sampleDates.every(Number.isFinite)?new Date(Math.min(...sampleDates)).toISOString():null,mint,supplyRaw:supply===null?null:String(supply),accounts:sampleValid?sampleAccounts:[],complete:sampleValid&&sampled===supply};
  return {status,asOf:read.asOf,note:info?read.note:'Parsed mint data unavailable for '+mint+'.',mint:info?mint:null,tokenProgram,mintAuthority,freezeAuthority,decimals,extensions:names,transferFeeStatus,transferFee,concentration,holderSample,flags};
 }
-export async function cachedMintSafety(mint:string,env:Env):Promise<MintSafety>{const [mintRead,owners]=await Promise.all([cachedResearchRead<RpcResponse[]>(env,'mint:'+mint),cachedResearchRead<OwnerRead>(env,'mint-owners:'+mint)]);return mintSafety(mintRead,mint,owners);}
+function mintRows(read:ResearchRead<RpcResponse[]|RpcResponse>):ResearchRead<RpcResponse[]>{return {...read,data:read.data?Array.isArray(read.data)?read.data:[read.data]:null};}
+async function withMintEpoch(read:ResearchRead<RpcResponse[]>,env:Env,context?:ResearchReadContext):Promise<ResearchRead<RpcResponse[]>>{
+ const account=read.data?.find(r=>r.id===1&&!r.error)?.result?.value,extensions=account?.data?.parsed?.info?.extensions;
+ const needsEpoch=read.status==='available'&&account?.owner===TOKEN_2022&&Array.isArray(extensions)&&extensions.some((e:any)=>/transferFeeConfig/i.test(String(e.extension||e.extensionType)))&&!read.data?.some(r=>r.id===2&&!r.error);
+ if(!needsEpoch)return read;
+ const epoch=context?await readJson<RpcResponse>(context,{name:'mint-epoch',provider:'Solana RPC',url:env.SOLANA_RPC||'https://api.mainnet-beta.solana.com',ttl:30000,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:2,method:'getEpochInfo',params:[{commitment:'confirmed'}]})}}):await cachedResearchRead<RpcResponse>(env,'mint-epoch');
+ const epochAt=Date.parse(epoch.asOf||'');
+ if(epoch.status!=='available'||!Number.isFinite(epochAt)||epochAt>Date.now()||Date.now()-epochAt>30000||!read.asOf||epoch.data?.id!==2||epoch.data.error||!Number.isSafeInteger(epoch.data.result?.epoch)||epoch.data.result.epoch<0)return read;
+ return {...read,data:[...read.data!,epoch.data],asOf:[read.asOf,epoch.asOf].sort()[0]};
+}
+export async function cachedMintSafety(mint:string,env:Env):Promise<MintSafety>{const [rawRead,owners]=await Promise.all([cachedResearchRead<RpcResponse[]|RpcResponse>(env,'mint:'+mint),cachedResearchRead<OwnerRead>(env,'mint-owners:'+mint)]);return mintSafety(await withMintEpoch(mintRows(rawRead),env),mint,owners);}
 export async function readMintSafety(mint:string,context:ResearchReadContext):Promise<MintSafety>{
- const body=[{jsonrpc:'2.0',id:1,method:'getAccountInfo',params:[mint,{encoding:'jsonParsed',commitment:'confirmed'}]},{jsonrpc:'2.0',id:2,method:'getEpochInfo',params:[{commitment:'confirmed'}]},{jsonrpc:'2.0',id:3,method:'getTokenLargestAccounts',params:[mint,{commitment:'confirmed'}]}];
- const read=await readJson<RpcResponse[]>(context,{name:'mint:'+mint,provider:'Solana RPC',url:context.env.SOLANA_RPC||'https://api.mainnet-beta.solana.com',ttl:RESEARCH_READ_LIMITS.mintTtlMs,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}});
+ const url=context.env.SOLANA_RPC||'https://api.mainnet-beta.solana.com',publicNode=normalizedRpcUrl(url)===PUBLIC_SOLANA_READ_RPC+'/';
+ const account={jsonrpc:'2.0',id:1,method:'getAccountInfo',params:[mint,{encoding:'jsonParsed',commitment:'confirmed'}]};
+ // The free public endpoint does not enumerate holders. A legacy SPL mint has
+ // no transfer-fee extension, so do not couple its one account read to an epoch
+ // request. Token-2022 transfer-fee policies still require a fresh epoch below.
+ const body=publicNode?account:[account,{jsonrpc:'2.0',id:2,method:'getEpochInfo',params:[{commitment:'confirmed'}]},{jsonrpc:'2.0',id:3,method:'getTokenLargestAccounts',params:[mint,{commitment:'confirmed'}]}];
+ const rawRead=await readJson<RpcResponse[]|RpcResponse>(context,{name:'mint:'+mint,provider:'Solana RPC',url,ttl:RESEARCH_READ_LIMITS.mintTtlMs,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}});
+ const read=await withMintEpoch(mintRows(rawRead),context.env,context);
  let owners=await cachedResearchRead<OwnerRead>(context.env,'mint-owners:'+mint);
  const largest=Array.isArray(read.data)?read.data.find(r=>r.id===3&&!r.error)?.result?.value:null;
  const addresses=Array.isArray(largest)?largest.slice(0,20).flatMap((r:any)=>typeof r.address==='string'?[r.address]:[]):[];

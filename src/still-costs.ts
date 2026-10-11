@@ -1,5 +1,6 @@
 import type {Env} from './env';
 import {solanaReadFetch} from './solana-read-rpc';
+import {readResearchRpcCooldown,noteResearchRpcRateLimit} from './sources/research-reads';
 /** Observed fees for explicit unsigned paper-plan message templates. Never a
  * simulation or an executable LP transaction. Nothing is signed or submitted. */
 export interface StillNetworkRead {asOf:string;singleLamports:number;doubleLamports:number;source:string}
@@ -26,7 +27,7 @@ export async function readStillNetwork(env:Env,live=false):Promise<StillNetworkR
 }
 async function readNetworkLive(env:Env,url:string):Promise<StillNetworkRead|null>{
  try{
-  const rpc=async(requests:{method:string;params:unknown[]}[])=>{const batch=requests.map((request,i)=>({jsonrpc:'2.0',id:i+1,...request})),r=await solanaReadFetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(batch.length===1?batch[0]:batch),signal:AbortSignal.timeout(6000)},{deadline:Date.now()+6000});const d=await r.json() as any,rows=Array.isArray(d)?d:[d];if(!r.ok||rows.length!==batch.length||batch.some(b=>rows.filter(v=>v?.jsonrpc==='2.0'&&v.id===b.id&&!v.error).length!==1))throw Error('RPC unavailable');return batch.map(b=>rows.find(v=>v.id===b.id).result);};
+  const rpc=async(requests:{method:string;params:unknown[]}[])=>{if(await readResearchRpcCooldown(env,url))throw Error('RPC provider cooldown');const batch=requests.map((request,i)=>({jsonrpc:'2.0',id:i+1,...request})),r=await solanaReadFetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(batch.length===1?batch[0]:batch),signal:AbortSignal.timeout(6000)},{deadline:Date.now()+6000});if(r.status===429)await noteResearchRpcRateLimit(env,url,r.headers);const d=await r.json() as any,rows=Array.isArray(d)?d:[d];if(!r.ok||rows.length!==batch.length||batch.some(b=>rows.filter(v=>v?.jsonrpc==='2.0'&&v.id===b.id&&!v.error).length!==1))throw Error('RPC unavailable');return batch.map(b=>rows.find(v=>v.id===b.id).result);};
   const hash=(await rpc([{method:'getLatestBlockhash',params:[{commitment:'confirmed'}]}]))[0].value?.blockhash;
   if(typeof hash!=='string'||hash.length<32||hash.length>44)return null;
   const fees=await rpc(([1,2] as const).map(n=>({method:'getFeeForMessage',params:[feeMessage(hash,n),{commitment:'confirmed'}]})));
