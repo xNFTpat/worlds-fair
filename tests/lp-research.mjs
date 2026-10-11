@@ -102,7 +102,7 @@ const invalidBinary=Buffer.from(binaryY);invalidBinary[0]^=1;
 const invalidResponses=[anchorRpc(binaryY,{owner:'wrong-program'}),anchorRpc(binaryY,{executable:true}),anchorRpc(invalidBinary),anchorRpc(binaryY.subarray(0,151)),anchorRpc(binaryY,{data:['not-base64','base64']}),anchorRpc(await pairBinary(true)),anchorRpc(await pairBinary(false,{bin_step:21})),anchorRpc(await pairBinary(false,{bin_step:0})),anchorRpc(await pairBinary(false,{active_id:443637})),anchorRpc(await pairBinary(false,{active_id:2147483647})),{error:{code:-32000,message:'Fixture'},result:null},{result:{context:{slot:null},value:null}}];
 for(const response of invalidResponses){globalThis.fetch=async()=>json(response);const result=await readResearchRangeAnchor(anchorPool(false),researchReadContext(env()),anchorMint());assert.notEqual(result.status,'available');assert.equal(result.activeBinId,null);assert.equal(result.activeBinPriceSol,null);}
 globalThis.fetch=async()=>json(anchorRpc(binaryY));
-for(const extra of [{mint:'another-mint'},{status:'stale'},{asOf:at(Date.now()-5*MINUTE-1)},{asOf:at(Date.now()+MINUTE)},{decimals:null},{decimals:-1},{decimals:6.5},{tokenProgram:'unrecognised'}]){const result=await readResearchRangeAnchor(anchorPool(false),researchReadContext(env()),{...anchorMint(),...extra});assert.equal(result.status,'unknown');assert.equal(result.activeBinId,null);}
+for(const extra of [{mint:'another-mint'},{status:'stale'},{asOf:at(Date.now()-RESEARCH_READ_LIMITS.mintTtlMs-1)},{asOf:at(Date.now()+MINUTE)},{decimals:null},{decimals:-1},{decimals:6.5},{tokenProgram:'unrecognised'}]){const result=await readResearchRangeAnchor(anchorPool(false),researchReadContext(env()),{...anchorMint(),...extra});assert.equal(result.status,'unknown');assert.equal(result.activeBinId,null);}
 const datedEnv=env(),anchorAt=Date.parse(nativeAnchor.asOf);datedEnv.LP_CACHE.values.set('research:v1:active-bin:'+nativePoolKey,anchorEnv.LP_CACHE.values.get('research:v1:active-bin:'+nativePoolKey));
 Date.now=()=>anchorAt+RESEARCH_READ_LIMITS.anchorTtlMs+1;globalThis.fetch=async()=>new Response('',{status:503});
 const expiredAnchor=await readResearchRangeAnchor(anchorPool(false),researchReadContext(datedEnv),anchorMint());assert.equal(expiredAnchor.status,'unavailable');assert.equal(expiredAnchor.asOf,nativeAnchor.asOf,'failure does not attach a fresh timestamp to old binary data');assert.equal(expiredAnchor.activeBinId,null);
@@ -157,7 +157,7 @@ assert.ok(Object.keys(JSON.parse(histEnv.LP_CACHE.values.get('research:v1:histor
 // future, another mint, or a stale provider response. Writer work stays two KV reads.
 globalThis.fetch=()=>{throw Error('History writer attempted a provider request');};
 const authorityEnv=env(),authorityStart=now-HOUR;
-const evidence=[null,{offset:MINUTE},{offset:-5*MINUTE-1},{offset:-5*MINUTE},{offset:0,mint:'other-mint'},{offset:0,status:'stale'},{offset:0}];
+const evidence=[null,{offset:MINUTE},{offset:-RESEARCH_READ_LIMITS.mintTtlMs-1},{offset:-5*MINUTE},{offset:0,mint:'other-mint'},{offset:0,status:'stale'},{offset:0}];
 for(let i=0;i<evidence.length;i++){
  const pointAt=authorityStart+i*10*MINUTE,fixture=evidence[i];Date.now=()=>pointAt;
  if(fixture)authorityEnv.LP_CACHE.values.set('research:v1:enriched-index',JSON.stringify({'solana:pool':{at:at(pointAt),tokenMint:fixture.mint||'mint',safety:{rpc:{status:fixture.status||'available',asOf:at(pointAt+fixture.offset),mintAuthority:null,freezeAuthority:'active-freeze'}}}}));
@@ -203,7 +203,7 @@ assert.equal(filtered.rows.length,1);assert.equal(filtered.rows[0].pool.id,'sola
 let calls=[];
 const providerEnv=env(true),tokenProgram='TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 providerEnv.LP_CACHE.values.set('research:v1:history',authorityEnv.LP_CACHE.values.get('research:v1:history'));
-const rpcMint=()=>[{id:1,result:{value:{owner:tokenProgram,data:{parsed:{type:'mint',info:{decimals:6,supply:'100000000',mintAuthority:'authority',freezeAuthority:null,extensions:[{extension:'transferFeeConfig',state:{transferFeeConfigAuthority:'fee-authority',withdrawWithheldAuthority:null,olderTransferFee:{epoch:1,transferFeeBasisPoints:200,maximumFee:'1000'},newerTransferFee:{epoch:10,transferFeeBasisPoints:500,maximumFee:'2000'}}},{extension:'permanentDelegate',state:{delegate:'delegate'}}]}}}}}},{id:2,result:{epoch:9}},{id:3,result:{value:[{address:'account1',amount:'30000000'},{address:'account2',amount:'25000000'}]}}];
+const rpcMint=()=>[{jsonrpc:'2.0',id:1,result:{value:{owner:tokenProgram,data:{parsed:{type:'mint',info:{decimals:6,supply:'100000000',mintAuthority:'authority',freezeAuthority:null,extensions:[{extension:'transferFeeConfig',state:{transferFeeConfigAuthority:'fee-authority',withdrawWithheldAuthority:null,olderTransferFee:{epoch:1,transferFeeBasisPoints:200,maximumFee:'1000'},newerTransferFee:{epoch:10,transferFeeBasisPoints:500,maximumFee:'2000'}}},{extension:'permanentDelegate',state:{delegate:'delegate'}}]}}}}}},{jsonrpc:'2.0',id:2,result:{epoch:9}},{jsonrpc:'2.0',id:3,result:{value:[{address:'account1',amount:'30000000'},{address:'account2',amount:'25000000'}]}}];
 const nativeRows=candles.map(c=>({timestamp:c.t,open:c.o,high:c.h,low:c.l,close:c.c,volume:c.v}));
 globalThis.fetch=async(input,init)=>{
  const url=new URL(String(input));calls.push({url:url.toString(),init});
@@ -211,7 +211,7 @@ globalThis.fetch=async(input,init)=>{
   const body=JSON.parse(init.body);
   if(Array.isArray(body)){assert.deepEqual(body.map(r=>r.method),['getAccountInfo','getEpochInfo','getTokenLargestAccounts']);return json(rpcMint());}
   assert.equal(body.method,'getMultipleAccounts');assert.deepEqual(body.params[0],['account1','account2']);
-  return json({result:{value:body.params[0].map((_,i)=>({data:{parsed:{type:'account',info:{mint:'mint',owner:'same-owner',tokenAmount:{amount:i?'25000000':'30000000'}}}}}))}});
+  return json({jsonrpc:'2.0',id:body.id,result:{value:body.params[0].map((_,i)=>({data:{parsed:{type:'account',info:{mint:'mint',owner:'same-owner',tokenAmount:{amount:i?'25000000':'30000000'}}}}}))}});
  }
  if(url.hostname==='api.rugcheck.xyz')return json({mint:'mint',score:12,risks:[{name:'Mint authority enabled',level:'warn',description:'Fixture'}]});
  if(url.hostname==='api.dexscreener.com')return json([{chainId:'solana',pairAddress:'other-pool',baseToken:{address:'mint'},quoteToken:{address:SOL},liquidity:{usd:90000}},{chainId:'solana',pairAddress:'pool',baseToken:{address:'mint'},quoteToken:{address:SOL},liquidity:{usd:100000},volume:{h24:500000},priceUsd:'100',url:'https://dexscreener.com/solana/pool'}]);
@@ -251,7 +251,7 @@ globalThis.fetch=async(input,init)=>{
  const url=new URL(String(input));
  if(url.hostname==='rpc.example'){
   const request=JSON.parse(init.body);
-  if(Array.isArray(request))return json([{id:1,result:{value:{owner:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',data:{parsed:{type:'mint',info:{decimals:6,supply:'1000',mintAuthority:null,freezeAuthority:null}}}}}},{id:2,result:{epoch:9}},{id:3,result:{value:[]}}]);
+  if(Array.isArray(request))return json([{jsonrpc:'2.0',id:1,result:{value:{owner:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',data:{parsed:{type:'mint',info:{decimals:6,supply:'1000',mintAuthority:null,freezeAuthority:null}}}}}},{jsonrpc:'2.0',id:2,result:{epoch:9}},{jsonrpc:'2.0',id:3,result:{value:[]}}]);
   detailAnchorRequests++;assert.equal(request.params[0],nativePoolKey);assert.equal(request.params[1].encoding,'base64');return json(anchorRpc(binaryY));
  }
  if(url.hostname==='api.rugcheck.xyz')return json({mint:pairedMint,score:0,risks:[]});
@@ -272,7 +272,7 @@ for(const solX of [false,true]){
   const url=new URL(String(input));
   if(url.hostname==='rpc.example'){
    const request=JSON.parse(init.body);
-   if(Array.isArray(request))return json([{id:1,result:{value:{owner:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',data:{parsed:{type:'mint',info:{decimals:6,supply:'1000',mintAuthority:null,freezeAuthority:null}}}}}},{id:2,result:{epoch:9}},{id:3,result:{value:[]}}]);
+   if(Array.isArray(request))return json([{jsonrpc:'2.0',id:1,result:{value:{owner:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',data:{parsed:{type:'mint',info:{decimals:6,supply:'1000',mintAuthority:null,freezeAuthority:null}}}}}},{jsonrpc:'2.0',id:2,result:{epoch:9}},{jsonrpc:'2.0',id:3,result:{value:[]}}]);
    markAnchorRequests++;return json(anchorRpc(await pairBinary(solX,{active_id:markId})));
   }
   if(url.hostname==='api.rugcheck.xyz')return json({mint:pairedMint,score:0,risks:[]});
@@ -423,6 +423,49 @@ assert.deepEqual(onMethods,[['getGenesisHash','getAccountInfo'],['getTokenLarges
 assert.equal((await cachedMintSafety(pairedMint,completeEnv)).holderSample.status,'available');assert.equal(onMethods.length,3,'cached split evidence preserves genuine holders without provider traffic');
 holderFails=true;onMethods=[];const failedHolders=await readMintSafety(pairedMint,researchReadContext(onEnv()));assert.equal(failedHolders.status,'available');assert.equal(failedHolders.transferFeeStatus,'none');assert.equal(failedHolders.holderSample.status,'unavailable');assert.match(failedHolders.note,/Largest-holder enumeration is unavailable/);assert.deepEqual(onMethods,[['getAccountInfo'],['getTokenLargestAccounts']]);
 holderFails=false;onMethods=[];const mintOnlyContext=researchReadContext(onEnv());mintOnlyContext.maxRequests=1;const mintOnly=await readMintSafety(pairedMint,mintOnlyContext);assert.equal(mintOnly.status,'available');assert.equal(mintOnly.transferFeeStatus,'none');assert.equal(mintOnly.holderSample.status,'unavailable');assert.deepEqual(onMethods,[['getAccountInfo']],'exhausted optional holder budget cannot poison or repeat the mandatory mint read');
+
+// Dedicated Still mint, Token-2022 and owner snapshots remain source-dated for
+// ten minutes. Private provider identity is hashed in KV; error prose is never
+// retained as successful evidence or copied into API/cache records.
+let cacheClock=originalNow(),privateCalls=0,privateEpoch=8,privateFailure=false;
+Date.now=()=>cacheClock;
+const privateCache={...env(),STILL_RPC_URL:'https://rpc.invalid/read'};
+const token2022='TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+globalThis.fetch=async(input,init)=>{
+ assert.ok(String(input)===privateCache.STILL_RPC_URL,'dedicated read endpoint selected');privateCalls++;
+ const body=JSON.parse(init.body),batch=Array.isArray(body),requests=batch?body:[body];
+ const rows=requests.map(r=>{
+  if(privateFailure)return {jsonrpc:'2.0',id:r.id,error:{code:-32000,message:'Failed URL '+privateCache.STILL_RPC_URL}};
+  if(r.method==='getEpochInfo')return {jsonrpc:'2.0',id:r.id,result:{epoch:privateEpoch}};
+  if(r.method==='getTokenLargestAccounts')return {jsonrpc:'2.0',id:r.id,result:{value:[{address:holderAddress,amount:'1000000'}]}};
+  if(r.method==='getAccountInfo')return {jsonrpc:'2.0',id:r.id,result:{value:{owner:token2022,data:{parsed:{type:'mint',info:{decimals:6,supply:'1000000',mintAuthority:null,freezeAuthority:null,extensions:[{extension:'transferFeeConfig',state:{olderTransferFee:{epoch:0,transferFeeBasisPoints:100,maximumFee:'1000'},newerTransferFee:{epoch:9,transferFeeBasisPoints:250,maximumFee:'2000'}}}]}}}}}};
+  assert.equal(r.method,'getMultipleAccounts');return {jsonrpc:'2.0',id:r.id,result:{value:[{owner:token2022,data:{parsed:{type:'account',info:{mint:pairedMint,owner:holderOwner,tokenAmount:{amount:'1000000'}}}}}]}};
+ });return json(batch?rows:rows[0]);
+};
+const privateFirst=await readMintSafety(pairedMint,researchReadContext(privateCache)),privateFirstAt=privateFirst.asOf;
+assert.equal(privateCalls,2);assert.equal(privateFirst.transferFee.bps,100);assert.equal(privateFirst.holderSample.status,'available');
+assert.ok([...privateCache.LP_CACHE.values.keys()].filter(k=>k.startsWith('research:v1:mint')).every(k=>/:rpc:[a-f0-9]{32}$/.test(k)),'credentialed mint/owner cache keys contain only a provider hash');
+for(const value of privateCache.LP_CACHE.values.values()){const record=JSON.parse(value);if(record.status==='available')assert.equal(record.expiresAt-Date.parse(record.at),600000);}
+privateEpoch=9;cacheClock+=599999;
+const privateCached=await readMintSafety(pairedMint,researchReadContext(privateCache));assert.equal(privateCalls,2);assert.equal(privateCached.asOf,privateFirstAt);assert.equal(privateCached.holderSample.asOf,privateFirst.holderSample.asOf);assert.equal(privateCached.transferFee.bps,100,'cache states the observed epoch policy without inventing a fresh one');
+cacheClock+=2;const privateRenewed=await readMintSafety(pairedMint,researchReadContext(privateCache));assert.equal(privateCalls,4);assert.equal(privateRenewed.transferFee.bps,250);assert.notEqual(privateRenewed.asOf,privateFirstAt);
+privateFailure=true;const failedPrivate={...privateCache,LP_CACHE:new KV()},privateFailed=await readMintSafety(pairedMint,researchReadContext(failedPrivate));assert.equal(privateFailed.status,'unavailable');assert.equal(privateFailed.transferFeeStatus,'unknown');assert.equal(privateFailed.holderSample.status,'unavailable');
+assert.ok(!JSON.stringify([...failedPrivate.LP_CACHE.values]).includes(privateCache.STILL_RPC_URL),'provider URL never appears in cached error records');assert.ok(!JSON.stringify(privateFailed).includes(privateCache.STILL_RPC_URL),'provider URL never appears in public evidence');
+assert.ok([...failedPrivate.LP_CACHE.values.values()].map(v=>JSON.parse(v)).every(record=>record.status!=='available'),'RPC errors do not receive a successful ten-minute cache entry');
+Date.now=originalNow;
+
+// Still's exact-size exit quote uses Jupiter alone, including routes for which
+// legacy Research optionally fetches a Pump fee floor from Solana RPC.
+let quoteOnlyCalls=0;const quoteOnlyEnv={...env(),STILL_RPC_URL:'https://rpc.invalid/read'},quoteOnlyPool=anchorPool(false);
+globalThis.fetch=async(input)=>{
+ const url=new URL(input);assert.equal(url.hostname,'api.jup.ag','Still quote helper must not request RPC supplemental fees');quoteOnlyCalls++;
+ const buy=url.searchParams.get('inputMint')===SOL,amount=url.searchParams.get('amount');
+ assert.equal(amount,buy?'500000000':'1000000','sell uses exact Jupiter buy output');
+ return json({inputMint:buy?SOL:pairedMint,outputMint:buy?pairedMint:SOL,inAmount:amount,outAmount:buy?'1000000':'490000000',routePlan:[{swapInfo:{ammKey:nativePoolKey,label:'Pump.fun Amm'}}]});
+};
+const quoteOnly=await readResearchQuotes(quoteOnlyPool,researchReadContext(quoteOnlyEnv),6,{source:'meteora-pool',priceSol:1,asOf:quoteOnlyPool.fetchedAt,poolAddress:quoteOnlyPool.address,mint:pairedMint},{sizes:[.5],modes:['best'],freshOnly:true,supplementalRpcFees:false});
+assert.equal(quoteOnlyCalls,2);assert.equal(quoteOnly[0].status,'quoted');assert.equal(quoteOnly[0].tokenRaw,'1000000');assert.equal(quoteOnly[0].quotedExitDragSol,.51);
+await readResearchQuotes(quoteOnlyPool,researchReadContext(quoteOnlyEnv),6,{source:'meteora-pool',priceSol:1,asOf:quoteOnlyPool.fetchedAt,poolAddress:quoteOnlyPool.address,mint:pairedMint},{sizes:[.5],modes:['best'],freshOnly:true,supplementalRpcFees:false});assert.equal(quoteOnlyCalls,2,'cached quote path also skips supplemental RPC');
 
 // Meteora normalisation preserves the reported twelve-hour windows and configuration.
 globalThis.fetch=async()=>json({data:[{address:'native-pool',token_x:{address:'mint',symbol:'A',price:1},token_y:{address:SOL,symbol:'SOL',price:100},tvl:100000,current_price:.01,created_at:now-48*HOUR,volume:{'1h':100,'4h':400,'12h':1200,'24h':2400},fees:{'1h':1,'4h':4,'12h':12,'24h':24},fee_tvl_ratio:{'1h':.001,'4h':.004,'24h':.024},pool_config:{bin_step:20,base_fee_pct:.3},dynamic_fee_pct:.1,is_blacklisted:false}]});

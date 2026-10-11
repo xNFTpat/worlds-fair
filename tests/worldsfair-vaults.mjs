@@ -39,9 +39,9 @@ globalThis.fetch=async(input,init={})=>{
  }
  if(url.hostname==='rpc.test'){
   assert.equal(method,'POST');const body=JSON.parse(init.body);
-  if(Array.isArray(body))return json(body.map(r=>{assert.equal(r.method,'getBlockTime');return {id:r.id,result:Math.floor(clock/1000)+(quoteFault==='old-slot'?-46:quoteFault==='future-slot'?1:priceFault==='stale'?-301:-2)};}));
+  if(Array.isArray(body))return json(body.map(r=>{assert.equal(r.method,'getBlockTime');return {jsonrpc:'2.0',id:r.id,result:Math.floor(clock/1000)+(quoteFault==='old-slot'?-46:quoteFault==='future-slot'?1:priceFault==='stale'?-301:-2)};}));
   assert.equal(body.method,'getMultipleAccounts');assert.deepEqual(body.params[0],[A]);
-  return json({result:{value:[{owner:rpcFault==='owner'?A:PROGRAM,executable:false,data:{parsed:{type:'mint',info:{isInitialized:true,decimals:rpcFault==='decimals'?7:6}}}}]}});
+  return json({jsonrpc:'2.0',id:body.id,result:{value:[{owner:rpcFault==='owner'?A:PROGRAM,executable:false,data:{parsed:{type:'mint',info:{isInitialized:true,decimals:rpcFault==='decimals'?7:6}}}}]}});
  }
  if(url.hostname==='api.jup.ag'){
   assert.equal(method,'GET');assert.equal(init.headers['x-api-key'],key?'vault-fixture-key':undefined);if(!key)assert.equal(Object.hasOwn(init.headers,'x-api-key'),false);

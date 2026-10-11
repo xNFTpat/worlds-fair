@@ -11,7 +11,7 @@ import {buildResearchRange, defaultResearchFloor, inventoryAtPrice, type Researc
 
 export const STILL_MAX_PRICE_AGE_MS = 10 * 60_000;
 export const STILL_MIN_TVL_USD = 5_000;
-const MINT_MAX_AGE_MS = 5 * 60_000;
+const MINT_MAX_AGE_MS = 10 * 60_000;
 const MARKET_SOURCE = 'Meteora DLMM Data API';
 const MODEL_SOURCE = 'Still paper range model + Meteora DLMM Data API';
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -340,10 +340,10 @@ export async function getStillPreflight(env: Env, poolAddress: string, sizeSol =
     const anchor=await readResearchRangeAnchor(current,context,rpc);
     const apiToken=freshPool&&freshPool.address===pool.address?researchToken(freshPool):null;
     const mark:ResearchQuoteMark|null=anchor.status==='available'&&positive(anchor.activeBinPriceSol)&&anchor.asOf?{priceSol:anchor.activeBinPriceSol,asOf:anchor.asOf,source:'active-bin'}:freshPool&&apiToken?.mint===token.mint&&positive(apiToken.priceSol)&&recent(freshPool.fetchedAt,45_000,Date.now())?{priceSol:apiToken.priceSol,asOf:freshPool.fetchedAt,source:'meteora-pool',poolAddress:pool.address,mint:token.mint}:null;
-    const quotes=await readResearchQuotes(current,context,rpc.decimals,mark,{sizes:[sizeSol],modes:['best'],freshOnly:false});
+    const quotes=await readResearchQuotes(current,context,rpc.decimals,mark,{sizes:[sizeSol],modes:['best'],freshOnly:false,supplementalRpcFees:false});
     const initial=buildStillPreflight({pool:current,quotes,safety:{rpc},rug,candles,rangeAnchor:anchor,network},sizeSol,Date.now(),options);
     const funding=initial.range&&initial.priceSol.value?Math.round(initial.range.bins.reduce((n,b)=>n+b.token*initial.priceSol.value!,0)*1e9)/1e9:0;
-    const entryQuotes=funding>0?await readResearchQuotes(current,context,rpc.decimals,mark,{sizes:[funding],modes:['best'],freshOnly:true}):[];
+    const entryQuotes=funding>0?await readResearchQuotes(current,context,rpc.decimals,mark,{sizes:[funding],modes:['best'],freshOnly:true,supplementalRpcFees:false}):[];
     const input={pool:current,quotes,entryQuotes,safety:{rpc},rug,candles,rangeAnchor:anchor,network};
     try{await env.LP_CACHE.put(savedKey,JSON.stringify({at:new Date().toISOString(),input}),{expirationTtl:60});}catch{}
     return buildStillPreflight(input,sizeSol,Date.now(),options);

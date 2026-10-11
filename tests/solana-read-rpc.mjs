@@ -38,7 +38,36 @@ let customCalls=[];
 const privateRpc=createSolanaReadRpc({fetcher:async(url,options)=>{customCalls.push({url,options});return new Response('',{status:403});}});
 const auth={...init(request('getSlot')),headers:{authorization:'synthetic-fixture-secret'}};
 await privateRpc('https://custom.example/key',auth);await privateRpc(LABS+'/?api-key=synthetic',init(request('getSlot')));await privateRpc(LABS,auth);
-assert.equal(customCalls.length,3);assert.equal(customCalls[0].options,auth,'custom URL and authorization stay at their own provider');assert.ok(customCalls.every(c=>c.url!==NODE));
+assert.equal(customCalls.length,3);assert.equal(customCalls[0].options.headers,auth.headers,'custom authorization stays at its own provider');assert.equal(customCalls[0].options.body,auth.body);assert.ok(customCalls.every(c=>c.options.redirect==='manual'&&c.url!==NODE),'custom reads cannot redirect or fall back');
+// A secret-bearing private endpoint is never included in returned failures,
+// SDK-visible prose or headers. These providers and credentials are synthetic.
+const selected='https://private-fixture.invalid/?api-key=private-sentinel',privateInit=init(request('getSlot'));
+let privateWire=[];
+for(const status of [301,302,307,401,403,429,500,503]){
+ const guarded=createSolanaReadRpc({now:()=>clock,fetcher:async(url,options)=>{privateWire.push({url,options});return new Response(selected,{status,statusText:'private-sentinel',headers:{location:selected,'x-provider-url':selected,'retry-after':'90'}});}});
+ const response=await guarded(selected,privateInit),body=await response.text();
+ assert.equal(response.status,status<400?502:status);assert.equal(response.headers.get('retry-after'),'90');
+ assert.doesNotMatch(body+JSON.stringify([...response.headers])+response.statusText,/private-sentinel|private-fixture|https:/);
+ assert.equal(privateWire.at(-1).url,selected);assert.equal(privateWire.at(-1).options.redirect,'manual');
+}
+assert.equal(privateWire.length,8,'each failed private read performs one request to the selected provider only');
+const guardedFailure=createSolanaReadRpc({now:()=>clock,fetcher:async()=>{throw Error('fetch failed at '+selected);}});
+assert.doesNotMatch(await (await guardedFailure(selected,privateInit)).text(),/private-sentinel|private-fixture|https:/);
+for(const providerBody of [selected,JSON.stringify({jsonrpc:'2.0',id:999,error:{message:selected}}),JSON.stringify({jsonrpc:'2.0',id:1,error:{code:-32000,message:selected,data:{url:selected}}})]){
+ const guarded=createSolanaReadRpc({now:()=>clock,fetcher:async()=>new Response(providerBody,{headers:{'x-provider-url':selected}})});
+ const response=await guarded(selected,privateInit);
+ assert.doesNotMatch(await response.text()+JSON.stringify([...response.headers]),/private-sentinel|private-fixture|https:/);
+}
+const successful={context:{slot:123},value:{amount:'900719925474099312345',nullable:null}};
+const mixed=createSolanaReadRpc({now:()=>clock,fetcher:async()=>json([{jsonrpc:'2.0',id:2,error:{code:-32000,message:selected,data:selected}},{jsonrpc:'2.0',id:1,result:successful}])});
+const mixedBody=await (await mixed(selected,init([request('getAccountInfo',1),request('getTokenAccountsByOwner',2)]))).json();
+assert.deepEqual(mixedBody[0],{jsonrpc:'2.0',id:1,result:successful},'successful RPC values survive private batch sanitization unchanged');
+assert.deepEqual(mixedBody[1],{jsonrpc:'2.0',id:2,error:{code:-32000,message:'The selected Solana read could not be completed.'}});
+for(const method of ['sendTransaction','requestAirdrop','simulateTransaction','signTransaction'])await assert.rejects(mixed(selected,init(request(method))),/read methods/);
+await assert.rejects(mixed('invalid private-sentinel',privateInit),error=>error.message==='The selected Solana read provider is invalid.');
+let privateLateCalls=0;const deadlineGuard=createSolanaReadRpc({now:()=>clock,fetcher:async()=>{privateLateCalls++;return json({jsonrpc:'2.0',id:1,result:123});}});
+assert.equal((await deadlineGuard(selected,privateInit,{deadline:clock})).status,503);assert.equal(privateLateCalls,0);
+const privateAbort=new AbortController();privateAbort.abort();assert.equal((await deadlineGuard(selected,{...privateInit,signal:privateAbort.signal})).status,503);assert.equal(privateLateCalls,0);
 // Explicit PublicNode selection never probes Labs first, and still verifies
 // mainnet before returning mutable account observations.
 calls=[];rpc=createSolanaReadRpc({fetcher,now:()=>clock});assert.equal((await rpc(NODE,init(request('getAccountInfo',1,['synthetic-mint'])))).status,200);assert.deepEqual(calls.map(c=>c.url),[NODE]);assert.ok(JSON.parse(calls[0].options.body).some(r=>r.method==='getGenesisHash'));

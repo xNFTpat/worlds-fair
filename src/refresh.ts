@@ -209,7 +209,7 @@ export async function refreshPositionsImpl(env: Env): Promise<PositionsPayload> 
       })(),
       (async () => {
         try {
-          const b = isEvm ? { native: await ethBalance(w.address, rpc), symbol: "ETH" } : await solanaBalances(w.address, env.SOLANA_RPC).then(b => ({ native: b.sol, stable: b.usdc, symbol: "SOL" }));
+          const b = isEvm ? { native: await ethBalance(w.address, rpc), symbol: "ETH" } : await solanaBalances(w.address, env.SOLANA_RPC, env.STILL_RPC_URL !== undefined ? env : undefined).then(b => ({ native: b.sol, stable: b.usdc, symbol: "SOL" }));
           balances.push({ wallet: w.name, chain, ...b });
           sources[bk] = health(`${w.name} wallet`, attemptedAt, true);
         } catch (e) {

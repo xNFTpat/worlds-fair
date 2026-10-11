@@ -3,6 +3,7 @@ import type {Pool} from '../schema';
 import type {Candle} from '../suggest';
 import {reserveResearchJupiter,noteResearchJupiterRateLimit} from '../research-quote-budget';
 import {solanaReadFetch,PUBLIC_SOLANA_READ_RPC,ONFINALITY_SOLANA_READ_RPC} from '../solana-read-rpc';
+import {stillReadRpcUrl} from '../still-rpc-env';
 
 // Research reads only. No swap construction, transaction signing or broadcasting.
 // Jupiter: https://dev.jup.ag/api-reference/swap/quote
@@ -13,7 +14,7 @@ export type ResearchReadStatus='available'|'unknown'|'unavailable'|'rate-limited
 export interface ResearchRead<T>{status:ResearchReadStatus;data:T|null;asOf:string|null;expiresAt?:number;cached:boolean;note:string}
 interface SavedRead<T>{data:T|null;at:string;expiresAt:number;status:ResearchReadStatus;note:string}
 export interface ResearchReadContext {env:Env;requests:number;pendingRequests:number;cacheHits:number;maxRequests:number;deadline:number;jupiterRetryAt?:number}
-export const RESEARCH_READ_LIMITS=Object.freeze({maxRequests:15,deadlineMs:20000,requestMs:7000,quoteTtlMs:45000,economicQuoteTtlMs:600000,economicRetentionMs:3600000,mintTtlMs:300000,anchorTtlMs:60000,safetyTtlMs:600000,candleTtlMs:300000,dexBatch:30});
+export const RESEARCH_READ_LIMITS=Object.freeze({maxRequests:15,deadlineMs:20000,requestMs:7000,quoteTtlMs:45000,economicQuoteTtlMs:600000,economicRetentionMs:3600000,mintTtlMs:600000,epochTtlMs:600000,dexTtlMs:300000,anchorTtlMs:60000,safetyTtlMs:600000,candleTtlMs:300000,dexBatch:30});
 export function researchReadContext(env:Env):ResearchReadContext{return {env,requests:0,pendingRequests:0,cacheHits:0,maxRequests:RESEARCH_READ_LIMITS.maxRequests,deadline:Date.now()+RESEARCH_READ_LIMITS.deadlineMs};}
 const pending=new Map<string,Promise<ResearchRead<unknown>>>();
 const valid=(n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n)&&n>=0;
@@ -21,6 +22,10 @@ const positive=(n:unknown):n is number=>valid(n)&&n>0;
 const raw=(n:unknown):n is string=>typeof n==='string'&&/^\d{1,78}$/.test(n);
 const number=(n:unknown):number|null=>{if(n==null||typeof n==='boolean'||n==='')return null;const value=typeof n==='string'?Number(n):n;return valid(value)?value:null;};
 const key=(name:string)=>'research:v1:'+name;
+const researchRpcUrl=(env:Env)=>env.STILL_RPC_URL!==undefined?stillReadRpcUrl(env):env.SOLANA_RPC||'https://api.mainnet-beta.solana.com';
+// Credentialed observations use a one-way provider scope. No URL or credential
+// is written to KV, returned in a response, or included in a cache key.
+async function observationKey(env:Env,name:string){return key(name)+(env.STILL_RPC_URL!==undefined&&/^(?:mint(?:-|:)|active-bin:|pump-sell-fee:)/.test(name)?':rpc:'+await keyHash(researchRpcUrl(env)):'');}
 async function keyHash(value:string){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return Array.from(new Uint8Array(bytes).slice(0,16),n=>n.toString(16).padStart(2,'0')).join('');}
 const unknown=<T>(note:string,status:ResearchReadStatus='unknown'):ResearchRead<T>=>({status,data:null,asOf:null,cached:false,note});
 interface ProviderBackoff {until:number;attempts:number;last429At:number;diagnostic?:string}
@@ -54,7 +59,7 @@ export function researchBackoff(previous:ProviderBackoff|null,headers:Headers,no
 }
 
 async function savedRead<T>(env:Env,name:string):Promise<SavedRead<T>|null>{
- try{return await env.LP_CACHE.get<SavedRead<T>>(key(name),'json');}catch{return null;}
+ try{return await env.LP_CACHE.get<SavedRead<T>>(await observationKey(env,name),'json');}catch{return null;}
 }
 export async function cachedResearchRead<T>(env:Env,name:string):Promise<ResearchRead<T>>{
  const saved=await savedRead<T>(env,name);
@@ -62,7 +67,7 @@ export async function cachedResearchRead<T>(env:Env,name:string):Promise<Researc
  return {status:saved.expiresAt>Date.now()?saved.status:'stale',data:saved.data,asOf:saved.at,expiresAt:saved.expiresAt,cached:true,note:saved.expiresAt>Date.now()?saved.note:'Saved research read is stale; open the pool to update it.'};
 }
 async function saveRead<T>(env:Env,name:string,saved:SavedRead<T>,ttl:number){
- try{await env.LP_CACHE.put(key(name),JSON.stringify(saved),{expirationTtl:Math.max(60,Math.ceil(ttl/1000)*10)});}catch{/* Cache failure must not invent a successful read. */}
+ try{await env.LP_CACHE.put(await observationKey(env,name),JSON.stringify(saved),{expirationTtl:Math.max(60,Math.ceil(ttl/1000)*(/^(?:mint(?:-|:))/.test(name)?1:10))});}catch{/* Cache failure must not invent a successful read. */}
 }
 async function readJson<T>(context:ResearchReadContext,options:{name:string;provider:string;url:string;ttl:number;init?:RequestInit;forceFresh?:boolean}):Promise<ResearchRead<T>>{
  const saved=await savedRead<T>(context.env,options.name),now=Date.now();
@@ -122,7 +127,19 @@ async function readJson<T>(context:ResearchReadContext,options:{name:string;prov
     await saveRead(context.env,options.name,{data:saved?.data??null,at:saved?.at??new Date().toISOString(),expiresAt:Date.now()+ttl,status,note},ttl);
     return {status,data:saved?.data??null,asOf:saved?.at??null,cached:!!saved,note};
    }
-   const data=await response.json() as T,atMs=Date.now(),at=new Date(atMs).toISOString(),expiresAt=atMs+options.ttl;
+   let data=await response.json() as T;
+   if(options.provider==='Solana RPC'){
+    // Provider error prose can contain request URLs. Preserve bounded error codes
+    // only, and never call an HTTP-200 JSON-RPC failure a valid ten-minute read.
+    const batch=Array.isArray(data),rows:any[]=Array.isArray(data)?data:[data],clean=rows.map((row:any)=>row?.error?{jsonrpc:'2.0',id:row.id,error:{code:Number.isSafeInteger(row.error?.code)?row.error.code:-32004,message:'Solana RPC read unavailable.'}}:row);
+    data=(batch?clean:clean[0]) as T;
+    if(!clean.some((row:any)=>row&&!row.error&&Object.prototype.hasOwnProperty.call(row,'result'))){
+     const note='Solana RPC returned no successful read result.';
+     await saveRead(context.env,options.name,{data:null,at:saved?.at??new Date().toISOString(),expiresAt:Date.now()+60000,status:'unavailable',note},60000);
+     return {status:'unavailable',data:null,asOf:saved?.at??null,cached:false,note};
+    }
+   }
+   const atMs=Date.now(),at=new Date(atMs).toISOString(),expiresAt=atMs+options.ttl;
    if(cooldown&&cooldown.until<=now)try{const latest=await context.env.LP_CACHE.get<ProviderBackoff>(backoffKey,'json');if(latest?.last429At===cooldown.last429At)await context.env.LP_CACHE.put(backoffKey,JSON.stringify({until:0,attempts:0,last429At:cooldown.last429At}),{expirationTtl:86400});}catch{}
    await saveRead(context.env,options.name,{data,at,expiresAt,status:'available',note:'Timestamped '+options.provider+' read.'},options.ttl);
    return {status:'available',data,asOf:at,expiresAt,cached:false,note:'Timestamped '+options.provider+' read.'};
@@ -200,13 +217,13 @@ interface PumpFee {bps:number;asOf:string}
 // Prefixes and canonical-pool rule from pump-fun/pump-public-docs:
 // idl/pump_amm.json, idl/pump_fees.json and docs/FEE_PROGRAM_README.md.
 async function readPumpSellFees(pool:Pool,quote:JupiterQuote,context:ResearchReadContext):Promise<Map<string,PumpFee>>{
- const out=new Map<string,PumpFee>(),mint=researchToken(pool)?.mint;if(!mint||!context.env.SOLANA_RPC)return out;
+ const out=new Map<string,PumpFee>(),mint=researchToken(pool)?.mint;if(!mint||context.env.STILL_RPC_URL===undefined&&!context.env.SOLANA_RPC)return out;
  const mintRead=await cachedResearchRead<RpcResponse[]>(context.env,'mint:'+mint),mintOwner=Array.isArray(mintRead.data)?mintRead.data.find(r=>r.id===1&&!r.error)?.result?.value?.owner:null,baseProgram=mintRead.status==='available'&&(mintOwner===TOKEN_PROGRAM||mintOwner===TOKEN_2022)?mintOwner:null;
  const addresses=[...new Set((quote.routePlan||[]).filter(r=>r.swapInfo?.label==='Pump.fun Amm').flatMap(r=>r.swapInfo?.ammKey?[r.swapInfo.ammKey]:[]))].slice(0,2);
  for(const address of addresses)try{
   if(!addressBytes(address))continue;const amm=addressBytes(PUMP_AMM)!,feeAddress=encodeAddress(await pdaBytes([new TextEncoder().encode('fee_config'),amm],addressBytes(PUMP_FEES)!)),poolBytes=addressBytes(address)!,expectedBase=addressBytes(mint)!,expectedQuote=addressBytes(RESEARCH_SOL)!,ataProgram=addressBytes('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')!;
   const baseAta=baseProgram?await pdaBytes([poolBytes,addressBytes(baseProgram)!,expectedBase],ataProgram):null,quoteAta=baseProgram?await pdaBytes([poolBytes,addressBytes(TOKEN_PROGRAM)!,expectedQuote],ataProgram):null,accounts=baseAta&&quoteAta?[address,feeAddress,encodeAddress(baseAta),encodeAddress(quoteAta),mint]:[address,feeAddress];
-  const read=await readJson<any>(context,{name:'pump-sell-fee:v2:'+address,provider:'Solana RPC',url:context.env.SOLANA_RPC,ttl:RESEARCH_READ_LIMITS.economicQuoteTtlMs,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:6,method:'getMultipleAccounts',params:[accounts,{encoding:'base64',commitment:'confirmed'}]})}});
+  const read=await readJson<any>(context,{name:'pump-sell-fee:v2:'+address,provider:'Solana RPC',url:researchRpcUrl(context.env),ttl:RESEARCH_READ_LIMITS.economicQuoteTtlMs,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:6,method:'getMultipleAccounts',params:[accounts,{encoding:'base64',commitment:'confirmed'}]})}});
   const at=Date.parse(read.asOf||'');if(read.status!=='available'||!Number.isFinite(at)||at>Date.now()||Date.now()-at>RESEARCH_READ_LIMITS.economicQuoteTtlMs)continue;
   const [account,config,baseAccount,quoteAccount,mintAccount]=read.data?.result?.value||[],decode=(a:any,owner:string,min:number,discriminator:number[])=>{if(a?.owner!==owner||a.executable||!Array.isArray(a.data)||a.data[1]!=='base64'||typeof a.data[0]!=='string')return null;const bytes=Uint8Array.from(atob(a.data[0]),c=>c.charCodeAt(0));return bytes.length>=min&&discriminator.every((v,i)=>bytes[i]===v)?bytes:null;};
   const bytes=decode(account,PUMP_AMM,243,[241,154,109,4,17,177,109,188]),fees=decode(config,PUMP_FEES,65,[143,52,146,187,219,123,76,155]);if(!bytes||!fees)continue;
@@ -278,7 +295,7 @@ export async function cachedResearchQuotes(pool:Pool,env:Env,decimals:number|nul
  const token=researchToken(pool);
  return await Promise.all([.5,1].flatMap(size=>(['best','dlmm'] as const).map(async mode=>await economicQuote(pool,env,size,mode)||quoteResult(pool,size,mode,token?await cachedResearchRead<QuotePair>(env,quoteName(token.mint,size,mode)):unknown('SOL-pair quotes are unsupported for this pool.','unsupported'),decimals))));
 }
-export async function readResearchQuotes(pool:Pool,context:ResearchReadContext,decimals:number|null=null,quoteMark?:ResearchQuoteMark|null,selection?:{sizes:number[];modes:('best'|'dlmm')[];freshOnly?:boolean}):Promise<ResearchQuote[]>{
+export async function readResearchQuotes(pool:Pool,context:ResearchReadContext,decimals:number|null=null,quoteMark?:ResearchQuoteMark|null,selection?:{sizes:number[];modes:('best'|'dlmm')[];freshOnly?:boolean;supplementalRpcFees?:boolean}):Promise<ResearchQuote[]>{
  if(quoteMark!==undefined){
   const token=researchToken(pool),markAt=Date.parse(quoteMark?.asOf||'');
   const sourceGood=quoteMark?.source==='active-bin'||quoteMark?.source==='meteora-pool'&&quoteMark.poolAddress===pool.address&&quoteMark.mint===token?.mint&&quoteMark.asOf===pool.fetchedAt&&quoteMark.priceSol===token?.priceSol;
@@ -294,7 +311,7 @@ export async function readResearchQuotes(pool:Pool,context:ResearchReadContext,d
   const economic=await economicQuote(pool,context.env,size,mode);if(!selection?.freshOnly&&economic&&researchEconomicQuoteFresh(economic)){context.cacheHits++;return economic;}
   const retain=(output:ResearchQuote):ResearchQuote=>economic?{...economic,status:output.status,roundTripCostSol:null,exitCostSol:null,returnedSol:null,note:output.note+' Last good dated economic estimate retained.',economicEstimate:{...economic.economicEstimate!,status:'stale',retained:true,cached:true,note:'Last good dated economic estimate retained while refresh is unavailable. '+economic.economicEstimate!.note}}:output;
   const name=quoteName(token.mint,size,mode),cached=await cachedResearchRead<QuotePair>(context.env,name);
-  if(cached.status==='available'){const pumpFees=cached.data?.sell?await readPumpSellFees(pool,cached.data.sell,context):new Map<string,PumpFee>(),output=quoteResult(pool,size,mode,cached,decimals,pumpFees,quoteMark);if(output.status==='quoted')return rememberEconomicQuote(pool,context.env,output,decimals);}
+  if(cached.status==='available'){const pumpFees=selection?.supplementalRpcFees!==false&&cached.data?.sell?await readPumpSellFees(pool,cached.data.sell,context):new Map<string,PumpFee>(),output=quoteResult(pool,size,mode,cached,decimals,pumpFees,quoteMark);if(output.status==='quoted')return rememberEconomicQuote(pool,context.env,output,decimals);}
   const get=async(input:string,output:string,amount:string,leg:string)=>{
    const query=new URLSearchParams({inputMint:input,outputMint:output,amount,swapMode:'ExactIn',slippageBps:'50'});
    if(mode==='dlmm')query.set('dexes','Meteora DLMM');
@@ -306,7 +323,7 @@ export async function readResearchQuotes(pool:Pool,context:ResearchReadContext,d
   const sell=await get(token.mint,RESEARCH_SOL,buy.data.outAmount,'sell:'+buy.data.outAmount);
   const buyAt=buy.asOf?Date.parse(buy.asOf):NaN,sellAt=sell.asOf?Date.parse(sell.asOf):NaN,oldest=Math.min(buyAt,sellAt),expiresAt=Math.min(buy.expiresAt??NaN,sell.expiresAt??NaN);
   const result:ResearchRead<QuotePair>={...sell,asOf:Number.isFinite(oldest)?new Date(oldest).toISOString():null,expiresAt,data:sell.data?{buy:buy.data,sell:sell.data,buyAsOf:buy.asOf,sellAsOf:sell.asOf}:null};
-  const pumpFees=sell.status==='available'&&sell.data?await readPumpSellFees(pool,sell.data,context):new Map<string,PumpFee>(),output=quoteResult(pool,size,mode,result,decimals,pumpFees,quoteMark);
+  const pumpFees=selection?.supplementalRpcFees!==false&&sell.status==='available'&&sell.data?await readPumpSellFees(pool,sell.data,context):new Map<string,PumpFee>(),output=quoteResult(pool,size,mode,result,decimals,pumpFees,quoteMark);
   if(output.status==='quoted')await saveRead(context.env,name,{data:result.data,at:result.asOf!,expiresAt,status:'available',note:output.note},RESEARCH_READ_LIMITS.quoteTtlMs);
   if(output.status==='quoted'){const remembered=await rememberEconomicQuote(pool,context.env,output,decimals);return remembered.economicEstimate?remembered:retain(remembered);}
   return retain(output);
@@ -387,21 +404,21 @@ async function withMintEpoch(read:ResearchRead<RpcResponse[]>,env:Env,context?:R
  const account=read.data?.find(r=>r.id===1&&!r.error)?.result?.value,extensions=account?.data?.parsed?.info?.extensions;
  const needsEpoch=read.status==='available'&&account?.owner===TOKEN_2022&&Array.isArray(extensions)&&extensions.some((e:any)=>/transferFeeConfig/i.test(String(e.extension||e.extensionType)))&&!read.data?.some(r=>r.id===2&&!r.error);
  if(!needsEpoch)return read;
- const epoch=context?await readJson<RpcResponse>(context,{name:'mint-epoch',provider:'Solana RPC',url:env.SOLANA_RPC||'https://api.mainnet-beta.solana.com',ttl:30000,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:2,method:'getEpochInfo',params:[{commitment:'confirmed'}]})}}):await cachedResearchRead<RpcResponse>(env,'mint-epoch');
+ const epoch=context?await readJson<RpcResponse>(context,{name:'mint-epoch',provider:'Solana RPC',url:researchRpcUrl(env),ttl:RESEARCH_READ_LIMITS.epochTtlMs,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:2,method:'getEpochInfo',params:[{commitment:'confirmed'}]})}}):await cachedResearchRead<RpcResponse>(env,'mint-epoch');
  const epochAt=Date.parse(epoch.asOf||'');
- if(epoch.status!=='available'||!Number.isFinite(epochAt)||epochAt>Date.now()||Date.now()-epochAt>30000||!read.asOf||epoch.data?.id!==2||epoch.data.error||!Number.isSafeInteger(epoch.data.result?.epoch)||epoch.data.result.epoch<0)return read;
+ if(epoch.status!=='available'||!Number.isFinite(epochAt)||epochAt>Date.now()||Date.now()-epochAt>RESEARCH_READ_LIMITS.epochTtlMs||!read.asOf||epoch.data?.id!==2||epoch.data.error||!Number.isSafeInteger(epoch.data.result?.epoch)||epoch.data.result.epoch<0)return read;
  return {...read,data:[...read.data!,epoch.data],asOf:[read.asOf,epoch.asOf].sort()[0]};
 }
 async function withMintLargest(read:ResearchRead<RpcResponse[]>,mint:string,env:Env,context?:ResearchReadContext):Promise<ResearchRead<RpcResponse[]>>{
- if(normalizedRpcUrl(env.SOLANA_RPC||'')!==ONFINALITY_SOLANA_READ_RPC||read.status!=='available'||read.data?.some(r=>r.id===3&&!r.error))return read;
- const largest=context?await readJson<RpcResponse>(context,{name:'mint-largest:'+mint,provider:'Solana RPC',url:env.SOLANA_RPC!,ttl:RESEARCH_READ_LIMITS.mintTtlMs,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:3,method:'getTokenLargestAccounts',params:[mint,{commitment:'confirmed'}]})}}):await cachedResearchRead<RpcResponse>(env,'mint-largest:'+mint);
+ if(normalizedRpcUrl(researchRpcUrl(env))===PUBLIC_SOLANA_READ_RPC+'/'||read.status!=='available'||read.data?.some(r=>r.id===3&&!r.error))return read;
+ const largest=context?await readJson<RpcResponse>(context,{name:'mint-largest:'+mint,provider:'Solana RPC',url:researchRpcUrl(env),ttl:RESEARCH_READ_LIMITS.mintTtlMs,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:3,method:'getTokenLargestAccounts',params:[mint,{commitment:'confirmed'}]})}}):await cachedResearchRead<RpcResponse>(env,'mint-largest:'+mint);
  const at=Date.parse(largest.asOf||'');
  if(largest.status!=='available'||!Number.isFinite(at)||at>Date.now()||Date.now()-at>RESEARCH_READ_LIMITS.mintTtlMs||largest.data?.id!==3||largest.data.error||!read.asOf)return {...read,note:read.note+' Largest-holder enumeration is unavailable: '+largest.note};
  return {...read,data:[...read.data!,largest.data],asOf:[read.asOf,largest.asOf!].sort()[0]};
 }
 export async function cachedMintSafety(mint:string,env:Env):Promise<MintSafety>{const [rawRead,owners]=await Promise.all([cachedResearchRead<RpcResponse[]|RpcResponse>(env,'mint:'+mint),cachedResearchRead<OwnerRead>(env,'mint-owners:'+mint)]);return mintSafety(await withMintLargest(await withMintEpoch(mintRows(rawRead),env),mint,env),mint,owners);}
 export async function readMintSafety(mint:string,context:ResearchReadContext):Promise<MintSafety>{
- const url=context.env.SOLANA_RPC||'https://api.mainnet-beta.solana.com',publicNode=normalizedRpcUrl(url)===PUBLIC_SOLANA_READ_RPC+'/',onfinality=normalizedRpcUrl(url)===ONFINALITY_SOLANA_READ_RPC;
+ const url=researchRpcUrl(context.env),publicNode=normalizedRpcUrl(url)===PUBLIC_SOLANA_READ_RPC+'/',onfinality=normalizedRpcUrl(url)===ONFINALITY_SOLANA_READ_RPC;
  const account={jsonrpc:'2.0',id:1,method:'getAccountInfo',params:[mint,{encoding:'jsonParsed',commitment:'confirmed'}]};
  // Public mint policy is independent of optional holder enumeration and epoch.
  // Legacy SPL has no transfer-fee extension; Token-2022 taxes require a fresh
@@ -412,10 +429,10 @@ export async function readMintSafety(mint:string,context:ResearchReadContext):Pr
  let owners=await cachedResearchRead<OwnerRead>(context.env,'mint-owners:'+mint);
  const largest=Array.isArray(read.data)?read.data.find(r=>r.id===3&&!r.error)?.result?.value:null;
  const addresses=Array.isArray(largest)?largest.slice(0,20).flatMap((r:any)=>typeof r.address==='string'?[r.address]:[]):[];
- if(read.status==='available'&&addresses.length&&owners.status!=='available'){
-  const request=await readJson<OwnerRead['response']>(context,{name:'mint-owner-request:'+mint,provider:'Solana RPC',url:context.env.SOLANA_RPC||'https://api.mainnet-beta.solana.com',ttl:RESEARCH_READ_LIMITS.mintTtlMs,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:4,method:'getMultipleAccounts',params:[addresses,{encoding:'jsonParsed',commitment:'confirmed'}]})}});
+ if(read.status==='available'&&addresses.length&&(owners.status!=='available'||JSON.stringify(owners.data?.addresses)!==JSON.stringify(addresses))){
+  const request=await readJson<OwnerRead['response']>(context,{name:'mint-owner-request:'+mint+':'+await keyHash(JSON.stringify(addresses)),provider:'Solana RPC',url:researchRpcUrl(context.env),ttl:RESEARCH_READ_LIMITS.mintTtlMs,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:4,method:'getMultipleAccounts',params:[addresses,{encoding:'jsonParsed',commitment:'confirmed'}]})}});
   owners={...request,data:request.data?{addresses,response:request.data}:null};
-  if(request.status==='available'&&request.asOf)await saveRead(context.env,'mint-owners:'+mint,{data:owners.data,at:request.asOf,expiresAt:Date.now()+RESEARCH_READ_LIMITS.mintTtlMs,status:'available',note:request.note},RESEARCH_READ_LIMITS.mintTtlMs);
+  if(request.status==='available'&&request.asOf)await saveRead(context.env,'mint-owners:'+mint,{data:owners.data,at:request.asOf,expiresAt:Date.parse(request.asOf)+RESEARCH_READ_LIMITS.mintTtlMs,status:'available',note:request.note},RESEARCH_READ_LIMITS.mintTtlMs);
  }
  return mintSafety(read,mint,owners);
 }
@@ -468,9 +485,9 @@ function rangeAnchor(pool:Pool,mint:MintSafety,read:ResearchRead<ActiveBinRpc>):
  }catch{return empty('RPC LbPair binary data could not be decoded.','unavailable');}
 }
 export async function readResearchRangeAnchor(pool:Pool,context:ResearchReadContext,mint:MintSafety,forceFresh=false):Promise<ResearchRangeAnchor>{
- if(pool.venue!=='meteora-dlmm'||!researchToken(pool)||!addressBytes(pool.address)||!context.env.SOLANA_RPC)return {status:'unknown',asOf:null,activeBinId:null,activeBinPriceSol:null,binStep:null,slot:null,minNativeBinId:null,maxNativeBinId:null,note:'An exact Meteora SOL-pair address and configured read-only Solana RPC are required.'};
+ if(pool.venue!=='meteora-dlmm'||!researchToken(pool)||!addressBytes(pool.address)||context.env.STILL_RPC_URL===undefined&&!context.env.SOLANA_RPC)return {status:'unknown',asOf:null,activeBinId:null,activeBinPriceSol:null,binStep:null,slot:null,minNativeBinId:null,maxNativeBinId:null,note:'An exact Meteora SOL-pair address and configured read-only Solana RPC are required.'};
  const body={jsonrpc:'2.0',id:5,method:'getAccountInfo',params:[pool.address,{encoding:'base64',commitment:'confirmed'}]};
- const read=await readJson<ActiveBinRpc>(context,{name:'active-bin:'+pool.address,provider:'Solana RPC',url:context.env.SOLANA_RPC,ttl:RESEARCH_READ_LIMITS.anchorTtlMs,forceFresh,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}});
+ const read=await readJson<ActiveBinRpc>(context,{name:'active-bin:'+pool.address,provider:'Solana RPC',url:researchRpcUrl(context.env),ttl:RESEARCH_READ_LIMITS.anchorTtlMs,forceFresh,init:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}});
  return rangeAnchor(pool,mint,read);
 }
 
@@ -515,8 +532,8 @@ export async function readDexScreenerBatch(pools:Pool[],context:ResearchReadCont
  const missing:string[]=[];
  for(const mint of mints)if((await cachedResearchRead(context.env,'dex-token:'+mint)).status!=='available')missing.push(mint);
  let response:ResearchRead<any[]>|null=null;
- if(missing.length){response=await readJson<any[]>(context,{name:'dex-batch:'+await keyHash(missing.slice().sort().join(',')),provider:'DexScreener',url:'https://api.dexscreener.com/tokens/v1/solana/'+missing.map(encodeURIComponent).join(','),ttl:RESEARCH_READ_LIMITS.mintTtlMs});
-  if(response.status==='available'&&Array.isArray(response.data))for(const mint of missing){const rows=response.data.filter(p=>p.chainId==='solana'&&[p.baseToken?.address,p.quoteToken?.address].includes(mint));await saveRead(context.env,'dex-token:'+mint,{data:rows,at:response.asOf!,expiresAt:Date.now()+RESEARCH_READ_LIMITS.mintTtlMs,status:'available',note:response.note},RESEARCH_READ_LIMITS.mintTtlMs);}
+ if(missing.length){response=await readJson<any[]>(context,{name:'dex-batch:'+await keyHash(missing.slice().sort().join(',')),provider:'DexScreener',url:'https://api.dexscreener.com/tokens/v1/solana/'+missing.map(encodeURIComponent).join(','),ttl:RESEARCH_READ_LIMITS.dexTtlMs});
+  if(response.status==='available'&&Array.isArray(response.data))for(const mint of missing){const rows=response.data.filter(p=>p.chainId==='solana'&&[p.baseToken?.address,p.quoteToken?.address].includes(mint));await saveRead(context.env,'dex-token:'+mint,{data:rows,at:response.asOf!,expiresAt:Date.parse(response.asOf!)+RESEARCH_READ_LIMITS.dexTtlMs,status:'available',note:response.note},RESEARCH_READ_LIMITS.dexTtlMs);}
  }
  const result=new Map<string,DexSafety>();
  for(const pool of pools){const token=researchToken(pool);result.set(pool.id,response&&token&&missing.includes(token.mint)&&response.status!=='available'?dexSafety(pool,response):await cachedDexSafety(pool,context.env));}

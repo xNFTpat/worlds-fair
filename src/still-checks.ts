@@ -1,3 +1,4 @@
+import {RESEARCH_READ_LIMITS} from './sources/research-reads';
 import {STILL_PREFLIGHT_THRESHOLDS as T} from './still-preflight-config';
 import type {StillPreflight,StillPreflightInput} from './still-preflight';
 export type StillCheckStatus='pass'|'caution'|'fail'|'unavailable';
@@ -38,7 +39,7 @@ export function stillChecks(p:StillPreflight,d:StillPreflightInput,now:number):S
  }else unknown('tax','Transfer tax','Solana RPC mint extensions','Token-2022 tokens can charge a fee on every transfer.',4);
  const rpc=d.safety?.rpc,sample=rpc?.holderSample,rug=d.rug,exclusions=rug?.holderExclusions;
  let holderAdded=false;
- if(rpc?.mint===p.pool.pairedMint&&rpc.status==='available'&&fresh(rpc.asOf,now)&&sample?.status==='available'&&sample.mint===p.pool.pairedMint&&fresh(sample.asOf,now)&&/^\d{1,78}$/.test(sample.supplyRaw||'')&&exclusions?.status==='available'&&exclusions.mint===sample.mint&&fresh(exclusions.asOf,now,600000)){
+ if(rpc?.mint===p.pool.pairedMint&&rpc.status==='available'&&fresh(rpc.asOf,now,RESEARCH_READ_LIMITS.mintTtlMs)&&sample?.status==='available'&&sample.mint===p.pool.pairedMint&&fresh(sample.asOf,now,RESEARCH_READ_LIMITS.mintTtlMs)&&/^\d{1,78}$/.test(sample.supplyRaw||'')&&exclusions?.status==='available'&&exclusions.mint===sample.mint&&fresh(exclusions.asOf,now,600000)){
   const supply=BigInt(sample.supplyRaw!),excluded=new Set([...exclusions.addresses,p.poolAddress,'11111111111111111111111111111111','1nc1nerator11111111111111111111111111111111']),owners=new Map<string,bigint>(),seen=new Set<string>();let sum=0n,valid=supply>0n;
   for(const a of sample.accounts){if(!a.owner||!a.address||seen.has(a.address)||!/^\d{1,78}$/.test(a.amountRaw)){valid=false;break;}seen.add(a.address);const v=BigInt(a.amountRaw);sum+=v;if(!excluded.has(a.owner)&&!excluded.has(a.address))owners.set(a.owner,(owners.get(a.owner)||0n)+v);}
   if(valid&&sum<=supply){const ranked=[...owners.values()].sort((a,b)=>a>b?-1:a<b?1:0),fraction=(v:bigint)=>Number(v*1000000000n/supply)/1e9,top=fraction(ranked[0]||0n),ten=fraction(ranked.slice(0,10).reduce((a,b)=>a+b,0n)),complete=sample.complete&&sum===supply;

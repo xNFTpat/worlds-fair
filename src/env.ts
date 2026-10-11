@@ -9,6 +9,7 @@ export interface Env {
   ROBINHOOD_CHAIN_ID: string;
   WALLETS: string; // "name:address,name:address"
   SOLANA_RPC?: string;
+  STILL_RPC_URL?: string; // Still-only Worker secret; server-side read endpoint.
   JUPITER_API_KEY?: string;
   PREVIEW_ORIGIN?: string;
   TX_KEY?: string; // Owner key for signing and controls; accepted by login or explicit auth headers.

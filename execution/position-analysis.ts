@@ -1,11 +1,13 @@
 import DLMM, {wrapPosition} from '@meteora-ag/dlmm';
-import {PublicKey} from '@solana/web3.js';
+import {Connection, PublicKey} from '@solana/web3.js';
 import {NATIVE_MINT, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getExtensionTypes, ExtensionType} from '@solana/spl-token';
 import {connection} from './solana';
 import {money} from '../src/pnl';
 import {estimateBreakEven, valueAtPrice, type PositionModel, type PriceBin} from '../src/break-even';
 import {readFetch} from '../src/sources/read-fetch';
 import type {Position} from '../src/schema';
+import {paperRpcTransport} from './paper-rpc';
+import type {PublicRpcBudgetEnv} from '../src/public-rpc-budget';
 
 function required(v:unknown, positive=false):number {
   const n=money(v);if(n==null || n<0 || (positive&&n===0))throw new Error('Position cash flows or prices are incomplete.');return n;
@@ -53,8 +55,9 @@ export function modelFromRecords(history:any, records:any[], config:{solX:boolea
   return m;
 }
 
-export async function readPositionBreakEven(pos:Position,rpc:string) {
-  const owner=new PublicKey(pos.walletAddress),pool=new PublicKey(pos.poolAddress),conn=connection(rpc);
+export async function readPositionBreakEven(pos:Position,rpc:string,stillEnv?:PublicRpcBudgetEnv) {
+  const owner=new PublicKey(pos.walletAddress),pool=new PublicKey(pos.poolAddress);
+  const conn=stillEnv?new Connection(rpc,{commitment:'confirmed',disableRetryOnRateLimit:true,fetch:paperRpcTransport({env:stillEnv,maxRequests:80,maxDurationMs:20000}).fetch as any}):connection(rpc);
   const qs=new URLSearchParams({user:pos.walletAddress,status:'open',page:'1',page_size:'20'});
   const [response,dlmm]=await Promise.all([
     readFetch(`https://dlmm.datapi.meteora.ag/positions/${pos.poolAddress}/pnl?${qs}`,{headers:{accept:'application/json'}}),

@@ -5,7 +5,7 @@ export const PUBLIC_SOLANA_READ_RPC = 'https://solana-rpc.publicnode.com';
 export const ONFINALITY_SOLANA_READ_RPC = 'https://solana.api.onfinality.io/public';
 export const SOLANA_MAINNET_GENESIS = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
 const LABS = new Set(['https://api.mainnet-beta.solana.com/', 'https://api.mainnet.solana.com/']);
-const READ_METHODS = new Set(['getAccountInfo','getMultipleAccounts','getEpochInfo','getTokenLargestAccounts','getBlockTime','getSlot','getBlockHeight','getGenesisHash','getProgramAccounts','getMinimumBalanceForRentExemption','getBalance','getTokenSupply','getLatestBlockhash','getFeeForMessage']);
+const READ_METHODS = new Set(['getAccountInfo','getMultipleAccounts','getEpochInfo','getTokenLargestAccounts','getTokenAccountsByOwner','getBlockTime','getSlot','getBlockHeight','getGenesisHash','getProgramAccounts','getMinimumBalanceForRentExemption','getBalance','getTokenSupply','getLatestBlockhash','getFeeForMessage']);
 interface RpcRead {jsonrpc: '2.0'; id: number | string; method: string; params?: unknown[]}
 interface Options {deadline?: number; onRequest?: () => void; env?:PublicRpcBudgetEnv}
 const json = (value: unknown, status = 200, headers: Record<string,string> = {}) => new Response(JSON.stringify(value), {status, headers: {'content-type':'application/json',...headers}});
@@ -26,12 +26,13 @@ async function classifyPublicFailure(response:Response):Promise<string>{
  * is cached here: mutable mint authorities, pool anchors and balances retain the
  * caller's existing source-dated cache policy. Neither failures nor nulls cache. */
 export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => number} = {}) {
- const now = deps.now || Date.now;
+ const now = deps.now || (()=>Date.now());
  const circuits = new Map<string,{until:number;status:number}>(), genesis = new Map<string,number>();
  const blocks = new Map<string,{at:number;body:any}>();
  let active = 0;
  return async function readRpc(input: RequestInfo | URL, init: RequestInit = {}, options: Options = {}): Promise<Response> {
-  const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+  let url:URL;
+  try{url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);}catch{throw Error('The selected Solana read provider is invalid.');}
   let body: unknown;
   try {if(init.method?.toUpperCase()!=='POST'||typeof init.body!=='string'||init.body.length>100000)throw Error();body=JSON.parse(init.body);} catch {throw Error('Only bounded JSON-RPC reads are supported.');}
   const batch=Array.isArray(body), reads=(batch?body:[body]) as RpcRead[];
@@ -44,8 +45,38 @@ export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => n
   if(onfinality&&[...headers.keys()].some(k=>/auth|api[-_]?key|token|cookie|secret/i.test(k)))return unavailable(reads,batch,'Credentials cannot be used with the fixed public RPC endpoint.');
   const publicMode=onfinality||cleanHeaders&&!url.username&&!url.password&&(LABS.has(url.href)||url.href===PUBLIC_SOLANA_READ_RPC+'/');
   const fetcher=deps.fetcher||globalThis.fetch;
-  // Preserve private/keyed/custom provider selection, headers and response shape.
-  if(!publicMode){options.onRequest?.();return fetcher(input,init);}
+  // A configured provider remains the only destination, including on failure.
+  // Do not give the SDK upstream error text/status prose/headers: providers can
+  // reflect their credential-bearing URL there, and SDK errors may be logged.
+  // Preserve verified successful result values and the requested response shape.
+  if(!publicMode){
+   const deadline=options.deadline??now()+12000;
+   if(init.signal?.aborted||now()>=deadline)return unavailable(reads,batch,'The selected Solana read timed out.');
+   options.onRequest?.();
+   try{
+    const signal=AbortSignal.timeout(Math.max(1,Math.min(12000,deadline-now())));
+    const response=await fetcher(input,{...init,redirect:'manual',signal:init.signal?AbortSignal.any([init.signal,signal]):signal});
+    if(init.signal?.aborted||now()>=deadline){await response.body?.cancel();return unavailable(reads,batch,'The selected Solana read timed out.');}
+    if(!response.ok){
+     const status=response.status>=400&&response.status<=599?response.status:502;
+     const retry=response.headers.get('retry-after'),seconds=Number(retry),retryAt=Date.parse(retry||'');
+     const retrySeconds=Number.isFinite(seconds)&&seconds>0?seconds:Number.isFinite(retryAt)&&retryAt>now()?(retryAt-now())/1000:undefined;
+     await response.body?.cancel();
+     return unavailable(reads,batch,status===429?'The selected Solana read provider is rate limited.':'The selected Solana read provider is unavailable.',status,retrySeconds);
+    }
+    const text=await response.text();
+    if(init.signal?.aborted||now()>=deadline)return unavailable(reads,batch,'The selected Solana read timed out.');
+    if(text.length>4000000)return unavailable(reads,batch,'The selected Solana read response is unavailable.');
+    const parsed=JSON.parse(text),rows=Array.isArray(parsed)?parsed:[parsed];
+    if(rows.length!==reads.length||reads.some(r=>rows.filter(v=>v?.jsonrpc==='2.0'&&v.id===r.id).length!==1))return unavailable(reads,batch,'Solana read response identities could not be verified.');
+    const result=reads.map(r=>{
+     const row=rows.find(v=>v.id===r.id);
+     if(row.error||!Object.hasOwn(row,'result'))return {jsonrpc:'2.0',id:r.id,error:{code:Number.isSafeInteger(row.error?.code)&&Math.abs(row.error.code)<=9999999?row.error.code:-32004,message:'The selected Solana read could not be completed.'}};
+     return {jsonrpc:'2.0',id:r.id,result:row.result};
+    });
+    return json(batch?result:result[0]);
+   }catch{return unavailable(reads,batch,'The selected Solana read provider is unavailable.');}
+  }
   if(onfinality&&!options.env?.RANGE_ALERTS)return unavailable(reads,batch,'Shared public RPC allowance is unavailable.',503,undefined,undefined,'budget-unbound');
   const deadline=options.deadline??now()+8000;
   const assertTime=()=>{if(init.signal?.aborted||now()>=deadline)throw Error('Solana read deadline reached.');};

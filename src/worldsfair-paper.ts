@@ -1,4 +1,5 @@
 import type {Env} from './env';
+import {stillReadEnvironment} from './still-rpc-env';
 import {StillPaperLedger} from './still-paper';
 import {RangeInbox as LegacyRangeInbox} from './range-alerts';
 import {fleetEquity, fleetRisk, fleetFresh, type FleetState, type FleetClosed} from './paper-fleet';
@@ -132,7 +133,7 @@ export async function worldsfairPaperRoute(request: Request, env: Env): Promise<
 export class WorldsfairRangeInbox extends LegacyRangeInbox {
   private preparing = new Map<string, {fingerprint: string; promise: Promise<Response>}>();
   private stillPaper: StillPaperLedger;
-  constructor(private paperCtx: DurableObjectState, private paperEnv: Env) {super(paperCtx); this.stillPaper = new StillPaperLedger(paperCtx, paperEnv);}
+  constructor(private paperCtx: DurableObjectState, private paperEnv: Env) {super(paperCtx); this.paperEnv = stillReadEnvironment(paperEnv); this.stillPaper = new StillPaperLedger(paperCtx, this.paperEnv);}
 
   async alarm(){await this.stillPaper.alarm();}
 

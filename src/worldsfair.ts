@@ -9,6 +9,7 @@ import {publicError} from './health';
 import {StillBackgroundScanner} from './still-background';
 import {worldsfairPaperRoute} from './worldsfair-paper';
 import {stillDemoRoute} from './still-demo-routes';
+import {stillReadRpcUrl} from './still-rpc-env';
 
 export {WorldsfairRangeInbox as RangeInbox} from './worldsfair-paper';
 
@@ -32,7 +33,8 @@ export function paperEnvironment(env: Env, includeOther = false): Env {
     LP_CACHE: env.LP_CACHE, ASSETS: env.ASSETS, RANGE_ALERTS: env.RANGE_ALERTS,
     BACKGROUND_SCANNER: env.BACKGROUND_SCANNER, MIN_TVL_USD: env.MIN_TVL_USD,
     ROBINHOOD_RPC: env.ROBINHOOD_RPC, ROBINHOOD_CHAIN_ID: env.ROBINHOOD_CHAIN_ID,
-    WALLETS: includeOther ? env.WALLETS : '', SOLANA_RPC: env.SOLANA_RPC,
+    WALLETS: includeOther ? env.WALLETS : '', SOLANA_RPC: stillReadRpcUrl(env),
+    STILL_RPC_URL: env.STILL_RPC_URL,
     JUPITER_API_KEY: env.JUPITER_API_KEY, GECKO_KEY: env.GECKO_KEY,
     CF_VERSION_METADATA: env.CF_VERSION_METADATA,
   };

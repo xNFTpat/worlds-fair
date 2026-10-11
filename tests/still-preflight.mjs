@@ -95,7 +95,7 @@ try {
   assert.equal(buildStillPreflight({...input, rangeAnchor: {...anchor, minNativeBinId: 100}}, .5, now).canOpen, false, 'native limit at current bin cannot fund a lower bid');
   const rpc = {status: 'available', asOf: at, mint: 'TestTokenMint', transferFeeStatus: 'none', transferFee: null, freezeAuthority: null};
   const known = buildStillPreflight({...input, safety: {rpc}}, .5, now); assert.equal(known.transferFeeBps.value, 0);
-  for (const change of [{status: 'stale'}, {mint: 'another'}, {asOf: iso(now - 300_001)}, {asOf: iso(now + 1)}]) assert.equal(buildStillPreflight({...input, safety: {rpc: {...rpc, ...change}}}, .5, now).transferFeeBps.value, null);
+  for (const change of [{status: 'stale'}, {mint: 'another'}, {asOf: iso(now - 600_001)}, {asOf: iso(now + 1)}]) assert.equal(buildStillPreflight({...input, safety: {rpc: {...rpc, ...change}}}, .5, now).transferFeeBps.value, null);
   assert.equal(buildStillPreflight({...input, safety: {rpc: {...rpc, freezeAuthority: 'active'}}}, .5, now).verdict.label, 'Skip');
   const tax = buildStillPreflight({...input, safety: {rpc: {...rpc, transferFeeStatus: 'known', transferFee: {bps: 150, maximumRaw: '10000', configAuthority: 'active'}}}}, .5, now);
   assert.equal(tax.transferFeeBps.value, 150); assert.equal(tax.verdict.label, 'Skip');
@@ -284,7 +284,7 @@ try {
       {...healthyInput, quotes: [{...quote, expiresAt: now - 1}]},
       {...healthyInput, network: {...network, asOf: iso(now - 600001)}},
       {...healthyInput, quotes: [{...quote, sizeSol: .37}]},
-      {...healthyInput, safety: {rpc: {...healthyRpc, asOf: iso(now - 300001)}}},
+      {...healthyInput, safety: {rpc: {...healthyRpc, asOf: iso(now - 600001)}}},
     ]) {
       const expired = await oneSummary({at, input: expiredInput});
       assert.equal(expired.verdict.label, 'Marginal', 'a fresh cache wrapper cannot retain a verdict after underlying evidence expires or size changes');
@@ -330,7 +330,7 @@ try {
   const stored = new Map([
     ['snapshot:v1', {updatedAt: liveAt, pools: [livePool], errors: {}}],
     ['research:v1:mint:' + liveMint, {at: liveAt, expiresAt: Date.now() + 300000, status: 'available', note: 'Observed mint fixture', data: [
-      {id: 1, result: {value: {owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data: {parsed: {type: 'mint', info: {decimals: 6, supply: '1000000000', mintAuthority: null, freezeAuthority: null}}}}}}, {id: 2, result: {epoch: 100}}
+      {id: 1, result: {value: {owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data: {parsed: {type: 'mint', info: {decimals: 6, supply: '1000000000', mintAuthority: null, freezeAuthority: null}}}}}}, {id: 2, result: {epoch: 100}}, {id: 3, result: {value: []}}
     ]}],
     ['research:v1:active-bin:' + liveAddress, {at: liveAt, expiresAt: Date.now() + 30000, status: 'rate-limited', note: 'Provider cooldown', data: null}],
     ['still:network-fees:v1', {asOf: liveAt, singleLamports: 5000, doubleLamports: 10000, source: 'Observed RPC fixture'}],

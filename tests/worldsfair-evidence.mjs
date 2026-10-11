@@ -25,8 +25,8 @@ globalThis.fetch=async(input,init)=>{
  const url=new URL(input);let out;
  if(url.hostname==='rpc.example'){
   const body=JSON.parse(init.body);
-  if(Array.isArray(body))out=[{id:1,result:{value:{owner:program,data:{parsed:{type:'mint',info:{supply,decimals:6,mintAuthority:null,freezeAuthority:null}}}}}},{id:2,result:{epoch:5}},{id:3,result:{value:currentAccounts.map(a=>({address:a.address,amount:a.amount}))}}];
-  else out={result:{value:body.params[0].map(address=>{const a=currentAccounts.find(a=>a.address===address);return {owner:accountProgram,data:{parsed:{type:'account',info:{mint,owner:a.owner,tokenAmount:{amount:a.amount}}}}};})}};
+  if(Array.isArray(body))out=[{jsonrpc:'2.0',id:1,result:{value:{owner:program,data:{parsed:{type:'mint',info:{supply,decimals:6,mintAuthority:null,freezeAuthority:null}}}}}},{jsonrpc:'2.0',id:2,result:{epoch:5}},{jsonrpc:'2.0',id:3,result:{value:currentAccounts.map(a=>({address:a.address,amount:a.amount}))}}];
+  else out={jsonrpc:'2.0',id:body.id,result:{value:body.params[0].map(address=>{const a=currentAccounts.find(a=>a.address===address);return {owner:accountProgram,data:{parsed:{type:'account',info:{mint,owner:a.owner,tokenAmount:{amount:a.amount}}}}};})}};
  }else if(url.hostname==='api.rugcheck.xyz')out=currentReport;
  else throw Error('Unexpected request '+url);
  return new Response(JSON.stringify(out),{headers:{'content-type':'application/json'}});
@@ -48,7 +48,7 @@ try{
  const young=researchPreflightEvidence({...pool,ageHours:2},rpc,{...rug,detectedAt:null},now);
  assert.equal(young.tokenAge.minimumHours,2);assert.equal(young.tokenAge.exact,false);assert.match(young.tokenAge.note,/young pool cannot prove a young token/);
  const oldPool=researchPreflightEvidence(pool,rpc,{...rug,detectedAt:iso(now-HOUR)},now);assert.equal(oldPool.tokenAge.minimumHours,48);assert.equal(oldPool.tokenAge.basis,'pool');
- for(const change of [{...rpc,status:'stale'},{...rpc,asOf:iso(now-300001)},{...rpc,holderSample:{...rpc.holderSample,asOf:iso(now-300001)}},{...rpc,holderSample:{...rpc.holderSample,mint:pk(222)}}])assert.equal(researchPreflightEvidence(pool,change,rug,now).holders.status,'unavailable','stale or mismatched owner evidence is rejected');
+ for(const change of [{...rpc,status:'stale'},{...rpc,asOf:iso(now-600001)},{...rpc,holderSample:{...rpc.holderSample,asOf:iso(now-600001)}},{...rpc,holderSample:{...rpc.holderSample,mint:pk(222)}}])assert.equal(researchPreflightEvidence(pool,change,rug,now).holders.status,'unavailable','stale or mismatched owner evidence is rejected');
  for(const change of [{...rug,status:'stale'},{...rug,asOf:iso(now-600001)},{...rug,holderExclusions:{...rug.holderExclusions,asOf:iso(now-600001)}},{...rug,mint:pk(222)}])assert.equal(researchPreflightEvidence(pool,rpc,change,now).holders.status,'unavailable','stale or mismatched classification is rejected');
  currentReport={...report,mint:pk(222)};let mismatch=await reads();assert.equal(mismatch.rug.status,'unavailable');assert.equal(researchPreflightEvidence(pool,mismatch.rpc,mismatch.rug,now).holders.status,'unavailable','provider token mismatch cannot supply exclusions');
  assert.equal(mismatch.rug.detectedAt,null,'another mint detection cannot age the selected token');

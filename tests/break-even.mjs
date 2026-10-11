@@ -7,7 +7,7 @@ import {pathToFileURL} from 'node:url';
 const dir=await mkdtemp(join(tmpdir(),'lp-break-even-'));
 for(const [name,entry] of [['model','src/break-even.ts'],['adapter','execution/position-analysis.ts']])await build({entryPoints:[entry],bundle:true,platform:'node',mainFields:['main'],format:'esm',banner:{js:"import {createRequire} from 'node:module';const require=createRequire(import.meta.url);"},outfile:join(dir,name+'.mjs')});
 const {valueAtPrice,estimateBreakEven}=await import(pathToFileURL(join(dir,'model.mjs')));
-const {modelFromRecords,checkModelToken}=await import(pathToFileURL(join(dir,'adapter.mjs')));
+const {modelFromRecords,checkModelToken,readPositionBreakEven}=await import(pathToFileURL(join(dir,'adapter.mjs')));
 const close=(a,b)=>assert.ok(Math.abs(a-b)<1e-9,`${a} != ${b}`);
 const m={bins:[{price:2,baseAmount:10,quoteAmount:0}],baseFees:0,quoteFees:0,quoteUsd:1,netCostUsd:15,currentPrice:1};
 close(valueAtPrice(m,1),-5);close(valueAtPrice(m,2),5);close(valueAtPrice(m,3),5);
@@ -45,6 +45,25 @@ checkModelToken(tokenWithExtension(18)); // MetadataPointer does not change toke
 assert.throws(()=>checkModelToken(tokenWithExtension(10)),/InterestBearingConfig/);
 assert.throws(()=>checkModelToken(tokenWithExtension(14)),/TransferHook/);
 console.log('PASS: decimals, reversed token ordering, deposits/withdrawals/claims, claim-index lag, reward and inconsistent-read guards');
+
+// Still's optional historical estimate uses the same private read boundary.
+// Its synthetic failed provider cannot redirect, switch endpoints, or expose
+// provider credentials in an SDK exception. Personal callers retain defaults.
+const originalFetch=globalThis.fetch,privateRpc='https://private-fixture.invalid/?api-key=synthetic-break-even-secret',rpcCalls=[];
+try {
+ globalThis.fetch=async(input,init)=>{
+  const url=String(input);
+  if(url.startsWith('https://dlmm.datapi.meteora.ag/'))return Response.json({});
+  assert(url===privateRpc,'Historical Still reads stay on the selected RPC');
+  assert.equal(init.redirect,'manual');
+  const request=JSON.parse(init.body);rpcCalls.push(request);
+  return new Response(privateRpc,{status:503,statusText:'synthetic-break-even-secret',headers:{location:privateRpc}});
+ };
+ await assert.rejects(readPositionBreakEven({walletAddress:'So11111111111111111111111111111111111111112',poolAddress:'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},privateRpc,{}),error=>!String(error).includes('synthetic-break-even-secret')&&!String(error).includes('private-fixture'));
+ assert(rpcCalls.length>0);
+ assert(rpcCalls.every(request=>(Array.isArray(request)?request:[request]).every(row=>['getMultipleAccounts','getAccountInfo'].includes(row.method))));
+ console.log('PASS: optional Still historical estimate uses sanitized read-only RPC without redirects or fallback');
+} finally {globalThis.fetch=originalFetch;}
 
 await import(pathToFileURL(join(process.cwd(),'public/candle-charts.js')));
 const {cleanCandles,orientEstimate}=globalThis.LPCandles;

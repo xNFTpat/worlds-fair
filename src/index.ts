@@ -446,7 +446,7 @@ export default {
       return json(await singleFlight(env,key,async()=>{
         const saved=q.get('refresh')==='1'?null:await env.LP_CACHE.get(key,'json');if(saved)return saved;
         try{
-          const result=await readPositionBreakEven(pos,env.SOLANA_RPC||'https://api.mainnet-beta.solana.com');
+          const result=await readPositionBreakEven(pos,env.SOLANA_RPC||'https://api.mainnet-beta.solana.com',env.STILL_RPC_URL!==undefined?env:undefined);
           await env.LP_CACHE.put(key,JSON.stringify(result),{expirationTtl:60});return result;
         }catch(e){return {status:'unavailable',price:null,note:publicError(e)};}
       }));
