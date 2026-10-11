@@ -1,3 +1,4 @@
+import {EXAMPLE_PARK_LAMPORTS,parseParkInput,parkSplit,parkProviders,validateParkQuotes,parkView,type StillParkRecord} from './still-park';
 import {getSnapshot} from './refresh';
 import {listStillPools} from './still-preflight';
 import {STILL_STRATEGIES,parseStillBot,botRange,strategySignal,type StillFollowRun} from './still-strategies';
@@ -32,6 +33,7 @@ export interface StillPaperMark {
   distanceToFloorPct: number | null; unavailableReasons: string[];
 }
 export interface StillPaperPosition {
+  examplePark?:boolean;
   runId?:string; strategyName?:string; review?:string;
   id: string; positionAddress: string; poolAddress: string; name: string; basketId: string | null; basketName: string | null;
   status: 'open' | 'closed'; openedAt: string; closedAt: string | null;
@@ -47,10 +49,12 @@ export interface StillPaperAccount {
   positions: StillPaperPosition[]; createdAt: string; updatedAt: string;
   latestBasket?: StillBasketProof;
   runs?:StillFollowRun[];
+  park?:{exampleRemainingLamports:number;records:StillParkRecord[]};
   actionCount: number; activityWindow: {at: number; count: number};
 }
 interface Receipt {requestId: string; action: string; fingerprint: string; at: string; positionIds: string[]; amountSol: number; settledSol?: number; settlementNote: string; basket?: StillBasketEvidence}
 export interface StillPaperProviders {
+  park:typeof parkProviders;
   snapshot:typeof getSnapshot;
   preflight: typeof getStillPreflight; baskets: typeof getStillBaskets; mark: typeof getStillPoolMark;
   now: () => number; id: () => string;
@@ -122,7 +126,7 @@ export function stillAccountView(account: StillPaperAccount, now = Date.now()) {
     const positions = account.positions.filter(position => position.poolAddress === poolAddress);
     return {poolAddress, name: positions[0].name, positionIds: positions.map(position => position.id), openCount: positions.filter(position => position.status === 'open').length};
   });
-  return {...view, latestBasket: account.latestBasket ?? null, balanceSol: account.balanceLamports / LAMPORTS_PER_SOL, seededSol: account.seededLamports / LAMPORTS_PER_SOL,
+  return {...view,park:account.park?{...account.park,records:account.park.records.map(r=>parkView(r,now))}:{exampleRemainingLamports:EXAMPLE_PARK_LAMPORTS,records:[]}, latestBasket: account.latestBasket ?? null, balanceSol: account.balanceLamports / LAMPORTS_PER_SOL, seededSol: account.seededLamports / LAMPORTS_PER_SOL,
     seedNote: '10 practice SOL was supplied for this browser. It is not a deposit or earnings.', settlementNote: STILL_SETTLEMENT_NOTE,
     feeModelNote: 'Modelled fees use the observed pool fee/TVL rate over short intervals; they are not earned on-chain fees or a measured position share.',
     positions: view.positions.map(saved => {
@@ -165,7 +169,7 @@ export class StillPaperLedger {
   private deps: StillPaperProviders;
   private preparing = new Map<string, {fingerprint: string; promise: Promise<Response>}>();
   constructor(private ctx: DurableObjectState, private env: Env, deps: Partial<StillPaperProviders> = {}) {
-    this.deps = {snapshot:getSnapshot,preflight: getStillPreflight, baskets: getStillBaskets, mark: getStillPoolMark, now: Date.now, id: () => crypto.randomUUID(), ...deps};
+    this.deps = {park:parkProviders,snapshot:getSnapshot,preflight: getStillPreflight, baskets: getStillBaskets, mark: getStillPoolMark, now: Date.now, id: () => crypto.randomUUID(), ...deps};
   }
   private async lock<T>(fn: () => Promise<T>): Promise<T> {
     const result = await this.ctx.blockConcurrencyWhile(async () => {
@@ -187,6 +191,7 @@ export class StillPaperLedger {
   async handle(account: string, action: string, input: Record<string, unknown> = {}): Promise<Response> {
     try {
       if (!/^[a-f0-9]{64}$/.test(account)) throw new StillPaperError('Invalid paper session.', 401);
+      if(['still-park','still-park-refresh'].includes(action))return await this.park(account,action,input);
       if(['still-follow','still-unfollow','still-bot'].includes(action))return await this.follow(account,action,input);
       if (action === 'still-account') return this.lock(async () => {
         const state = await this.read(account);
@@ -278,7 +283,7 @@ export class StillPaperLedger {
           const settlement = Math.floor(position.mark.grossValueSol * LAMPORTS_PER_SOL);
           if (!Number.isSafeInteger(settlement) || settlement < 0 || !Number.isSafeInteger(current.balanceLamports + settlement)) throw new StillPaperError('The modelled position value cannot be settled safely.', 409, 'still_close_unavailable');
           position.status = 'closed'; position.closedAt = at; position.settledLamports = settlement;
-          current.balanceLamports += settlement; receipt.settledSol = settlement / LAMPORTS_PER_SOL; receipt.amountSol = position.amountSol;
+          if(!position.examplePark)current.balanceLamports += settlement; receipt.settledSol = settlement / LAMPORTS_PER_SOL; receipt.amountSol = position.amountSol;
         }
       }
       current.revision++; current.actionCount++; current.updatedAt = at; validateStored(current);
@@ -429,6 +434,54 @@ export class StillPaperLedger {
       const active=await this.ctx.storage.get<string[]>('still:active-runs')||[];
       const keep=next.runs!.some(r=>r.active)||next.positions.some(p=>p.runId&&p.status==='open');
       await this.ctx.storage.put({[accountKey(account)]:next,'still:active-runs':keep?active:active.filter(id=>id!==account)});
+    });
+  }
+  private async park(account:string,action:string,input:Record<string,unknown>){
+    const id=requestId(input),refresh=action==='still-park-refresh';
+    inputFields(input,refresh?['requestId']:['requestId','confirmed','mode','split','poolAddress','basketSlug','vaultId']);
+    if(!refresh&&input.confirmed!==true)throw new StillPaperError('Review and confirm this paper allocation first.');
+    let selection:ReturnType<typeof parseParkInput>|null=null;
+    try{if(!refresh)selection=parseParkInput(input);}catch(error){throw new StillPaperError((error as Error).message);}
+    const fingerprint=JSON.stringify({action,...selection}),saved=await this.lock(()=>this.saved(account,id,fingerprint));if(saved)return saved;
+    const state=await this.read(account),park=state.park||{exampleRemainingLamports:EXAMPLE_PARK_LAMPORTS,records:[]};
+    if(state.actionCount>=MAX_RECEIPTS)throw new StillPaperError('This browser has reached its demo action limit.',409);
+    let prepared:StillParkRecord|null=null,positions:StillPaperPosition[]=[],marks:Awaited<ReturnType<typeof parkProviders.marks>>|null=null;
+    if(refresh){
+      const holdings=park.records.flatMap(r=>r.basket?[r.basket]:[]);
+      if(holdings.length)marks=await this.deps.park.marks(this.env,holdings);
+    }else{
+      if(park.exampleRemainingLamports<1)throw new StillPaperError('The example amount has already been parked. View your saved allocation.',409);
+      const selected=selection!,amount=park.exampleRemainingLamports,split=parkSplit(amount,selected.split),now=this.deps.now();
+      prepared={id:'park:'+this.deps.id(),mode:'example',at:new Date(now).toISOString(),amountLamports:amount,split:selected.split,poolPositionIds:[]};
+      if(split[0]){
+        const check=await this.deps.preflight(this.env,selected.poolAddress!,split[0]/1e9,undefined,true);
+        if(!check||check.verdict.label!=='Worth it')throw new StillPaperError('No complete “Worth a look” check for this pool. Set Pools to 0% or choose another pool.',409);
+        positions=await this.prepare('still-open',{poolAddress:selected.poolAddress,amountLamports:split[0]});
+        for(const position of positions)position.examplePark=true;
+        prepared.poolPositionIds=positions.map(p=>p.id);
+      }
+      const [basket,vault]=await Promise.all([split[1]?this.deps.park.basket(this.env,{slug:selected.basketSlug!,amountSol:split[1]/1e9}):null,split[2]?this.deps.park.vault(this.env,{ideaId:selected.vaultId!,amountSol:split[2]/1e9}):null]);
+      if(basket)prepared.basket={...basket,id:prepared.id+':basket',openedAt:prepared.at};
+      if(vault)prepared.vault={...vault,id:prepared.id+':vault',openedAt:prepared.at};
+    }
+    return this.lock(async()=>{
+      const saved=await this.saved(account,id,fingerprint);if(saved)return saved;
+      const current=await this.read(account);
+      if(current.revision!==state.revision)throw new StillPaperError('Your paper journal changed while quotes were checked. Retry this same allocation.',409);
+      const now=this.deps.now(),at=new Date(now).toISOString();takeRate(current,now);
+      current.park??={exampleRemainingLamports:EXAMPLE_PARK_LAMPORTS,records:[]};
+      if(prepared){
+        try{validateParkQuotes(prepared,selection!,now);}catch(error){throw new StillPaperError((error as Error).message,409);}
+        if(current.positions.length+positions.length>MAX_POSITIONS||positions.some(p=>!fresh(p.entryAsOf,now)))throw new StillPaperError('The pool evidence expired or the position journal is full. Nothing was parked.',409);
+        // The example allocation is segregated; it is neither earned profit nor practice cash.
+        prepared.at=at;if(prepared.basket)prepared.basket.openedAt=at;if(prepared.vault)prepared.vault.openedAt=at;
+        current.park.exampleRemainingLamports-=prepared.amountLamports;current.park.records.push(prepared);current.positions.push(...positions);
+      }else if(marks){
+        for(const record of current.park.records)if(record.basket){const found=marks.marks.find(m=>m.holdingId===record.basket!.id);if(found)record.basketMark=found;}
+      }
+      current.updatedAt=at;current.revision++;current.actionCount++;validateStored(current);
+      const receipt:Receipt={requestId:id,action,fingerprint,at,positionIds:positions.map(p=>p.id),amountSol:prepared?prepared.amountLamports/1e9:0,settlementNote:'Separate paper example allocation. Not earned profits; no real funds move.'};
+      await this.ctx.storage.put({[accountKey(account)]:current,[receiptKey(account,id)]:receipt});return this.result(current,receipt);
     });
   }
 

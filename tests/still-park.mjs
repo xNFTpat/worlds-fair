@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {mkdtemp} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+const dir=await mkdtemp(join(tmpdir(),'still-park-'));
+await build({entryPoints:['src/still-paper.ts','src/still-park.ts'],outdir:dir,bundle:true,platform:'node',format:'esm',outExtension:{'.js':'.mjs'}});
+const {StillPaperLedger}=await import(join(dir,'still-paper.mjs'));
+const {parseParkInput,parkSplit,validateParkQuotes}=await import(join(dir,'still-park.mjs'));
+for(let a=0;a<=100;a+=5)for(let b=0;b<=100-a;b+=5){const split=[a,b,100-a-b],amounts=parkSplit(1000000001,split);assert.equal(amounts.reduce((x,n)=>x+n,0),1000000001);amounts.forEach((n,i)=>{assert(n>=0);if(!split[i])assert.equal(n,0);});}
+const input={mode:'example',split:[0,50,50],poolAddress:null,basketSlug:'fixture',vaultId:'fixture-vault'};
+assert.deepEqual(parseParkInput(input),input);
+for(const patch of [{mode:'profit'},{split:[10,20,60]},{split:[-5,55,50]},{split:[0,NaN,100]},{split:[1,49,50]},{basketSlug:'../private'},{poolAddress:'A'.repeat(32)}])assert.throws(()=>parseParkInput({...input,...patch}));
+let now=Date.parse('2026-10-11T13:00:00Z'),counter=0,fail=false,expire=false;
+const iso=()=>new Date(now).toISOString(),account='a'.repeat(64);
+class Storage{values=new Map();async get(k){return structuredClone(this.values.get(k));}async put(k,v){for(const [key,value]of Object.entries(typeof k==='string'?{[k]:v}:k))this.values.set(key,structuredClone(value));}}
+const storage=new Storage();let queue=Promise.resolve();const ctx={storage,blockConcurrencyWhile(fn){const p=queue.then(fn);queue=p.catch(()=>{});return p;}};
+const common=amountSol=>({paper:true,amountLamports:Math.round(amountSol*1e9),costSol:amountSol,quoteAsOf:iso(),expiresAt:now+(expire?-1:45000)});
+const deps={now:()=>now,id:()=>`fixture-${++counter}`,park:{basket:async(_env,{slug,amountSol})=>({...common(amountSol),kind:'basket',slug,name:'Synthetic basket',legs:[{mint:'B'.repeat(32),symbol:'TEST',inputLamports:Math.round(amountSol*1e9),unitsRaw:'100000000',decimals:9,weight:100,quoteAsOf:iso()}]}),vault:async(_env,{ideaId,amountSol})=>{if(fail)throw Error('Synthetic missing provider');return {...common(amountSol),kind:'vault',ideaId,name:'Synthetic SOL staking',asset:'SOL',mint:'So11111111111111111111111111111111111111112',basis:'native-sol',principalUnitsRaw:String(Math.round(amountSol*1e9)),decimals:9,rate:5,rateType:'APY',rateReadAt:iso(),rateAsOf:null};},marks:async(_env,holdings)=>({marks:holdings.map(h=>({holdingId:h.id,status:'complete',valueSol:.4,pnlSol:-.1,asOf:iso()})),asOf:iso()})}};
+const ledger=new StillPaperLedger(ctx,{},deps);
+const call=async(action,body={},acct=account)=>{const r=await ledger.handle(acct,action,body);return {status:r.status,...await r.json()};};
+const body={...input,requestId:'park-request-001',confirmed:true};
+assert.equal((await call('still-park',{...body,confirmed:false})).status,400);
+assert.equal((await call('still-park',{...body,unitsRaw:'999'})).status,400);
+fail=true;assert.equal((await call('still-park',body)).status,503);let before=await call('still-account');assert.equal(before.account.park.exampleRemainingLamports,1e9);assert.equal(before.account.park.records.length,0);assert.equal(before.account.balanceSol,10);
+fail=false;expire=true;assert.equal((await call('still-park',body)).status,409);expire=false;
+const attempts=await Promise.all([call('still-park',body),call('still-park',body)]);assert(attempts.every(a=>a.status===200));
+const result=attempts[0];assert.equal(result.account.park.exampleRemainingLamports,0);assert.equal(result.account.balanceSol,10);assert.equal(result.account.park.records.length,1);assert.equal(result.account.park.records[0].basket.amountLamports,5e8);assert.equal(result.account.park.records[0].vault.amountLamports,5e8);
+assert.deepEqual(attempts[0].receipt,attempts[1].receipt);
+assert.equal((await call('still-park',{...body,split:[0,0,100],basketSlug:null})).status,409);
+assert.equal((await call('still-park',{...body,requestId:'another-park-001'})).status,409,'The one-time example cannot be multiplied by a new request id');
+assert.equal((await call('still-account',{},'b'.repeat(64))).account.park.records.length,0);
+now+=86400000;const refreshed=await call('still-park-refresh',{requestId:'park-refresh-001'});const record=refreshed.account.park.records[0];assert.equal(record.basketMark.valueSol,.4);assert(record.vaultAccrual.estimatedUnits>.5);assert.equal(record.vaultAccrual.label,'estimate at quoted rate');assert.equal(refreshed.account.balanceSol,10,'Model accrual never creates practice cash');
+const malformed=structuredClone(record);malformed.basket.legs[0].unitsRaw='-1';assert.throws(()=>validateParkQuotes(malformed,input,now-86400000));
+console.log('Still Park: every split conserves lamports, strict destinations, isolated example budget, atomic failures/expiry/replays, dated basket marks and labelled linear accrual passed.');

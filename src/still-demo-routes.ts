@@ -1,14 +1,16 @@
+import {stillParkData} from './still-park';
 import {parseStillRangeOptions} from './still-preflight-config';
 import type {Env} from './env';
 import {getSnapshot} from './refresh';
 import {listStillPools, buildStillBaskets, getStillPreflight, getStillBasketPreflight} from './still-preflight';
-const paths = new Set(['/api/still/pools', '/api/still/preflight', '/api/baskets', '/api/still/basket-preflight']);
+const paths = new Set(['/api/still/park', '/api/still/pools', '/api/still/preflight', '/api/baskets', '/api/still/basket-preflight']);
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {status, headers: {'content-type': 'application/json', 'cache-control': 'no-store'}});
 export async function stillDemoRoute(req: Request, env: Env): Promise<Response | null> {
   const url = new URL(req.url);
   if (!paths.has(url.pathname)) return null;
   if (!['GET', 'HEAD'].includes(req.method)) return json({error: 'This evidence endpoint is read-only.'}, 405);
   try {
+    if(url.pathname==='/api/still/park')return json(await stillParkData(env));
     if (url.pathname === '/api/still/pools' || url.pathname === '/api/baskets') {
       const snapshot = await getSnapshot(env);
       return json({paper: true, updatedAt: snapshot.updatedAt, ...(url.pathname === '/api/baskets'

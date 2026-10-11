@@ -79,3 +79,7 @@ In the private development repository, `worldsfair-baseline` and `pre-worldsfair
 - Mainnet money actions remain outside this paper/devnet demo.
 
 Keep user-dependent checks and remaining product decisions here while implementation continues.
+
+## Park example (11 October 2026)
+
+Park supports an atomic, confirmed split into qualified pools, quoted Cesto token units and Backyard estimates. Because complete net LP costs remain unavailable, earned profits cannot honestly be established. The demonstration therefore uses a separately labelled, one-time 1 SOL example allowance, never the user's practice balance or invented trading profit. Only complete Worth-a-look pools qualify; unavailable destinations must have a zero split. Backyard only provides a working path when no pool qualifies. Rates are saved at entry and accrued linearly on the underlying deposit asset; no vault shares, LST tokens or real yield are acquired. Cesto values require fresh Jupiter marks. Retries are idempotent and any failed destination leaves the entire allowance unchanged.

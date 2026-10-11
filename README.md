@@ -128,3 +128,7 @@ Source posts were located through the [LP Army strategy library](https://www.lpa
 - TODO(permission): [@VladimirKovacs — beginner LP checklist](https://x.com/VladimirKovacs/status/2104497731939033572).
 
 Every creator card discloses the inspiration and non-affiliation, and links a removal-request issue. Pat’s Overnight patience and Still’s Steady drip are house examples. No permission request has been sent on the user’s behalf.
+
+## Park example (11 October 2026)
+
+Park supports an atomic, confirmed split into qualified pools, quoted Cesto token units and Backyard estimates. Because complete net LP costs remain unavailable, earned profits cannot honestly be established. The demonstration therefore uses a separately labelled, one-time 1 SOL example allowance, never the user's practice balance or invented trading profit. Only complete Worth-a-look pools qualify; unavailable destinations must have a zero split. Backyard only provides a working path when no pool qualifies. Rates are saved at entry and accrued linearly on the underlying deposit asset; no vault shares, LST tokens or real yield are acquired. Cesto values require fresh Jupiter marks. Retries are idempotent and any failed destination leaves the entire allowance unchanged.
