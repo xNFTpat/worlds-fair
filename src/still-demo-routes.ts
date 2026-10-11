@@ -1,8 +1,7 @@
-import {withStillDemoObservation} from './still-demo-pools';
+import {readStillHotPools} from './still-demo-pools';
 import {stillParkData} from './still-park';
 import {parseStillRangeOptions} from './still-preflight-config';
 import type {Env} from './env';
-import {getSnapshot} from './refresh';
 import {listStillPoolsWithSummaries, buildStillBaskets, getStillPreflight, getStillBasketPreflight} from './still-preflight';
 const paths = new Set(['/api/still/wallet','/api/still/wallet-position','/api/still/park', '/api/still/pools', '/api/still/preflight', '/api/baskets', '/api/still/basket-preflight']);
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {status, headers: {'content-type': 'application/json', 'cache-control': 'no-store'}});
@@ -19,8 +18,8 @@ export async function stillDemoRoute(req: Request, env: Env): Promise<Response |
     }
     if(url.pathname==='/api/still/park')return json(await stillParkData(env));
     if (url.pathname === '/api/still/pools' || url.pathname === '/api/baskets') {
-      const snapshot = await withStillDemoObservation(await getSnapshot(env),env);
-      return json({paper: true, updatedAt: snapshot.updatedAt, ...(url.pathname === '/api/baskets'
+      const snapshot = await readStillHotPools(env);
+      return json({paper: true, updatedAt: snapshot.updatedAt, source: 'Meteora DLMM one-hour volume', unavailable:!!snapshot.errors['meteora-dlmm'], ...(url.pathname === '/api/baskets'
         ? {baskets: buildStillBaskets(snapshot)} : {pools: await listStillPoolsWithSummaries(snapshot,env),baskets:buildStillBaskets(snapshot)})});
     }
     const raw = url.searchParams.get('amountSol') ?? '0.5';

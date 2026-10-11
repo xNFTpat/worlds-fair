@@ -9,6 +9,8 @@ await build({entryPoints: ['src/worldsfair.ts'], outfile: join(dir, 'worldsfair.
   platform: 'node', format: 'esm', mainFields: ['main'],
   banner: {js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);"}});
 const {default: worker, paperEnvironment, ...exports} = await import(join(dir, 'worldsfair.mjs'));
+// Native optional-dependency stack formatter assumes CommonJS; keep assertion diagnostics usable in this ESM harness.
+Error.prepareStackTrace=undefined;
 const origin = 'https://paper.test';
 let reads = 0, writes = 0, assets = 0, providers = 0, durableCalls = 0;
 const store = new Map();
@@ -115,6 +117,7 @@ try {
     assert.equal(await response.text(), path === '/index.html' ? 'asset /still-demo' : 'asset /');
   }
   assert.equal(assets, 4);
+  store.set('still:hot-sol-pools:v1',{updatedAt:new Date().toISOString(),pools:[],errors:{}});
   const beforeGuided = {writes, assets, providers};
   data = await (await worker.fetch(request('/api/still/pools'), env)).json();
   assert.equal(data.paper, true); assert.deepEqual(data.pools, [], 'Ineligible snapshot rows produce an explicit empty shortlist');
@@ -131,13 +134,14 @@ try {
   const originalSnapshot = store.get('snapshot:v1');
   for (const malformed of [{updatedAt:now}, {pools:null}, {pools:[null]}]) {
     store.set('snapshot:v1',malformed);
-    for (const path of ['/api/still/pools','/api/baskets','/api/still/preflight?poolAddress='+'A'.repeat(32),'/api/still/basket-preflight?basketId=steady']) {
+    for (const path of ['/api/still/preflight?poolAddress='+'A'.repeat(32)]) {
       const broken = await worker.fetch(request(path),env);
       assert.equal(broken.status,503,'Malformed snapshot returns a retryable error for '+path);
       assert.match((await broken.json()).error,/unavailable/i);
     }
   }
   store.set('snapshot:v1',originalSnapshot);
+  assert.equal((await worker.fetch(request('/api/still/basket-preflight?basketId=steady'),env)).status,200,'Basket catalogue uses the independent fresh hot-pool cache');
   assert.deepEqual({writes, assets, providers}, beforeGuided, 'Guided evidence stays read-only and uses only the supplied snapshot');
   for(const path of ['/brand/still-mark.svg','/product.css','/product-brand.js']){const response=await worker.fetch(request(path),env);assert.equal(response.status,200);assert.equal(await response.text(),'asset '+path,'public product assets reach only the static binding');}
   assert.equal(assets, 7); assert.equal(writes, 0); assert.equal(providers, 0);

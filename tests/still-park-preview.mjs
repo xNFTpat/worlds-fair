@@ -14,12 +14,12 @@ try {
   Date.now=()=>now;
   let calls=0,writes=0,reads=[];
   globalThis.fetch=async()=>{calls++;throw Error('A cached Grow preview must not request quotes or RPC');};
-  const pools=[...'ABCDEFGHJKLM'].map(letter=>({id:'solana:'+letter.repeat(32),address:letter.repeat(32),chain:'solana',venue:'meteora-dlmm',pair:'TEST/SOL',base:{address:mint,symbol:'TEST'},quote:{address:SOL,symbol:'SOL'},fetchedAt:at,tvlUsd:200000,ageHours:240,priceQuote:.01,priceUsd:1,quotePriceUsd:100,feeSource:'reported',fees24hUsd:4800,volume24hUsd:960000,activity:{fees1h:1200,fees4h:4800,fees12h:14400},poolConfig:{binStep:100},tags:[]}));
+  const pools=[...'ABCDEFGHJKLM'].map(letter=>({id:'solana:'+letter.repeat(32),address:letter.repeat(32),chain:'solana',venue:'meteora-dlmm',pair:'TEST/SOL',base:{address:mint,symbol:'TEST'},quote:{address:SOL,symbol:'SOL'},fetchedAt:at,tvlUsd:200000,ageHours:240,priceQuote:.01,priceUsd:1,quotePriceUsd:100,feeSource:'reported',fees24hUsd:4800,volume24hUsd:960000,activity:{volume1h:100000,fees1h:1200,fees4h:4800,fees12h:14400},poolConfig:{binStep:100},tags:[]}));
   let snapshot={updatedAt:at,pools,errors:{}};
   const rpc={status:'available',asOf:at,mint,decimals:6,transferFeeStatus:'none',transferFee:null,freezeAuthority:null,
     holderSample:{status:'available',asOf:at,mint,supplyRaw:'1000',complete:true,accounts:Array.from({length:40},(_,i)=>({address:'account-'+i,owner:'owner-'+i,amountRaw:'25'}))}};
   const candles={status:'available',asOf:at,note:'Synthetic exact-pool Meteora candles',candles:Array.from({length:24},(_,i)=>({t:now/1000-(24-i)*3600,o:.01,c:.01,h:.0105,l:.0095,v:100}))};
-  const quote={mode:'best',sizeSol:.5,status:'quoted',asOf:at,buyAsOf:at,sellAsOf:at,expiresAt:now+45000,exitFeeSource:'jupiter-route',exitCostSol:.001,roundTripCostSol:.002};
+  const quote={mode:'best',sizeSol:.25,status:'quoted',asOf:at,buyAsOf:at,sellAsOf:at,expiresAt:now+45000,exitFeeSource:'jupiter-route',exitCostSol:.001,verifiedExitSwapSol:.001,roundTripCostSol:.002};
   const network={asOf:at,singleLamports:5000,doubleLamports:10000,source:'Synthetic RPC fees'};
   const input=pool=>({accountCosts:{asOf:at,poolAddress:pool.address,positionBytes:8120,positionRentLamports:57406080,setupRentLamports:0,missingAccounts:0,rangeKey:'-1'},rangeAnchor:{status:'available',asOf:at,activeBinId:0,activeBinPriceSol:.01,binStep:100,minNativeBinId:-10000,maxNativeBinId:10000},pool,safety:{rpc},candles,quotes:[quote],network,rug:{mint,status:'available',asOf:at,holderExclusions:{mint,status:'available',asOf:at,addresses:[]}}});
   let cacheMode='fresh';
@@ -29,7 +29,7 @@ try {
     if(key==='cesto:v1:/products')return {readAt:now,data:[]};
     if(key==='cesto:v1:/products/analytics')return {readAt:now,data:{}};
     if(key.startsWith('long-game:v1:'))return {readAt:at,items:[]};
-    const pool=pools.find(p=>key==='still:preflight-input:v3:'+p.address+':500000000:null');
+    const pool=pools.find(p=>key==='still:preflight-input:v4:'+p.address+':500000000:null');
     if(!pool||cacheMode==='missing')return null;
     const detail=input(pool);
     if(cacheMode==='expired-quote')detail.quotes=[{...quote,expiresAt:now-1}];

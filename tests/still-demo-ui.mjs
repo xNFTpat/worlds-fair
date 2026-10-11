@@ -253,7 +253,7 @@ poolCards.setPool({cardSummary:{...cardSummary,verdict:{label:'Marginal',reason:
 await poolCards.click({go:'pools'});
 const refreshedCard=poolCards.elements['#screen'].innerHTML;
 assert.ok(!refreshedCard.includes('alt="Worth a look"'),'A new unavailable response cannot retain an earlier passing verdict');
-assert.match(refreshedCard,/<h4><img[^>]+alt="Marginal"/);assert.ok(refreshedCard.includes('The previous quote has expired.'));
+assert.match(refreshedCard,/<h4><span class="still-chip still-chip--caution">.*Caution<\/span>/);assert.ok(refreshedCard.includes('The previous quote has expired.'));
 assert.ok(!refreshedCard.includes('Observed paper exit estimate is 0.001 SOL.'),'Earlier numeric cost evidence is replaced rather than carried forward');
 
 const noSummary=fixture({poolFields:{cardSummary:null,tvlUsd:{value:null,source:'Synthetic market read',asOf:null}}});await noSummary.click({go:'pools'});

@@ -1,6 +1,9 @@
 import {RESEARCH_READ_LIMITS} from './sources/research-reads';
 import {STILL_PREFLIGHT_THRESHOLDS as T} from './still-preflight-config';
 import type {StillPreflight,StillPreflightInput} from './still-preflight';
+// Exact canonical mints, never names or ticker symbols. Source: Solana payments docs.
+export const STILL_KNOWN_ISSUERS=new Set(['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v','Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB']);
+export const isStillKnownIssuer=(mint:string|null|undefined)=>!!mint&&STILL_KNOWN_ISSUERS.has(mint);
 export type StillCheckStatus='pass'|'caution'|'fail'|'unavailable';
 export interface StillCheck {id:string;label:string;status:StillCheckStatus;result:string;source:string;asOf:string|null;tooltip:string;lesson:number}
 const finite=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
@@ -11,7 +14,9 @@ export function stillChecks(p:StillPreflight,d:StillPreflightInput,now:number):S
  const hold=(p.options?.holdMinutes||T.defaultHoldMinutes)/60,holdText=hold<1?`${n(hold*60)} minutes`:`${n(hold)} hours`,checks:StillCheck[]=[];
  const add=(id:string,label:string,status:StillCheckStatus,result:string,source:string,asOf:string|null,tooltip:string,lesson:number)=>checks.push({id,label,status,result,source,asOf,tooltip,lesson});
  const unknown=(id:string,label:string,source:string,tooltip:string,lesson:number)=>add(id,label,'unavailable',`Unavailable. Couldn't read ${source} at ${new Date(now).toISOString()}. Treat this as unknown.`,source,null,tooltip,lesson);
- const fee=p.feeRateHourly.value,cost=p.exitCostSol.value??p.exitConversionSol.value,day=p.expectedFeesPerDaySol.value;
+ const policy=d.safety?.rpc;
+ if(policy?.status==='available'&&policy.mint===p.pool.pairedMint&&fresh(policy.asOf,now,RESEARCH_READ_LIMITS.mintTtlMs)&&policy.freezeAuthority)add('freeze','Freeze authority',isStillKnownIssuer(policy.mint)?'caution':'fail',isStillKnownIssuer(policy.mint)?'Known issuer':'The token has an active freeze authority.','Confirmed Solana RPC mint policy',policy.asOf,'An active authority can freeze token accounts. Exact canonical issuer identity changes the warning, not that capability.',4);
+ const fee=p.feeRateHourly.value,cost=p.exitCostSol.value,day=p.expectedFeesPerDaySol.value;
  if(finite(fee)){
   const status=fee>=T.feePace.pass?'pass':fee>=T.feePace.caution?'caution':'fail';
   const t=finite(p.roundTripCostSol.value)&&fee>0?`${n(p.roundTripCostSol.value/(fee*p.sizeSol))} hours`:'unavailable';

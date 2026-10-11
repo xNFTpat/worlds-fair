@@ -1,6 +1,6 @@
 import type {Env} from './env';
 import type {Pool,Snapshot} from './schema';
-import {fetchMeteoraPool} from './sources/meteora';
+import {fetchMeteoraPool,fetchMeteoraHotSolPools} from './sources/meteora';
 
 /** One exact pool illustrates why small pools need a cost check. The symbol is
  * display copy only: address AND both mints must match on every observation.
@@ -35,4 +35,28 @@ export async function withStillDemoObservation(snapshot:Snapshot,env:Env,live=fa
   }
   if(!pool)return snapshot;
   return {...snapshot,pools:[...snapshot.pools.filter(p=>p.address!==STILL_THIN_DEMO.address),pool]};
+}
+
+const HOT_KEY='still:hot-sol-pools:v1';
+export const STILL_HOT_POOL_TTL_MS=300_000;
+const hotPending=new WeakMap<object,Promise<Snapshot>>();
+/** Five-minute KV catalogue. Failure is empty/unavailable, never stale data with a new date. */
+export async function readStillHotPools(env:Env,live=true):Promise<Snapshot> {
+  try {
+    const saved=await env.LP_CACHE.get<Snapshot>(HOT_KEY,'json'),age=Date.now()-Date.parse(saved?.updatedAt||'');
+    if(saved&&Array.isArray(saved.pools)&&age>=0&&age<STILL_HOT_POOL_TTL_MS)return saved;
+  }catch{}
+  const empty:Snapshot={updatedAt:'',pools:[],errors:{'meteora-dlmm':'Live one-hour pool list unavailable.'}};
+  if(!live)return empty;
+  const existing=hotPending.get(env.LP_CACHE);if(existing)return existing;
+  const work=(async()=>{
+    try {
+      const pools=await fetchMeteoraHotSolPools();
+      const snapshot=await withStillDemoObservation({updatedAt:pools[0]?.fetchedAt||new Date().toISOString(),pools,errors:{}},env,true);
+      try{await env.LP_CACHE.put(HOT_KEY,JSON.stringify(snapshot),{expirationTtl:300});}catch{}
+      return snapshot;
+    }catch{return {...empty,...await withStillDemoObservation(empty,env)};}
+  })();
+  hotPending.set(env.LP_CACHE,work);
+  try{return await work;}finally{hotPending.delete(env.LP_CACHE);}
 }

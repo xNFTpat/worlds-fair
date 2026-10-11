@@ -161,6 +161,7 @@ interface JupiterQuote {inputMint:string;outputMint:string;inAmount:string;outAm
 interface QuotePair {buy:JupiterQuote;sell:JupiterQuote;buyAsOf:string|null;sellAsOf:string|null}
 export interface ResearchQuote {
  priceMark?:ResearchQuoteMark;
+ verifiedEntrySwapSol?:number|null; verifiedExitSwapSol?:number|null; // Still: verified route fees + reported adverse impact, never an assumed floor.
  quotedExitDragSol?:number|null; // Net quoted proceeds versus the dated mark, without any assumed fee floor.
  sizeSol:number;mode:'best'|'dlmm';status:'quoted'|'unknown'|'unavailable'|'rate-limited'|'stale'|'unsupported';
  roundTripCostSol:number|null;exitCostSol:number|null;asOf:string|null;note:string;
@@ -244,7 +245,7 @@ async function readPumpSellFees(pool:Pool,quote:JupiterQuote,context:ResearchRea
  }catch{/* Missing or unsupported real fee evidence uses the explicit assumption. */}
  return out;
 }
-function routeFeeFloor(pool:Pool,quote:JupiterQuote,token:{mint:string;priceSol:number|null}|null,decimals:number|null,grossValueSol:number|null,pumpFees=new Map<string,PumpFee>()):{sol:number|null;source:'jupiter-route'|'pool-config'|'pump-config'|'assumed'|null;asOf?:string|null}{
+function routeFeeFloor(pool:Pool,quote:JupiterQuote,token:{mint:string;priceSol:number|null}|null,decimals:number|null,grossValueSol:number|null,pumpFees=new Map<string,PumpFee>()):{sol:number|null;source:'jupiter-route'|'pool-config'|'pump-config'|'assumed'|null;asOf?:string|null;complete?:boolean}{
  const configBase=number(pool.poolConfig?.baseFee??pool.feeTier),configDynamic=number(pool.poolConfig?.dynamicFee),configFee=configBase!=null?configBase+(configDynamic??0):null;
  const value=(mint:unknown,amount:unknown):number|null=>{if(!raw(amount))return null;const n=Number(amount),scaled=mint===RESEARCH_SOL?n/1e9:mint===token?.mint&&positive(token?.priceSol)&&decimals!=null&&Number.isInteger(decimals)&&decimals>=0&&decimals<=18?n/10**decimals*token.priceSol:null;return valid(scaled)?scaled:null;};
  let total=0,missing=false,feeAsOf:string|null=null,source:'jupiter-route'|'pool-config'|'pump-config'|'assumed'='jupiter-route';
@@ -259,7 +260,7 @@ function routeFeeFloor(pool:Pool,quote:JupiterQuote,token:{mint:string;priceSol:
   const fallbackSource=pump?'pump-config':matched&&configFee!=null&&configFee>0&&configFee<1?'pool-config':'assumed';source=source==='assumed'||fallbackSource==='assumed'?'assumed':fallbackSource;
   const legValue=value(info?.inputMint,info?.inAmount),percent=number(route.percent),bps=number(route.bps),share=bps!=null&&bps<=10000?bps/10000:percent!=null&&percent<=100?percent/100:1;
   const fallbackValue=legValue??(valid(grossValueSol)?grossValueSol*share:null);
-  if(fallbackValue==null)return {sol:valid(total)&&total>0?total:null,source:total>0?'jupiter-route':null};
+  if(fallbackValue==null)return {sol:valid(total)&&total>0?total:null,source:total>0?'jupiter-route':null,complete:false};
   // Pump charges its configured fees in quote SOL. A better-priced alternate
   // venue can return more SOL than this selected-pool mark; gross up its actual
   // net output so that favourable pricing cannot understate the absolute fee.
@@ -284,12 +285,22 @@ function quoteResult(pool:Pool,sizeSol:number,mode:'best'|'dlmm',read:ResearchRe
  const sellValue=coherent&&markCurrent&&p?.priceSol&&decimals!=null&&Number.isInteger(decimals)&&decimals>=0&&decimals<=18?Number(data!.buy.outAmount)/10**decimals*p.priceSol:null;
  const sellFee=coherent?routeFeeFloor(pool,data!.sell,p,decimals,sellValue,pumpFees):{sol:null,source:null,asOf:null};
  const exitCost=quoted&&sellValue!=null&&returnedSol!=null?Math.max(sellFee.sol??0,sellValue-returnedSol):null;
+ // Still presents the conservative fee-plus-impact cost, rather than letting a
+ // favourable cross-venue mark erase a real route fee. No assumed fee is valid.
+ const buyFee=coherent?routeFeeFloor(pool,data!.buy,p,decimals,sizeSol,pumpFees):{sol:null,source:null};
+ const verifiedSwap=(fee:typeof buyFee,impact:unknown,notional:number|null,drag:number|null)=>{
+  const parsed=typeof impact==='string'&&impact.trim()!==''?Number(impact):NaN;
+  if(!quoted||fee.complete===false||!positive(fee.sol)||!['jupiter-route','pool-config','pump-config'].includes(fee.source||'')||!Number.isFinite(parsed)||parsed>1||!positive(notional))return null;
+  return Math.max(fee.sol+Math.max(0,parsed)*notional,drag??0);
+ };
+ const verifiedEntrySwapSol=verifiedSwap(buyFee,data?.buy.priceImpactPct,sizeSol,sellValue==null?null:sizeSol-sellValue);
+ const verifiedExitSwapSol=verifiedSwap(sellFee,data?.sell.priceImpactPct,sellValue,sellValue==null||returnedSol==null?null:sellValue-returnedSol);
  // Jupiter's returned amount already nets both swap fees. Adding a separate
  // configured-fee floor here would double count or misprice alternate venues.
  const roundTripCost=quoted&&returnedSol!=null?Math.max(0,sizeSol-returnedSol):null;
  const selectedPoolMatched=coherent?buyRoutePools.includes(pool.address)&&sellRoutePools.includes(pool.address):null;
  const scope=mode==='dlmm'?'Meteora DLMM routes; the selected pool is not guaranteed.':'Jupiter best route across supported venues.';
- return {sizeSol,mode,status,...(priceMark?{priceMark}:{}),quotedExitDragSol:quoted&&sellValue!=null&&returnedSol!=null?Math.max(0,sellValue-returnedSol):null,roundTripCostSol:roundTripCost,exitCostSol:exitCost,exitFeeFloorSol:sellFee.sol,exitFeeSource:sellFee.source,exitFeeAsOf:sellFee.asOf??null,asOf:read.asOf,buyAsOf:data?.buyAsOf??null,sellAsOf:data?.sellAsOf??null,expiresAt:read.expiresAt??null,note:(quoted?scope+' Buy then sell the quoted returned tokens. Round-trip cost is the actual net SOL loss from both legs; exit cost never falls below the sell-route fee floor. '+(sellFee.source==='pump-config'?'Sell-fee floor uses dated verified PumpSwap flat or market-cap-tier fee configuration at '+sellFee.asOf+'. ':sellFee.source==='assumed'?'Sell-fee floor is an explicitly assumed 0.5% where the actual route fee could not be verified. ':sellFee.source==='pool-config'?'Missing sell-route fee metadata uses the dated matched selected-pool base/dynamic fee conservatively. ':'Sell-route raw fee amounts are valued once, without reweighting split percentages. ')+'Network fees, LP rent, deposit/withdrawal transfer fees and future price movement are excluded.':status==='stale'?'Both dated quote legs must be current within 45 seconds; conversion cost is unavailable after either leg expires.':read.status==='available'?'Quote identities, amounts or requested venue routes could not be verified.':read.note),selectedPoolMatched,buyRoutePools,sellRoutePools,buyPriceImpact:number(data?.buy.priceImpactPct),sellPriceImpact:number(data?.sell.priceImpactPct),slippageBps:50,inputRaw:coherent?data!.buy.inAmount:null,tokenRaw:coherent?data!.buy.outAmount:null,returnedSol:quoted?returnedSol:null};
+ return {sizeSol,mode,status,verifiedEntrySwapSol,verifiedExitSwapSol,...(priceMark?{priceMark}:{}),quotedExitDragSol:quoted&&sellValue!=null&&returnedSol!=null?Math.max(0,sellValue-returnedSol):null,roundTripCostSol:roundTripCost,exitCostSol:exitCost,exitFeeFloorSol:sellFee.sol,exitFeeSource:sellFee.source,exitFeeAsOf:sellFee.asOf??null,asOf:read.asOf,buyAsOf:data?.buyAsOf??null,sellAsOf:data?.sellAsOf??null,expiresAt:read.expiresAt??null,note:(quoted?scope+' Buy then sell the quoted returned tokens. Round-trip cost is the actual net SOL loss from both legs; exit cost never falls below the sell-route fee floor. '+(sellFee.source==='pump-config'?'Sell-fee floor uses dated verified PumpSwap flat or market-cap-tier fee configuration at '+sellFee.asOf+'. ':sellFee.source==='assumed'?'Sell-fee floor is an explicitly assumed 0.5% where the actual route fee could not be verified. ':sellFee.source==='pool-config'?'Missing sell-route fee metadata uses the dated matched selected-pool base/dynamic fee conservatively. ':'Sell-route raw fee amounts are valued once, without reweighting split percentages. ')+'Network fees, LP rent, deposit/withdrawal transfer fees and future price movement are excluded.':status==='stale'?'Both dated quote legs must be current within 45 seconds; conversion cost is unavailable after either leg expires.':read.status==='available'?'Quote identities, amounts or requested venue routes could not be verified.':read.note),selectedPoolMatched,buyRoutePools,sellRoutePools,buyPriceImpact:number(data?.buy.priceImpactPct),sellPriceImpact:number(data?.sell.priceImpactPct),slippageBps:50,inputRaw:coherent?data!.buy.inAmount:null,tokenRaw:coherent?data!.buy.outAmount:null,returnedSol:quoted?returnedSol:null};
 }
 export async function cachedResearchQuotes(pool:Pool,env:Env,decimals:number|null=null):Promise<ResearchQuote[]>{
  const token=researchToken(pool);

@@ -37,7 +37,7 @@ try{
  const anchor={status:'available',asOf:at,activeBinId:0,activeBinPriceSol:.01,binStep:100,minNativeBinId:-10000,maxNativeBinId:10000};
  const rpc={mint,status:'available',asOf:at,decimals:6,transferFeeStatus:'known',transferFee:{bps:300,maximumRaw:'10000',configAuthority:null}};
  const network={asOf:at,singleLamports:5000,doubleLamports:10000,source:'Fixture'},accounts={...observed,asOf:at,rangeKey:'-1',setupRentLamports:1000000,missingAccounts:1};
- const quote={mode:'best',sizeSol:.5,status:'quoted',asOf:at,buyAsOf:at,sellAsOf:at,expiresAt:now+45000,exitFeeSource:'jupiter-route',quotedExitDragSol:.002,tokenRaw:'50000000'};
+ const quote={mode:'best',sizeSol:.25,status:'quoted',asOf:at,buyAsOf:at,sellAsOf:at,expiresAt:now+45000,exitFeeSource:'jupiter-route',verifiedExitSwapSol:.002,tokenRaw:'50000000'};
  const input={pool,rangeAnchor:anchor,safety:{rpc},network,accountCosts:accounts,quotes:[quote]};
  const full=buildStillPreflight(input,.5,now);
  assert.equal(full.positionRentSol.value,observed.positionRentLamports/1e9);assert.equal(full.exitTransferFeeSol.value,.0001,'Fee cap is token-denominated, rounded in raw units');
@@ -46,9 +46,9 @@ try{
  assert(Math.abs(full.roundTripCostSol.value-(.00001+.00211+.001005))<1e-12,'Returned position rent excluded; sunk setup included');
  assert.equal(full.netReturnPct.value,full.paperCostModel.netAfterHoldSol.value/.5*100);
  assert.equal(full.breakEvenHours.value,full.roundTripCostSol.value/(.5*.005));
- const partial=buildStillPreflight({...input,quotes:[]},.5,now);assert.equal(partial.exitTransferFeeSol.value,.0001);assert(Math.abs(partial.exitCostSol.value-.00011)<1e-12);assert.equal(partial.exitCostComplete,false);assert.equal(partial.netReturnPct.value,null);assert.equal(partial.ledger.exitCostsSol,null);assert.match(partial.exitCostSol.note,/At least/);
+ const partial=buildStillPreflight({...input,quotes:[]},.5,now);assert.equal(partial.exitTransferFeeSol.value,.0001);assert.equal(partial.exitCostSol.value,null);assert.equal(partial.exitCostComplete,false);assert.equal(partial.netReturnPct.value,null);assert.equal(partial.ledger.exitCostsSol,null);assert.match(partial.exitCostSol.note,/unavailable/);
  const basket={status:'available',legs:[{poolAddress,weightBps:10000}]};const combined=combineStillBasketPreflight(basket,[partial],.5);assert.equal(combined.exitCostSol.value,null,'A component lower bound cannot become a complete basket exit total');
- const missingNetwork=buildStillPreflight({...input,network:null},.5,now);assert(Math.abs(missingNetwork.exitCostSol.value-.0021)<1e-12,'Partial exit retains both known transfer tax and known quote when network is missing');assert.equal(missingNetwork.exitCostComplete,false);
+ const missingNetwork=buildStillPreflight({...input,network:null},.5,now);assert.equal(missingNetwork.exitCostSol.value,null,'Complete exit total requires network evidence; tax stays separately visible');assert.equal(missingNetwork.exitCostComplete,false);
  const noMint=buildStillPreflight({...input,safety:undefined},.5,now);assert.equal(noMint.entryCostSol.value,.00001);assert.equal(noMint.entryCostSol.asOf,at,'Known all-SOL entry fee retains its source date without a mint read');
  const unknown=buildStillPreflight({...input,accountCosts:null},.5,now);assert.equal(unknown.setupCostSol.value,null);assert.equal(unknown.netReturnPct.value,null);
  const zero=buildStillPreflight({...input,pool:{...pool,activity:{fees1h:0}}},.5,now);assert.equal(zero.breakEvenStatus,'never');assert.equal(zero.breakEvenHours.value,null);

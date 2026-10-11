@@ -127,3 +127,19 @@ function normaliseMeteoraPool(p:RawPool,venue:'meteora-dlmm'|'meteora-damm-v2',n
     };
 
 }
+
+/** Still's bounded live catalogue: both SOL token orientations, sorted at source. */
+export async function fetchMeteoraHotSolPools():Promise<Pool[]> {
+  const sol='So11111111111111111111111111111111111111112';
+  const lists=await Promise.all(['token_x','token_y'].map(async side=>{
+    const query=new URLSearchParams({page:'1',page_size:'100',sort_by:'volume_1h:desc',filter_by:`is_blacklisted=false && tvl>=5000 && ${side}=${sol}`});
+    const response=await fetch(BASE+'/pools?'+query,{headers:{accept:'application/json'},signal:AbortSignal.timeout(6000)});
+    if(!response.ok)throw Error('Hot pools unavailable');
+    const body=await response.json() as RawResponse;
+    if(!Array.isArray(body.data))throw Error('Hot pools unavailable');
+    return body.data.filter(p=>p.is_blacklisted===false&&(p.token_x?.address===sol||p.token_y?.address===sol)&&nonnegative(p.volume?.['1h'])!==null);
+  }));
+  const at=new Date().toISOString();
+  return [...new Map(lists.flat().map(p=>[p.address,p])).values()].map(p=>normaliseMeteoraPool(p,'meteora-dlmm',at))
+    .sort((a,b)=>(b.activity?.volume1h??-1)-(a.activity?.volume1h??-1)||a.address.localeCompare(b.address));
+}
