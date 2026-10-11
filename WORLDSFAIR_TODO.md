@@ -1,5 +1,12 @@
 # Still · remaining work
 
+## 11 October — Coinbase issuer and exact entry funding, 23:55 BST
+
+- [x] Deployed `fd1d040bf5533b056bad730a7de3fc69e227780a` to Still only. Exact Coinbase cbBTC mint receives Known issuer / Caution for freeze authority; other screening checks remain intact.
+- [x] Exact raw amount/direction guards for two-sided entry quotes; swap principal, conversion loss and network costs visible separately. Missing funding quotes remain Unavailable. Default SOL-only entry remains 0.000010 SOL.
+- [x] All 85 tests, both type checks and five Worker runtime suites passed. All 26 live checks had complete cost/net figures (12 default, 12 Spot, cbBTC Curve and two-sided Bid-Ask). No Worth a look; DOPE logic and all protected rules unchanged.
+- [x] [Full default and two-sided checkpoint](docs/CBBTC_ENTRY_CHECKPOINT.md). Stopped at the requested checkpoint.
+
 ## 11 October — exit floor and visible reasons, 23:14 BST
 
 - [x] Deployed `fb7574e9918a955e628ed1b3f36ee1a7d8f4ef56` to Still only: concurrent exact-pool price/quote, observed pool-fee exit floor, Better than mid note, subminute recovery label and visible deciding checks.
