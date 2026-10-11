@@ -6,7 +6,7 @@
 - [x] Project fees using the slower of hourly volume and daily volume / 24; existing thresholds, Known issuer chip and pinned SKR retained.
 - [x] 85 test scripts, both type checks and five Worker runtime suites passed; final cache-age fix passed focused regressions/type checks.
 - [x] Final same-twelve-pool check: **all 12 exit figures available; 11 complete cost/net rows**. UNCC has ~$566 liquidity, below the unchanged $5,000 minimum, so its entry/deposit/net remain Unavailable. **No Worth a look.** Baton bFsVz remains Skip with +0.1748% four-hour net at this check.
-- [x] Evidence: [quote/fee checkpoint](validation/worldsfair/QUOTE_FEE_CHECKPOINT.md). This supersedes the earlier nine-unavailable quote result below. Stopped at the checkpoint.
+- [x] Evidence: [quote/fee checkpoint](docs/QUOTE_FEE_CHECKPOINT.md). This supersedes the earlier nine-unavailable quote result below. Stopped at the checkpoint.
 
 
 This public repository starts with a sanitized snapshot and fresh history. The task SHAs below from the earlier development phase identify commits in the private source repository; they are disclosed provenance, not publicly mirrored history.

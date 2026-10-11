@@ -5,7 +5,7 @@ import type {StillPreflight,StillPreflightInput} from './still-preflight';
 export const STILL_KNOWN_ISSUERS=new Set(['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v','Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB']);
 export const isStillKnownIssuer=(mint:string|null|undefined)=>!!mint&&STILL_KNOWN_ISSUERS.has(mint);
 export type StillCheckStatus='pass'|'caution'|'fail'|'unavailable';
-export interface StillCheck {id:string;label:string;status:StillCheckStatus;result:string;source:string;asOf:string|null;tooltip:string;lesson:number}
+export interface StillCheck {id:string;label:string;status:StillCheckStatus;result:string;shortReason?:string;source:string;asOf:string|null;tooltip:string;lesson:number}
 const finite=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
 const n=(v:number)=>v!==0&&Math.abs(v)<.0001?v.toExponential(2):v.toLocaleString('en-GB',{maximumFractionDigits:4});
 const pct=(v:number)=>n(v*100),sol=(v:number)=>n(v)+' SOL';
@@ -14,12 +14,15 @@ export function stillChecks(p:StillPreflight,d:StillPreflightInput,now:number):S
  const hold=(p.options?.holdMinutes||T.defaultHoldMinutes)/60,holdText=hold<1?`${n(hold*60)} minutes`:`${n(hold)} hours`,checks:StillCheck[]=[];
  const add=(id:string,label:string,status:StillCheckStatus,result:string,source:string,asOf:string|null,tooltip:string,lesson:number)=>checks.push({id,label,status,result,source,asOf,tooltip,lesson});
  const unknown=(id:string,label:string,source:string,tooltip:string,lesson:number)=>add(id,label,'unavailable',`Unavailable. Couldn't read ${source} at ${new Date(now).toISOString()}. Treat this as unknown.`,source,null,tooltip,lesson);
+ const liquidity=p.pool.tvlUsd.value;
+ if(finite(liquidity))add('liquidity','Liquidity',liquidity<5000?'fail':'pass',liquidity<5000?'Liquidity under $5k':'Liquidity meets $5k minimum',p.pool.tvlUsd.source,p.pool.tvlUsd.asOf,'Pools below the existing $5,000 minimum are direct-view examples only; they cannot be picked or opened.',3);
+ else unknown('liquidity','Liquidity',p.pool.tvlUsd.source,'A current liquidity observation is required.',3);
  const policy=d.safety?.rpc;
  if(policy?.status==='available'&&policy.mint===p.pool.pairedMint&&fresh(policy.asOf,now,RESEARCH_READ_LIMITS.mintTtlMs)&&policy.freezeAuthority)add('freeze','Freeze authority',isStillKnownIssuer(policy.mint)?'caution':'fail',isStillKnownIssuer(policy.mint)?'Known issuer':'The token has an active freeze authority.','Confirmed Solana RPC mint policy',policy.asOf,'An active authority can freeze token accounts. Exact canonical issuer identity changes the warning, not that capability.',4);
  const fee=p.feeRateHourly.value,cost=p.exitCostSol.value,day=p.expectedFeesPerDaySol.value;
  if(finite(fee)){
   const status=fee>=T.feePace.pass?'pass':fee>=T.feePace.caution?'caution':'fail';
-  const t=finite(p.breakEvenHours.value)?`${n(p.breakEvenHours.value)} hours`:'unavailable';
+  const t=finite(p.breakEvenHours.value)?p.breakEvenHours.value<1/60?'Under 1 min':`${n(p.breakEvenHours.value)} hours`:'unavailable';
   add('fees','Fee pace',status,t==='unavailable'?`Fees are ${pct(fee)}% of TVL an hour. Cost recovery is unavailable.`:status==='pass'?`Fees are running at ${pct(fee)}% of TVL an hour. Costs earned back in about ${t}.`:status==='caution'?`Fees are ${pct(fee)}% of TVL an hour. Costs take about ${t} to earn back.`:`Fees are ${pct(fee)}% of TVL an hour. ${finite(p.roundTripCostSol.value)?`Cost recovery at this pace: ${t}. Planned hold: ${holdText}.`:'Cost recovery is unavailable.'}`,p.feeRateHourly.source,p.feeRateHourly.asOf,`Fee projection uses the slower of one-hour volume and 24-hour volume / 24, at the observed fee per dollar traded, applied to your size. ${finite(day)?'Daily pace: '+sol(day)+'. ':''}Pool-average model, not position earnings. Example threshold bands; costs and future fees may be unavailable.`,7);
  }else unknown('fees','Fee pace',p.feeRateHourly.source,'Fee projection uses the slower of one-hour volume and 24-hour volume / 24, at the observed fee per dollar traded, applied to your size.',7);
  for(const scenario of p.scenarios){
@@ -65,5 +68,10 @@ export function stillChecks(p:StillPreflight,d:StillPreflightInput,now:number):S
   const swing=(Math.max(...dayWindow.map(c=>c!.h))-Math.min(...dayWindow.map(c=>c!.l)))/p.priceSol.value,depth=p.range.depthFraction,status=depth<swing?'fail':depth<swing*T.floor.passAtSwing?'caution':'pass';
   add('floor','Floor distance',status,status==='pass'?`Your floor is ${pct(depth)}% below price. Room for a normal pullback.`:status==='caution'?`Your floor is ${pct(depth)}% below price. A routine dip could take you out.`:`Your floor is ${pct(depth)}% below price, inside today's usual swing of ${pct(swing)}%.`,candles!.note.includes('Gecko')?'GeckoTerminal exact-pool hourly candles + paper range':'Meteora hourly candles + paper range',candles!.asOf,'Example thresholds: below the observed 24h high–low span fails; 1–1.2× cautions; at least 1.2× passes. Past movement is not a prediction.',1);
  }else unknown('floor','Floor distance','Exact-pool 24-hour candle window','Requires all 24 complete hourly candles and a valid range.',1);
+ for(const c of checks){
+  const reasons:Record<string,string[]>={liquidity:['Liquidity meets minimum','Liquidity needs checking','Liquidity under $5k'],freeze:['No freeze authority','Known issuer','Freeze authority active'],fees:['Fee pace passes','Fee pace borderline','Fee pace too slow'],cost:['Costs fit the hold','Exit cost elevated','Exit too costly'],tax:['No transfer tax','Transfer tax applies','Transfer tax too high or changeable'],holders:['Holders spread out','Holders concentrated','Holders too concentrated'],spike:['No price spike','Price moving sharply','Price spike too large'],floor:['Range has room','Range close to usual swing','Range too narrow for usual swings'],half:['Inside range','Near or above range','Outside range'],drop20:['Inside range','Near or above range','Outside range']};
+  const age=d.pool.ageHours;
+  c.shortReason=c.status==='unavailable'?c.id==='spike'&&finite(age)&&age<6?'Pool too young for 6h check':c.id==='floor'&&finite(age)&&age<24?'Pool too young for 24h check':`${c.label} unavailable`:(reasons[c.id]||['Check passes','Check needs review','Check fails'])[['pass','caution','fail'].indexOf(c.status)];
+ }
  return checks;
 }

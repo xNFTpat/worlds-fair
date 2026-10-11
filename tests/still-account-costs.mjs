@@ -37,7 +37,7 @@ try{
  const anchor={status:'available',asOf:at,activeBinId:0,activeBinPriceSol:.01,binStep:100,minNativeBinId:-10000,maxNativeBinId:10000};
  const rpc={mint,status:'available',asOf:at,decimals:6,transferFeeStatus:'known',transferFee:{bps:300,maximumRaw:'10000',configAuthority:null}};
  const network={asOf:at,singleLamports:5000,doubleLamports:10000,source:'Fixture'},accounts={...observed,asOf:at,rangeKey:'-1',setupRentLamports:1000000,missingAccounts:1};
- const quote={mode:'best',sizeSol:.25,status:'quoted',asOf:at,buyAsOf:at,sellAsOf:at,expiresAt:now+45000,exitFeeSource:'jupiter-route',verifiedExitSwapSol:.002,tokenRaw:'50000000',returnedSol:.498,priceMark:{source:'active-bin',priceSol:.01,asOf:at}};
+ const quote={stillPoolFeeFloorSol:.0001,mode:'best',sizeSol:.25,status:'quoted',asOf:at,buyAsOf:at,sellAsOf:at,expiresAt:now+45000,exitFeeSource:'jupiter-route',verifiedExitSwapSol:.002,tokenRaw:'50000000',returnedSol:.498,priceMark:{source:'active-bin',priceSol:.01,asOf:at}};
  const input={pool,rangeAnchor:anchor,safety:{rpc},network,accountCosts:accounts,quotes:[quote]};
  const full=buildStillPreflight(input,.5,now);
  assert.equal(full.positionRentSol.value,observed.positionRentLamports/1e9);assert.equal(full.exitTransferFeeSol.value,.0001,'Fee cap is token-denominated, rounded in raw units');

@@ -1,3 +1,4 @@
+import {fetchMeteoraPool} from './meteora';
 import type {Env} from '../env';
 import type {Pool} from '../schema';
 import type {Candle} from '../suggest';
@@ -161,6 +162,7 @@ interface JupiterQuote {inputMint:string;outputMint:string;inAmount:string;outAm
 interface QuotePair {buy:JupiterQuote;sell:JupiterQuote;buyAsOf:string|null;sellAsOf:string|null}
 export interface ResearchQuote {
  direction?:'entry'|'exit'; tokenDecimals?:number;
+ stillPoolFeeFloorSol?:number|null; stillSynchronousMark?:boolean;
  priceMark?:ResearchQuoteMark;
  verifiedEntrySwapSol?:number|null; verifiedExitSwapSol?:number|null; // Still: verified route fees + reported adverse impact, never an assumed floor.
  quotedExitDragSol?:number|null; // Net quoted proceeds versus the dated mark, without any assumed fee floor.
@@ -354,14 +356,25 @@ export async function readStillSwapQuote(pool:Pool,context:ResearchReadContext,d
  if(!Number.isSafeInteger(amount)||amount<=0)return fail('Swap size cannot be represented in raw token units.');
  const input=direction==='exit'?token.mint:RESEARCH_SOL,output=direction==='exit'?RESEARCH_SOL:token.mint;
  const query=new URLSearchParams({inputMint:input,outputMint:output,amount:String(amount),swapMode:'ExactIn',slippageBps:'50'});
- const read=await readJson<JupiterQuote>(context,{name:`still-swap:v1:${input}:${output}:${amount}`,provider:'Jupiter',url:'https://api.jup.ag/swap/v1/quote?'+query,ttl:45000,init:{headers:{accept:'application/json',...(context.env.JUPITER_API_KEY?{'x-api-key':context.env.JUPITER_API_KEY}:{})}}});
+ // Fetch both observations together, bypassing the quote cache. The prior mark
+ // sizes the request only; it is never used to value this quote's proceeds.
+ const [read,current]=await Promise.all([
+  readJson<JupiterQuote>(context,{name:`still-swap:v2:${input}:${output}:${amount}`,provider:'Jupiter',url:'https://api.jup.ag/swap/v1/quote?'+query,ttl:45000,forceFresh:true,init:{headers:{accept:'application/json',...(context.env.JUPITER_API_KEY?{'x-api-key':context.env.JUPITER_API_KEY}:{})}}}),
+  fetchMeteoraPool(pool.address).catch(()=>null),
+ ]);
  if(read.status!=='available'){result.status=read.status==='unknown'?'unknown':read.status;return fail(read.note);}
  const q=read.data;
  if(!q||!raw(q.outAmount)||BigInt(q.outAmount)<=0n)return fail('Jupiter returned no usable route/output amount.');
  if(q.inputMint!==input||q.outputMint!==output||q.inAmount!==String(amount))return fail('Jupiter quote mint or input amount mismatch.');
- result.status='quoted';result.asOf=read.asOf;result.expiresAt=read.expiresAt;result.priceMark=mark;result.tokenDecimals=decimals!;
+ const currentToken=current&&researchToken(current),gap=Math.abs(Date.parse(current?.fetchedAt||'')-Date.parse(read.asOf||''));
+ if(!current||current.base.address!==pool.base.address||current.quote.address!==pool.quote.address||!positive(currentToken?.priceSol)||!Number.isFinite(gap)||gap>10000)return fail('Concurrent exact-pool active price unavailable or more than ten seconds from quote.');
+ const base=current.poolConfig?.baseFee,dynamic=current.poolConfig?.dynamicFee;
+ if(direction==='exit'&&(!valid(base)||!valid(dynamic)||base+dynamic>=1))return fail('Current selected-pool base/dynamic fee unavailable.');
+ const mid:ResearchQuoteMark={source:'meteora-pool',priceSol:currentToken.priceSol,asOf:current.fetchedAt,poolAddress:pool.address,mint:token.mint};
+ result.status='quoted';result.asOf=read.asOf;result.expiresAt=read.expiresAt;result.priceMark=mid;result.tokenDecimals=decimals!;result.stillSynchronousMark=true;
+ if(direction==='exit')result.stillPoolFeeFloorSol=Number(q.inAmount)/10**decimals!*mid.priceSol*(base!+dynamic!);
  result.inputRaw=direction==='entry'?q.inAmount:null;result.tokenRaw=direction==='exit'?q.inAmount:q.outAmount;result.returnedSol=direction==='exit'?Number(q.outAmount)/1e9:null;
- result.note='Exact-size Jupiter output versus the dated pool mid-price; includes fees embedded in proceeds. Per-hop fee and impact fields are not required. Negative cost means favourable execution versus that mark.';
+ result.note='Exact-size Jupiter output versus an exact-pool active-price read fetched alongside it (within ten seconds). The selected pool base plus dynamic fee is the conversion floor. Per-hop fee/impact fields are not required.';
  return result;
 }
 

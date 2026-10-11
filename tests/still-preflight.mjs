@@ -99,7 +99,7 @@ try {
   assert.equal(buildStillPreflight({...input, safety: {rpc: {...rpc, freezeAuthority: 'active'}}}, .5, now).verdict.label, 'Marginal');
   const tax = buildStillPreflight({...input, safety: {rpc: {...rpc, transferFeeStatus: 'known', transferFee: {bps: 150, maximumRaw: '10000', configAuthority: 'active'}}}}, .5, now);
   assert.equal(tax.transferFeeBps.value, 150); assert.equal(tax.verdict.label, 'Marginal');
-  const quote = {tokenDecimals:6,tokenRaw:'25000000',returnedSol:.249,priceMark:{source:'active-bin',priceSol:.01,asOf:at},mode: 'best', sizeSol: .25, status: 'quoted', asOf: at, buyAsOf: at, sellAsOf: at, expiresAt: now + 45_000, exitFeeSource: 'jupiter-route', exitCostSol: .001, verifiedExitSwapSol:.001, verifiedEntrySwapSol:.001, roundTripCostSol: .002};
+  const quote = {stillPoolFeeFloorSol:.0001,tokenDecimals:6,tokenRaw:'25000000',returnedSol:.249,priceMark:{source:'active-bin',priceSol:.01,asOf:at},mode: 'best', sizeSol: .25, status: 'quoted', asOf: at, buyAsOf: at, sellAsOf: at, expiresAt: now + 45_000, exitFeeSource: 'jupiter-route', exitCostSol: .001, verifiedExitSwapSol:.001, verifiedEntrySwapSol:.001, roundTripCostSol: .002};
   const quoted = buildStillPreflight({...input, quotes: [quote]}, .5, now);
   assert.equal(quoted.exitConversionSol.value, .001); assert.equal(quoted.exitCostSol.value, null, 'a swap quote alone is not an all-in LP exit cost');
   for (const change of [{sizeSol: 1}, {returnedSol: null}, {tokenRaw: undefined}, {status: 'stale'}, {expiresAt: now - 1}]) assert.equal(buildStillPreflight({...input, quotes: [{...quote, ...change}]}, .5, now).exitConversionSol.value, null);
@@ -139,11 +139,17 @@ try {
     closeTo(result.exitCostSol.value,.00101,'Ignore obsolete fee floor');
   }
   const favourable=buildStillPreflight({...healthyInput,quotes:[{...quote,returnedSol:.251}]},.5,now);
-  closeTo(favourable.exitCostSol.value,-.00099,'Favourable execution is a signed difference, not invented fees');
-  assert.equal(favourable.breakEvenHours.value,0,'Already covered costs need no fee accrual');
+  closeTo(favourable.exitCostSol.value,.00011,'Favourable execution retains network plus current pool fee');assert.equal(favourable.betterThanMid,true);
+  assert(favourable.breakEvenHours.value>0,'Costs always take positive time to cover');
   for (const change of [{sizeSol:.5},{status:'stale'},{expiresAt:now-1},{asOf:iso(now+1),buyAsOf:iso(now+1),sellAsOf:iso(now+1)}]) {
     assert.equal(buildStillPreflight({...healthyInput,quotes:[{...quote,...change}]},.5,now).exitCostSol.value,null,'Requires current half-size quote');
   }
+  const thin=buildStillPreflight({...healthyInput,pool:{...healthyPool,tvlUsd:566}},.5,now);
+  assert.equal(thin.canOpen,false);assert.equal(thin.thinExampleOnly,true);assert(thin.range);assert.equal(thin.entryCostSol.value,.00001);assert(thin.positionRentSol.value>0);assert(thin.exitCostSol.value>0);assert.match(thin.verdict.reason,/^Liquidity under \$5k/);
+  assert(!listStillPools({pools:[{...healthyPool,tvlUsd:566}],updatedAt:at,errors:{}},now).length,'Under-minimum pool stays out of picker');
+  assert.equal(modeled.checks.find(c=>c.id==='fees').shortReason,'Fee pace passes');
+  const slow=buildStillPreflight({...healthyInput,pool:{...healthyPool,activity:{...healthyPool.activity,fees1h:200}}},.5,now);
+  assert(slow.netReturnPct.value>0);assert.equal(slow.verdict.label,'Skip');assert.equal(slow.verdict.reason,'Fee pace: Fee pace too slow');
   const longHold = {shape: 'BidAsk', floorPct: 47.5, ceilingPct: 0, holdMinutes: 2880};
   for (const [totalExit, status] of [[.005, 'pass'], [.00500001, 'caution'], [.015, 'caution'], [.01500001, 'fail']]) {
     const result = buildStillPreflight({...healthyInput, quotes: [{...quote, returnedSol: .25 - totalExit + .00001}]}, .5, now, longHold);
@@ -151,7 +157,7 @@ try {
   }
   assert.equal(buildStillPreflight(healthyInput, .5, now, {...longHold, holdMinutes: 1}).checks.find(c => c.id === 'cost').status, 'fail', 'cost exceeding planned-hold fees fails even below 1%');
   const frozen = buildStillPreflight({...healthyInput, safety: {rpc: {...healthyRpc, freezeAuthority: 'active'}}}, .5, now);
-  assert.equal(frozen.verdict.label, 'Skip'); assert.match(frozen.verdict.reason, /freeze authority/);
+  assert.equal(frozen.verdict.label, 'Skip'); assert.match(frozen.verdict.reason, /Freeze authority/);
   for (const invalidNetwork of [null, {...network, asOf: iso(now - 600001)}, {...network, asOf: iso(now + 1)}, {...network, asOf: 'invalid'},
     {...network, singleLamports: -1}, {...network, doubleLamports: 1.5}, {...network, singleLamports: Number.MAX_SAFE_INTEGER + 1}]) {
     const result = buildStillPreflight({...healthyInput, network: invalidNetwork}, .5, now);
@@ -231,12 +237,12 @@ try {
     const cardInput = {...healthyInput,accountCosts:{...accountCosts,poolAddress:firstAddress}, pool: {...healthyPool, id: cards[0].id, address: firstAddress}};
     const cardEnv = {LP_CACHE: {async get(key) {
       cardKeys.push(key);
-      return key === 'still:preflight-input:v5:' + firstAddress + ':500000000:null' ? {at, input: cardInput} : null;
+      return key === 'still:preflight-input:v6:' + firstAddress + ':500000000:null' ? {at, input: cardInput} : null;
     }}};
     const summaries = await listStillPoolsWithSummaries(snapshot, cardEnv, now);
     assert.equal(summaries.length, 8); assert.equal(cardKeys.length, 8);
     assert.equal(new Set(cardKeys).size, 8);
-    assert.deepEqual(cardKeys, cards.map(card => 'still:preflight-input:v5:' + card.address + ':500000000:null'));
+    assert.deepEqual(cardKeys, cards.map(card => 'still:preflight-input:v6:' + card.address + ':500000000:null'));
     assert.equal(summaries[0].cardSummary.verdict.label, 'Worth it', 'fresh default evidence may produce a real passing card');
     for (const card of summaries) {
       assert.equal(card.cardSummary.sizeSol, .5); assert.equal(card.cardSummary.scope, '0.5 paper SOL · default range');
@@ -254,7 +260,7 @@ try {
     async function oneSummary(saved) {
       let reads = 0;
       const result = await listStillPoolsWithSummaries(singleSnapshot, {LP_CACHE: {async get(key) {
-        reads++; assert.equal(key, 'still:preflight-input:v5:steady-a:500000000:null');
+        reads++; assert.equal(key, 'still:preflight-input:v6:steady-a:500000000:null');
         if (saved instanceof Error) throw saved;
         return saved;
       }}}, now);
@@ -298,7 +304,7 @@ try {
     assert.equal(fetches, 0, 'card summaries make no provider calls, even on cache misses or corrupt evidence');
     // A live pre-flight's exact evidence survives the cached-only paper-open path.
     const cachedRange = twoSidedRange, cachedSize = .37, cachedInput = fundedInput(cachedSize);
-    const cacheKey = 'still:preflight-input:v5:steady-a:370000000:' + JSON.stringify(cachedRange);
+    const cacheKey = 'still:preflight-input:v6:steady-a:370000000:' + JSON.stringify(cachedRange);
     let savedInput = {at, input: cachedInput};
     const cachedEnv = {LP_CACHE: {async get(key) {return key === 'snapshot:v1' ? snapshot : key === cacheKey ? savedInput : null;}}};
     const cached = await getStillPreflight(cachedEnv, 'steady-a', cachedSize, cachedRange);
@@ -337,7 +343,7 @@ try {
     const url = new URL(String(input));
     if (url.hostname === 'rpc.test') {rpcRequests++;const body=JSON.parse(init.body);assert.equal(body.method,'getMinimumBalanceForRentExemption','No native-anchor retry');return Response.json({jsonrpc:'2.0',id:body.id,result:57406080});}
     if (url.hostname === 'dlmm.datapi.meteora.ag' && url.pathname === '/pools') return Response.json({data: [{address: liveAddress, name: 'USDC/SOL', is_blacklisted: false, tvl: 200000, current_price: .5, created_at: Date.now() - 48 * 3600000,
-      token_x: {address: liveMint, symbol: 'USDC', price: 50}, token_y: {address: SOL, symbol: 'SOL', price: 100}, pool_config: {bin_step: 100, base_fee_pct: .3}, fees: {'1h': 1200, '24h': 4800}, volume: {'24h': 100000}, fee_tvl_ratio: {'1h': .6, '24h': 2.4}, tags: []}]});
+      token_x: {address: liveMint, symbol: 'USDC', price: 50}, token_y: {address: SOL, symbol: 'SOL', price: 100}, pool_config: {bin_step: 100, base_fee_pct: .3}, dynamic_fee_pct:0, fees: {'1h': 1200, '24h': 4800}, volume: {'24h': 100000}, fee_tvl_ratio: {'1h': .6, '24h': 2.4}, tags: []}]});
     if (url.hostname === 'api.jup.ag') {quoteRequests++;const buy = url.searchParams.get('inputMint') === SOL;return Response.json({inputMint: buy ? SOL : liveMint, outputMint: buy ? liveMint : SOL, inAmount: url.searchParams.get('amount'), outAmount: buy ? '500000' : '245000000', priceImpactPct:'0.001', routePlan: [{swapInfo: {ammKey: liveAddress, label: 'Meteora DLMM'}}]});}
     return new Response('{}', {status: 503});
   };

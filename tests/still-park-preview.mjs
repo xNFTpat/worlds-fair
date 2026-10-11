@@ -19,7 +19,7 @@ try {
   const rpc={status:'available',asOf:at,mint,decimals:6,transferFeeStatus:'none',transferFee:null,freezeAuthority:null,
     holderSample:{status:'available',asOf:at,mint,supplyRaw:'1000',complete:true,accounts:Array.from({length:40},(_,i)=>({address:'account-'+i,owner:'owner-'+i,amountRaw:'25'}))}};
   const candles={status:'available',asOf:at,note:'Synthetic exact-pool Meteora candles',candles:Array.from({length:24},(_,i)=>({t:now/1000-(24-i)*3600,o:.01,c:.01,h:.0105,l:.0095,v:100}))};
-  const quote={tokenDecimals:6,tokenRaw:'25000000',returnedSol:.249,priceMark:{source:'active-bin',priceSol:.01,asOf:at},mode:'best',sizeSol:.25,status:'quoted',asOf:at,buyAsOf:at,sellAsOf:at,expiresAt:now+45000,exitFeeSource:'jupiter-route',exitCostSol:.001,verifiedExitSwapSol:.001,roundTripCostSol:.002};
+  const quote={stillPoolFeeFloorSol:.0001,tokenDecimals:6,tokenRaw:'25000000',returnedSol:.249,priceMark:{source:'active-bin',priceSol:.01,asOf:at},mode:'best',sizeSol:.25,status:'quoted',asOf:at,buyAsOf:at,sellAsOf:at,expiresAt:now+45000,exitFeeSource:'jupiter-route',exitCostSol:.001,verifiedExitSwapSol:.001,roundTripCostSol:.002};
   const network={asOf:at,singleLamports:5000,doubleLamports:10000,source:'Synthetic RPC fees'};
   const input=pool=>({accountCosts:{asOf:at,poolAddress:pool.address,positionBytes:8120,positionRentLamports:57406080,setupRentLamports:0,missingAccounts:0,rangeKey:'-1'},rangeAnchor:{status:'available',asOf:at,activeBinId:0,activeBinPriceSol:.01,binStep:100,minNativeBinId:-10000,maxNativeBinId:10000},pool,safety:{rpc},candles,quotes:[quote],network,rug:{mint,status:'available',asOf:at,holderExclusions:{mint,status:'available',asOf:at,addresses:[]}}});
   let cacheMode='fresh';
@@ -29,7 +29,7 @@ try {
     if(key==='cesto:v1:/products')return {readAt:now,data:[]};
     if(key==='cesto:v1:/products/analytics')return {readAt:now,data:{}};
     if(key.startsWith('long-game:v1:'))return {readAt:at,items:[]};
-    const pool=pools.find(p=>key==='still:preflight-input:v5:'+p.address+':500000000:null');
+    const pool=pools.find(p=>key==='still:preflight-input:v6:'+p.address+':500000000:null');
     if(!pool||cacheMode==='missing')return null;
     const detail=input(pool);
     if(cacheMode==='expired-quote')detail.quotes=[{...quote,expiresAt:now-1}];

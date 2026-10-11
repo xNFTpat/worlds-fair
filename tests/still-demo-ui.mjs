@@ -35,7 +35,7 @@ class Element {
   async dispatch(kind, event = {}) {for (const callback of this.listeners.get(kind) || []) await callback(event);}
 }
 const flush = async () => {for(let i=0;i<5;i++) await new Promise(resolve => setImmediate(resolve));};
-function fixture({initialHash="",walletPositions=[],walletStatus="available",poolFields={},additionalPools=[],initialStorage=[],preflightFields={}}={}) {
+function fixture({initialHash="",initialSearch="",walletPositions=[],walletStatus="available",poolFields={},additionalPools=[],initialStorage=[],preflightFields={}}={}) {
   let clock = Date.parse('2026-10-09T12:00:00.000Z'), serial = 0;
   const address = 'A'.repeat(32), requests = [], stored = new Map(initialStorage), steps = ['pools','preflight','positions','baskets'].map(go => Object.assign(new Element(),{dataset:{go}}));
   const ids = ['screen','confirmation','notice','home','journey','step-preflight','build-version','confirm-submit','confirm-cancel','confirm-error','confirm-content','paper-amount','wallet-address'];
@@ -43,7 +43,7 @@ function fixture({initialHash="",walletPositions=[],walletStatus="available",poo
   elements['#confirmation'].form = new Element(); elements['#screen'].deposit = new Element();
   const document = new Element(); document.querySelector = selector => elements[selector]; document.querySelectorAll = () => steps;
   const window = new Element(); window.scrollTo = () => {};
-  const location = {hash:initialHash,pathname:'/',search:''}; const history = {pushState(_state,_unused,hash){location.hash=hash;},replaceState(_state,_unused,hash){location.hash=hash;}};
+  const location = {hash:initialHash,pathname:'/',search:initialSearch}; const history = {pushState(_state,_unused,hash){location.hash=hash;},replaceState(_state,_unused,hash){location.hash=hash;}};
   const evidence = value => ({value,status:value === null?'unavailable':'available',asOf:new Date(clock).toISOString(),source:'Synthetic observed source',note:'Synthetic note'});
   const pool = {address,id:'solana:'+address,name:'<img src=x onerror="run()">/SOL',binStep:evidence(100),risk:{label:'Busy',reason:'<script>not code</script>'},tvlUsd:evidence(50000),fees24hFraction:evidence(.01),feeTrend:evidence(.2),ageHours:evidence(100),priceSol:evidence(1),...poolFields};
   const account = {balanceSol:10,seededSol:10,seedNote:'Practice seed',settlementNote:'Gross model only',feeModelNote:'Modelled fees only',positions:[]};
@@ -300,3 +300,11 @@ assert.ok(noExitHtml.includes('Detailed rent layout disclosure'),'Rent schema/so
 const minimumExit=fixture({preflightFields:{exitCostComplete:false,exitCostSol:{value:.001}}});await minimumExit.ready();
 assert.ok(minimumExit.elements['#screen'].innerHTML.includes('Exit cost is a known minimum.'));
 console.log('Still ticket: numeric-only exit minimum and compact refundable deposit before the action passed.');
+
+for(const hours of [0,.00001,.01])assert.equal(helpers.netSummary({breakEvenStatus:'covered',breakEvenHours:{value:hours}}).cover,'Under 1 min');
+const direct=fixture({initialHash:'#preflight',initialSearch:'?pool='+ 'B'.repeat(32),preflightFields:{canOpen:false,thinExampleOnly:true,betterThanMid:true,exitCostSol:{value:.14},verdict:{label:'Skip',reason:'Liquidity under $5k. Exit costs 28%.'},checks:[{id:'liquidity',label:'Liquidity',status:'fail',shortReason:'Liquidity under $5k',result:'Pool liquidity $566'},{id:'holders',label:'Top holders',status:'unavailable',shortReason:'Top holders unavailable',result:'Coverage unavailable'}]}});await flush();
+assert(direct.requests.some(r=>r.path.includes('poolAddress='+ 'B'.repeat(32))),'Direct pool URL does not need picker membership');
+const directHtml=direct.elements['#screen'].innerHTML,front=directHtml.split('<details class="still-ticket__fold">')[0];
+assert(front.includes('Liquidity under $5k'));assert(front.includes('0.14 SOL'));assert(front.includes('28%'));assert(front.includes('Better than mid'));assert(front.includes('Top holders unavailable'));assert(front.includes('still-chip--caution'));assert(front.includes('still-chip--fail'));
+assert(front.includes('visible-preflight-checks'),'All short check reasons are visible outside the numbers fold');
+console.log('PASS positive cost presentation, sub-minute coverage, direct thin-example entry and visible deciding checks');

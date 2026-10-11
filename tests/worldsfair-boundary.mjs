@@ -142,8 +142,8 @@ try {
   }
   store.set('snapshot:v1',originalSnapshot);
   assert.equal((await worker.fetch(request('/api/still/basket-preflight?basketId=steady'),env)).status,200,'Basket catalogue uses the independent fresh hot-pool cache');
-  assert.deepEqual({writes, assets, providers}, beforeGuided, 'Guided evidence stays read-only and uses only the supplied snapshot');
+  assert.deepEqual({writes, assets, providers}, {...beforeGuided,providers:beforeGuided.providers+2}, 'Unknown direct pool makes only one bounded exact-pool read plus its retry; no writes or other fanout');
   for(const path of ['/brand/still-mark.svg','/product.css','/product-brand.js']){const response=await worker.fetch(request(path),env);assert.equal(response.status,200);assert.equal(await response.text(),'asset '+path,'public product assets reach only the static binding');}
-  assert.equal(assets, 7); assert.equal(writes, 0); assert.equal(providers, 0);
+  assert.equal(assets, 7); assert.equal(writes, 0); assert.equal(providers, 2);
   console.log('PASS: Paper Worker blocks mainnet and devnet signing/auth assets and endpoints before side effects; secrets excluded; read APIs and Solana defaults verified.');
 } finally {globalThis.fetch = realFetch;}
