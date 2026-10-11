@@ -10,3 +10,7 @@ validation/
 node_modules
 execution/node_modules
 !.dev.vars.example
+
+# Rebuilt from the supplied motion components and local styles.
+public/still-app-motion.js
+public/still-app.css
