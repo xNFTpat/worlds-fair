@@ -1,4 +1,5 @@
 import legacyWorker from './index';
+import {withStillDemoObservation} from './still-demo-pools';
 import type {Env} from './env';
 import type {Pool, Snapshot} from './schema';
 import {selectPools} from './discovery';
@@ -175,6 +176,8 @@ export default {
     return new Response(null, {status: response.status, headers: response.headers});
   },
   scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    return legacyWorker.scheduled(event, paperEnvironment(env), ctx);
+    const safeEnv=paperEnvironment(env);
+    ctx.waitUntil(withStillDemoObservation({pools:[],errors:{},updatedAt:new Date().toISOString()},safeEnv,true));
+    return legacyWorker.scheduled(event, safeEnv, ctx);
   },
 };

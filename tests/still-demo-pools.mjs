@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const dir=await mkdtemp(join(tmpdir(),'still-demo-pools-'));
+try {
+ await build({entryPoints:['src/still-demo-pools.ts'],bundle:true,platform:'node',format:'esm',outfile:join(dir,'module.mjs')});
+ const {STILL_THIN_DEMO:p,isStillThinDemo,withStillThinDemo,withStillDemoObservation}=await import(pathToFileURL(join(dir,'module.mjs')));
+ const example={chain:'solana',venue:'meteora-dlmm',address:p.address,base:{address:p.mintX},quote:{address:p.mintY},fetchedAt:new Date().toISOString(),pair:'SKR/SOL'};
+ assert.equal(isStillThinDemo(example),true);
+ assert.equal(isStillThinDemo({...example,base:{address:'another-mint'}}),false,'Matching ticker/pool never substitutes another mint');
+ assert.equal(isStillThinDemo({...example,address:'another-pool'}),false,'Matching mints never substitutes another pool');
+ const ordinary=Array.from({length:8},(_,i)=>({...example,address:'ordinary-'+i}));
+ const selected=withStillThinDemo(ordinary,[...ordinary,example]);
+ assert.equal(selected.length,8);assert.equal(selected[7].address,p.address);assert.equal(new Set(selected.map(x=>x.address)).size,8);
+ assert.equal(withStillThinDemo([...ordinary,example],ordinary).some(isStillThinDemo),false,'Ineligible example is never forced in');
+ assert.equal(withStillThinDemo(ordinary,[...ordinary,{...example,base:{address:'another'}}]).some(x=>x.address===p.address),false);
+ const cache=new Map(),env={LP_CACHE:{get:async k=>cache.get(k)??null,put:async(k,v)=>cache.set(k,JSON.parse(v))}};
+ const empty={pools:[],errors:{},updatedAt:new Date().toISOString()};let requests=0;
+ globalThis.fetch=async()=>{requests++;throw Error('offline');};
+ assert.deepEqual(await withStillDemoObservation(empty,env),empty);assert.equal(requests,0,'List reads never call a provider');
+ assert.deepEqual(await withStillDemoObservation(empty,env,true),empty,'Failed exact observation never fabricates a row');
+ const snapshot={...empty,pools:[example]};assert.equal(await withStillDemoObservation(snapshot,env),snapshot,'Fresh matching source avoids another read');
+ cache.set('still:thin-demo-pool:v1',example);const cached=await withStillDemoObservation(empty,env);assert.equal(cached.pools[0].fetchedAt,example.fetchedAt,'Cache preserves source time');
+ cache.set('still:thin-demo-pool:v1',{...example,fetchedAt:new Date(Date.now()-700000).toISOString()});
+ assert.deepEqual(await withStillDemoObservation(empty,env),empty,'Expired cached observations never appear as fresh');
+ console.log('PASS exact thin-demo identity, bounded shortlist, eligibility, failure and original-time cache semantics');
+}finally{await rm(dir,{recursive:true,force:true});}

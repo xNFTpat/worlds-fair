@@ -27,10 +27,10 @@ export function stillChecks(p:StillPreflight,d:StillPreflightInput,now:number):S
   add(id,label,above?'caution':status,result,scenario.grossValueSol.source,scenario.grossValueSol.asOf,'Gross inventory only, before fees and costs. A fixed downward price scenario, not a forecast. The floor is not a stop-loss.',1);
  }
  if(finite(cost)){
-  const fraction=cost/p.sizeSol,expected=finite(fee)?fee*p.sizeSol*hold:null,status=fraction>T.exitCost.caution||finite(expected)&&cost>expected?'fail':fraction<=T.exitCost.pass?'pass':'caution';
+  const fraction=cost/p.sizeSol,expected=finite(fee)?fee*p.sizeSol*hold:null,status=fraction>T.exitCost.caution||finite(expected)&&(p.roundTripCostSol.value??cost)>expected?'fail':fraction<=T.exitCost.pass?'pass':'caution';
   // A full-size token sale is a reference, not the unknown future LP withdrawal.
-  const modeled=finite(p.roundTripCostSol.value);
-  add('cost','Entry and exit cost',modeled?status:status==='fail'?'fail':'unavailable',modeled?`Paper exit estimate: ${pct(fraction)}% (${sol(cost)}). Paper entry + exit: ${sol(p.roundTripCostSol.value!)}.`:`Exit swap reference: ${pct(fraction)}% (${sol(cost)}). Paper entry and exit estimate: unavailable.`,modeled?p.exitCostSol.source:p.exitConversionSol.source,modeled?p.exitCostSol.asOf:p.exitConversionSol.asOf,p.paperCostModel?.note||'Current full-size token-to-SOL reference. It is not an LP withdrawal simulation or a future exit guarantee.',3);
+  const modeled=finite(p.roundTripCostSol.value),partial=p.exitCostComplete===false&&finite(p.exitCostSol.value);
+  add('cost','Entry and exit cost',modeled?status:status==='fail'?'fail':'unavailable',modeled?`Paper exit estimate: ${pct(fraction)}% (${sol(cost)}). Paper entry + exit + setup: ${sol(p.roundTripCostSol.value!)}.`:partial?`Exit costs at least ${pct(fraction)}% (${sol(cost)}), including the verified transfer fee. Swap quote or remaining costs: Unavailable.`:`Exit swap reference: ${pct(fraction)}% (${sol(cost)}). Paper entry and exit estimate: Unavailable.`,modeled||partial?p.exitCostSol.source:p.exitConversionSol.source,modeled||partial?p.exitCostSol.asOf:p.exitConversionSol.asOf,p.paperCostModel?.note||'Current full-size token-to-SOL reference. It is not an LP withdrawal simulation or a future exit guarantee.',3);
  }else unknown('cost','Entry and exit cost','Jupiter size-matched quote','Swap cost to get in and out at your size, from a live Jupiter quote. Network and LP withdrawal costs are separate.',3);
  const tax=p.transferFeeBps.value,mutable=p.transferFeeChangeable?.value;
  if(finite(tax)){

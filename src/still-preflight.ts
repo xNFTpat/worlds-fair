@@ -1,3 +1,5 @@
+import {STILL_THIN_DEMO,withStillDemoObservation,withStillThinDemo} from './still-demo-pools';
+import {readStillAccountCosts,stillAccountRangeKey,STILL_ACCOUNT_COST_TTL,STILL_ACCOUNT_LAYOUT,type StillAccountCosts} from './still-account-costs';
 import {readStillNetwork,STILL_NETWORK_MAX_AGE_MS,type StillNetworkRead} from './still-costs';
 import {fetchMeteoraPool} from './sources/meteora';
 import {stillChecks, type StillCheck} from './still-checks';
@@ -118,7 +120,7 @@ export function listStillPools(snapshot: Snapshot, now = Date.now()): StillPoolC
     for (const pool of selected) picked.set(pool.address, pool);
   }
   for (const pool of candidates) { if (picked.size >= 8) break; picked.set(pool.address, pool); }
-  return [...picked.values()].slice(0, 8).map(pool => poolCard(pool, now));
+  return withStillThinDemo([...picked.values()], candidates).map(pool => poolCard(pool, now));
 }
 export interface StillBasket {
   id: string; name: string; range?: StillRangeOptions; reason: string; status: 'available' | 'unavailable'; source: string; asOf: string | null;
@@ -150,6 +152,7 @@ export interface StillScenario {
   grossPnlSol: StillEvidence<number>; netValueSol: StillEvidence<number>; pnlSol: StillEvidence<number>; vsHoldingSol: StillEvidence<number>;
 }
 export interface StillPreflight {
+  solPriceUsd: StillEvidence<number>; positionRentSol: StillEvidence<number>; setupCostSol: StillEvidence<number>; entryTransactionFeeSol: StillEvidence<number>; exitTransferFeeSol: StillEvidence<number>; exitCostComplete:boolean; netReturnPct:StillEvidence<number>; breakEvenHours:StillEvidence<number>; breakEvenStatus:'covered'|'never'|'unavailable';
   paperCostModel?:{label:string;note:string;asOf:string|null;netAfterHoldSol:StillEvidence<number>};
   checks?: StillCheck[]; options?: StillRangeOptions; transferFeeChangeable?: StillEvidence<boolean>;
   pool: StillPoolCard; poolAddress: string; name: string; sizeSol: number; fetchedAt: string;
@@ -162,7 +165,7 @@ export interface StillPreflight {
   ledger: {priceSol: number | null; feeRateHourly: number | null; entryCostsSol: number | null; exitCostsSol: number | null; transferFeeBps: number | null; bins: ResearchRangeBin[] | null};
 }
 export interface StillPreflightInput {
-  network?:StillNetworkRead|null; entryQuotes?:ResearchQuote[]; pool: Pool; rug?: RugSafety; candles?: ResearchCandles; quotes?: ResearchQuote[]; safety?: {rpc: MintSafety}; rangeAnchor?: ResearchRangeAnchor;
+  accountCosts?:StillAccountCosts|null; network?:StillNetworkRead|null; entryQuotes?:ResearchQuote[]; pool: Pool; rug?: RugSafety; candles?: ResearchCandles; quotes?: ResearchQuote[]; safety?: {rpc: MintSafety}; rangeAnchor?: ResearchRangeAnchor;
 }
 /** Build only what observed inputs support. The inherited model's network default
  * is explicitly overridden for gross inventory arithmetic, and never presented as
@@ -233,20 +236,43 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   const entryQuote=(detail.entryQuotes||[]).find(q=>q.sizeSol===tokenFunding&&q.status==='quoted'&&researchQuoteFresh(q,now)&&q.tokenRaw&&q.inputRaw&&rpc?.decimals!=null);
   const entrySwap=oneSided?0:entryQuote&&policyCurrent&&Number.isInteger(rpc?.decimals)&&rpc!.decimals!>=0&&rpc!.decimals!<=18&&/^\d{1,78}$/.test(entryQuote.inputRaw||'')&&/^\d{1,78}$/.test(entryQuote.tokenRaw||'')&&mark?Math.max(0,Number(entryQuote.inputRaw)/1e9-Number(entryQuote.tokenRaw)/10**rpc!.decimals!*mark):null;
   const oldest=(...dates:(string|null|undefined)[])=>dates.every(d=>d&&Number.isFinite(Date.parse(d)))?(dates as string[]).sort()[0]:null;
-  const entryAt=oneSided?oldest(netRead?.asOf,rpc?.asOf,range?.asOf):oldest(netRead?.asOf,rpc?.asOf,entryQuote?.asOf,priceSol.asOf);
+  const entryAt=oneSided?oldest(netRead?.asOf,range?.asOf):oldest(netRead?.asOf,rpc?.asOf,entryQuote?.asOf,priceSol.asOf);
   const exitAt=oldest(netRead?.asOf,quoteAt,rpc?.asOf);
   const costAt=oldest(entryAt,exitAt);
-  // Paper-plan scope is explicit: one 2-signature open, one close, one exit swap,
-  // plus an entry swap for two-sided funding; zero priority bid by choice.
-  // Refundable rent is excluded, not reported as an observed zero. Transfer-tax
-  // tokens remain unavailable until exact deposit/withdrawal amounts are quoted.
-  const taxKnownZero=bps===0,entryNetwork=netFresh?(netRead!.doubleLamports+(oneSided?0:netRead!.singleLamports))/1e9:null,exitNetwork=netFresh?2*netRead!.singleLamports/1e9:null;
-  const scope='Paper estimate: 2-signature open + one close + one exit swap; an extra entry swap for two-sided funding. Dated RPC base-fee observations (reused for at most ten minutes), zero priority bid by choice. Refundable account rent, extra setup transactions and execution changes are excluded. This is not an LP transaction simulation.';
+  // The paper plan separates returned position rent from sunk setup costs.
+  const accounts=detail.accountCosts,accountFresh=!!accounts&&accounts.poolAddress===pool.address&&accounts.positionBytes===STILL_ACCOUNT_LAYOUT.positionBytes&&recent(accounts.asOf,STILL_ACCOUNT_COST_TTL,now)&&Number.isSafeInteger(accounts.positionRentLamports)&&accounts.positionRentLamports>=0;
+  const setupFresh=accountFresh&&accounts!.rangeKey===stillAccountRangeKey(range)&&accounts!.rangeKey!==null&&Number.isSafeInteger(accounts!.setupRentLamports)&&accounts!.setupRentLamports!>=0&&Number.isSafeInteger(accounts!.missingAccounts)&&accounts!.missingAccounts!>=0;
+  const positionRentSol=evidence(accountFresh?accounts!.positionRentLamports/1e9:null,'Solana RPC getMinimumBalanceForRentExemption · 8,120-byte DLMM PositionV2',accounts?.asOf||null,'Planned new position account deposit, read from chain; returned when the empty position account closes. It is locked capital, excluded from costs and net. It is not an existing wallet balance. Token account deposits are separate.');
+  const entryNetwork=netFresh?(netRead!.doubleLamports+(oneSided?0:netRead!.singleLamports))/1e9:null,exitNetwork=netFresh?2*netRead!.singleLamports/1e9:null;
+  const setupValue=setupFresh&&netFresh?(accounts!.setupRentLamports!+accounts!.missingAccounts!*netRead!.singleLamports)/1e9:null;
+  const setupCostSol=evidence(setupValue,'Confirmed RPC bin-array accounts + rent exemptions + unsigned setup fee templates',oldest(accounts?.asOf,netRead?.asOf),'Non-refundable pool bin-array/bitmap rent plus one single-signature setup transaction per missing account. Existing verified accounts cost zero to create. Unsupported or unverified account layouts stay unavailable. Extra priority fees are not chosen in this paper plan.');
+  const entryTransactionFeeSol=evidence(entryNetwork,netRead?.source||'Solana RPC getFeeForMessage',netRead?.asOf||null,'Two-signature paper open; adds one single-signature funding swap for two-sided entry. Setup transaction fees, if needed, appear separately in setup cost.');
+  // Transfer fees round UP in raw token units and are capped per transfer.
+  // Jupiter proceeds already include the swap transfer fee: add only the
+  // separate LP withdrawal fee, never apply the percentage twice to its quote.
+  const rawTransferCost=(rawAmount:string|null):number|null=>{
+    if(bps===0)return 0;
+    if(bps===null||!positive(mark)||!Number.isInteger(rpc?.decimals)||rpc!.decimals!<0||rpc!.decimals!>18||!/^\d{1,78}$/.test(rpc?.transferFee?.maximumRaw||'')||!/^\d{1,78}$/.test(rawAmount||''))return null;
+    const amount=BigInt(rawAmount!),tax=(amount*BigInt(bps)+9999n)/10000n,cap=BigInt(rpc!.transferFee!.maximumRaw),cost=Number(tax<cap?tax:cap)/10**rpc!.decimals!*mark;return nonnegative(cost)?cost:null;
+  };
+  const amountRaw=(sol:number|null)=>positive(mark)&&nonnegative(sol)&&Number.isInteger(rpc?.decimals)&&rpc!.decimals!>=0&&rpc!.decimals!<=18&&Number.isSafeInteger(Math.floor(sol/mark*10**rpc!.decimals!))?String(Math.floor(sol/mark*10**rpc!.decimals!)):null;
+  const withdrawalFromQuote=/^\d{1,78}$/.test(quote?.tokenRaw||''),withdrawalRaw=withdrawalFromQuote?quote!.tokenRaw!:amountRaw(sizeSol);
+  const withdrawalAt=oldest(rpc?.asOf,priceSol.asOf,...(withdrawalFromQuote?[quoteAt]:[]));
+  const withdrawalTax=rawTransferCost(withdrawalRaw),depositTax=oneSided?0:rawTransferCost(entryQuote?.tokenRaw||amountRaw(tokenFunding));
+  const exitTransferFeeSol=evidence(withdrawalTax,'Confirmed Token-2022 mint policy + full-size token reference at the observed pool price',withdrawalAt,(withdrawalFromQuote?'Uses the dated Jupiter reference token quantity. ':'Uses a full-size token quantity derived from the dated pool mark. ')+'One separate LP withdrawal transfer, rounded up in raw token units and capped by the observed on-chain maximum. Jupiter swap proceeds already include their own transfer fees. Without a swap quote this is a known minimum component, not a complete exit. Future inventory and fee policy can change.');
+  const scope='Paper estimate: 2-signature open + one close + one exit swap; an extra entry swap for two-sided funding. Dated RPC base fees (reused for at most ten minutes), zero priority bid by choice. Non-refundable bin-array/bitmap setup is included; refundable position rent is excluded from net. Existing token accounts or separately refunded token-account deposits are assumed; wallet-specific account setup is not quoted. This is not an LP transaction simulation.';
   const networkCostSol=evidence(netFresh?(entryNetwork!+exitNetwork!):null,netRead?.source||'Solana RPC getFeeForMessage',netRead?.asOf||null,scope);
-  if(entrySwap!==null&&Number.isFinite(entrySwap)){entryConversionSol.value=entrySwap;entryConversionSol.status='available';entryConversionSol.source=oneSided?'Still paper range allocation':'Jupiter exact-size funding quote + observed pool mark';entryConversionSol.asOf=oneSided?range?.asOf||null:entryQuote?.asOf||null;entryConversionSol.note=oneSided?'No token purchase for this SOL-only paper allocation.':'Quoted SOL input minus token output valued at the dated pool mark, floored at zero. Network fees are separate.';}
-  const entryCostSol=evidence(taxKnownZero&&entryNetwork!==null&&entrySwap!==null?entryNetwork+entrySwap:null,'Paper cost model · RPC fee templates + exact-size Jupiter funding quote',entryAt,scope);
-  const exitCostSol=evidence(taxKnownZero&&exitNetwork!==null&&exitValue!==null?exitNetwork+exitValue:null,'Paper cost model · Jupiter exit conversion + RPC fee templates'+(quoteMarkSource?' + '+quoteMarkSource:''),exitAt,scope+' Uses the full-size token conversion reference, not an actual future withdrawal.');
-  const roundTripCostSol=evidence(entryCostSol.value!==null&&exitCostSol.value!==null?entryCostSol.value+exitCostSol.value:null,'Paper entry + exit cost model',costAt,scope);
+  if(entrySwap!==null&&Number.isFinite(entrySwap)){entryConversionSol.value=entrySwap;entryConversionSol.status='available';entryConversionSol.source=oneSided?'Still paper range allocation':'Jupiter exact-size funding quote + observed pool mark';entryConversionSol.asOf=oneSided?range?.asOf||null:entryQuote?.asOf||null;entryConversionSol.note=oneSided?'No token purchase for this SOL-only paper allocation.':'Quoted SOL input minus token output valued at the dated pool mark, floored at zero. Network fees and separate LP deposit transfer tax are separate.';}
+  const entryCostSol=evidence(entryNetwork!==null&&entrySwap!==null&&depositTax!==null?entryNetwork+entrySwap+depositTax:null,'Paper cost model · RPC fee templates + exact-size Jupiter funding quote + deposit transfer fee',entryAt,scope+' Non-refundable account setup is shown separately and added to the round-trip net calculation.');
+  const exitCostComplete=bps!==null&&exitNetwork!==null&&exitValue!==null&&withdrawalTax!==null;
+  const partialExit=withdrawalTax!==null&&withdrawalTax>0?withdrawalTax+(exitNetwork??0)+(exitValue??0):null;
+  const exitCostSol=evidence(exitCostComplete?exitNetwork!+exitValue!+withdrawalTax!:partialExit,'Paper cost model · Jupiter exit conversion + RPC fee templates + withdrawal transfer fee'+(quoteMarkSource?' + '+quoteMarkSource:''),exitCostComplete?exitAt:oldest(withdrawalAt,...(exitNetwork===null?[]:[netRead?.asOf])),scope+(exitCostComplete?' Full-size token conversion reference, not an actual future withdrawal.':' At least this much: the verified withdrawal transfer fee and any available network fee. Swap conversion or remaining costs are unavailable; this is not the total exit cost.'));
+  const roundTripCostSol=evidence(entryCostSol.value!==null&&exitCostComplete&&setupValue!==null?entryCostSol.value+exitCostSol.value!+setupValue:null,'Paper entry + exit + non-refundable setup cost model',oldest(costAt,setupCostSol.asOf),scope);
+  const netValue=roundTripCostSol.value!==null&&hourly!==null?sizeSol*hourly*(options?.holdMinutes||240)/60-roundTripCostSol.value:null;
+  const netReturnPct=evidence(netValue===null?null:netValue/sizeSol*100,'Paper net / paper SOL amount × 100',oldest(roundTripCostSol.asOf,feeRateHourly.asOf),'Projected fee income at unchanged pool pace minus complete measured paper-plan costs. Returnable position deposit is excluded. This is a percentage of the selected SOL size, not realized profit.');
+  const breakEvenStatus:StillPreflight['breakEvenStatus']=roundTripCostSol.value===null||hourly===null?'unavailable':hourly===0&&roundTripCostSol.value>0?'never':'covered';
+  const breakEvenHours=evidence(breakEvenStatus==='covered'?(roundTripCostSol.value===0?0:roundTripCostSol.value!/(sizeSol*hourly!)):null,'Complete paper costs / current projected hourly fees',oldest(roundTripCostSol.asOf,feeRateHourly.asOf),breakEvenStatus==='never'?"Fees don't cover costs at the observed zero fee pace.":'Hours at unchanged fee pace, assuming eligible in-range liquidity throughout. Missing costs or fee observations keep this unavailable.');
+  const solPriceUsd=evidence(marketCurrent&&positive(token?.solUsd)?token.solUsd:null,MARKET_SOURCE,pool.fetchedAt,'Observed USD price of the SOL-side token for this exact pool; used only for dollar display, not an invented SOL conversion.');
   const scenarios = [0.2, 0.5].map(dropFraction => {
     const stress = mark === null ? null : mark * (1 - dropFraction);
     const gross = range && positive(stress) ? inventoryAtPrice(range.bins, stress).valueSol : null;
@@ -260,7 +286,7 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   const canOpen = marketCurrent && !!range && positive(mark);
   const missingEvidence = [!positive(mark) ? 'Current pool price' : null, !range ? 'Valid paper range' : null,
     hourly === null ? 'Complete one-hour fee observation' : null, bps === null ? 'Current token transfer-fee policy' : null,
-    exitValue === null ? 'Size-matched token-to-SOL reference quote' : null, roundTripCostSol.value===null?'Paper cost-plan evidence':null].filter((item): item is string => !!item);
+    exitValue === null ? 'Size-matched token-to-SOL reference quote' : null,setupValue===null?'Non-refundable setup cost':null,positionRentSol.value===null?'Refundable position deposit':null, roundTripCostSol.value===null?'Paper cost-plan evidence':null].filter((item): item is string => !!item);
   let verdict: StillPreflight['verdict'] = {label: 'Marginal', reason: 'Complete costs are unavailable, so fees cannot yet be compared with the real cost of entering and leaving. You can still practise on paper.'};
   if (!canOpen) verdict = {label: 'Skip', reason: 'A current price and a valid range are needed before this paper position can be modelled.'};
   else if (policyCurrent && rpc?.freezeAuthority) verdict = {label: 'Skip', reason: 'The token has an active freeze authority. Practice is available, but this screen does not support a real deposit.'};
@@ -268,10 +294,10 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   else if (hourly === 0) verdict = {label: 'Skip', reason: 'The last complete hour reports no pool fees, so there is no observed fee pace to compare with costs.'};
   else if (hourly !== null && exitValue !== null && sizeSol * hourly * 24 <= exitValue) verdict = {label: 'Skip', reason: 'Even the quoted conversion cost exceeds a full day at the current pool fee pace, before other costs.'};
   const result: StillPreflight = {pool: card, poolAddress: pool.address, name: pool.pair, sizeSol, fetchedAt: markAt, priceSol, range, feeRateHourly, expectedFeesPerDaySol,
-    transferFeeBps, entryCostSol, exitCostSol, entryConversionSol, exitConversionSol, networkCostSol, roundTripCostSol, scenarios, verdict, canOpen, missingEvidence,
+    solPriceUsd,positionRentSol,setupCostSol,entryTransactionFeeSol,exitTransferFeeSol,exitCostComplete,netReturnPct,breakEvenHours,breakEvenStatus,transferFeeBps, entryCostSol, exitCostSol, entryConversionSol, exitConversionSol, networkCostSol, roundTripCostSol, scenarios, verdict, canOpen, missingEvidence,
     model: {kind: 'paper-monotonic-bin-model', note: 'Paper practice only. Fixed-price bins model a monotonic move; real partial fills, liquidity share and transaction execution are not reproduced. Missing costs keep net results unavailable.'},
-    ledger: {priceSol: mark, feeRateHourly: hourly, entryCostsSol: entryCostSol.value, exitCostsSol: exitCostSol.value, transferFeeBps: bps, bins: range?.bins ?? null}};
-  result.paperCostModel={label:'Paper estimate, not an execution quote',note:scope,asOf:costAt,netAfterHoldSol:evidence(roundTripCostSol.value!==null&&hourly!==null?sizeSol*hourly*(options?.holdMinutes||240)/60-roundTripCostSol.value:null,'Paper pool-pace projection minus dated cost model',costAt,'Assumes unchanged pool fee pace and eligible in-range liquidity throughout the planned hold. Not actual earnings or a prediction.')};
+    ledger: {priceSol: mark, feeRateHourly: hourly, entryCostsSol: entryCostSol.value!==null&&setupValue!==null?entryCostSol.value+setupValue:null, exitCostsSol: exitCostComplete?exitCostSol.value:null, transferFeeBps: bps, bins: range?.bins ?? null}};
+  result.paperCostModel={label:'Paper estimate, not an execution quote',note:scope,asOf:roundTripCostSol.asOf,netAfterHoldSol:evidence(netValue,'Paper pool-pace projection minus dated cost model',roundTripCostSol.asOf,'Assumes unchanged pool fee pace and eligible in-range liquidity throughout the planned hold. Not actual earnings or a prediction.')};
   result.options=options;
   result.transferFeeChangeable=evidence(policyCurrent ? !!rpc!.transferFee?.configAuthority : null,'Solana RPC mint transfer-fee authority',rpc?.asOf||null,'Whether the observed fee-setting authority remains active.');
   result.checks=stillChecks(result,detail,now);
@@ -279,6 +305,7 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   // not itself a reason to reject every pool. Observed screening failures are.
   const failed=result.checks.find(c=>!['half','drop20'].includes(c.id)&&c.status==='fail');
   if(!canOpen||policyCurrent&&!!rpc?.freezeAuthority||policyCurrent&&!!rpc?.transferFee?.configAuthority){ /* Preserve explicit hard rejections above. */ }
+  else if(netValue!==null&&netValue<=0)result.verdict={label:'Skip',reason:'The estimated entry, exit and setup costs eat the fees for this planned hold at the current pool pace.'};
   else if(failed)result.verdict={label:'Skip',reason:failed.result};
   else if(roundTripCostSol.value!==null){const complete=result.checks.filter(c=>!['half','drop20'].includes(c.id)).every(c=>c.status==='pass');result.verdict={label:complete?'Worth it':'Marginal',reason:complete?'Observed checks pass the example thresholds and the paper cost model is covered at the current fee pace.':'Paper costs are estimated; review the caution or unavailable checks before practising.'};}
   result.missingEvidence=[...new Set([...result.missingEvidence,...result.checks.filter(c=>c.status==='unavailable').map(c=>c.label)])];
@@ -286,7 +313,7 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
 }
 
 const preflightInputKey = (poolAddress: string, sizeSol: number, options?: StillRangeOptions) =>
-  'still:preflight-input:v2:' + poolAddress + ':' + Math.round(sizeSol * 1e9) + ':' + JSON.stringify(options || null);
+  'still:preflight-input:v3:' + poolAddress + ':' + Math.round(sizeSol * 1e9) + ':' + JSON.stringify(options || null);
 
 /** One exact default-size KV read per card, at most eight. Never refreshes the
  * snapshot or calls providers: list views must not fan out into RPC or quotes. */
@@ -329,7 +356,7 @@ export async function listStillPoolsWithSummaries(snapshot: Snapshot, env: Env, 
 /** Fast path: pool snapshot and existing provider caches only. No user click waits
  * for a fanout of RPC/quote requests. An explicit detail refresh may enrich it. */
 export async function getStillPreflight(env: Env, poolAddress: string, sizeSol = 0.5, options?: StillRangeOptions, live = false): Promise<StillPreflight | null> {
-  const snapshot = await getSnapshot(env), pool = snapshot.pools.find(item => item.address === poolAddress || item.id === poolAddress);
+  const stored = await getSnapshot(env), snapshot = poolAddress===STILL_THIN_DEMO.address ? await withStillDemoObservation(stored,env,live) : stored, pool = snapshot.pools.find(item => item.address === poolAddress || item.id === poolAddress);
   if (!pool || pool.venue !== 'meteora-dlmm' || !researchToken(pool)) return null;
   const savedKey=preflightInputKey(pool.address,sizeSol,options);
   if(!live){try{const saved=await env.LP_CACHE.get<{at:string;input:StillPreflightInput}>(savedKey,'json');if(saved&&recent(saved.at,45000,Date.now())&&saved.input.pool.address===pool.address&&researchToken(saved.input.pool)?.mint===researchToken(pool)?.mint)return buildStillPreflight(saved.input,sizeSol,Date.now(),options);}catch{}}
@@ -344,7 +371,8 @@ export async function getStillPreflight(env: Env, poolAddress: string, sizeSol =
     const initial=buildStillPreflight({pool:current,quotes,safety:{rpc},rug,candles,rangeAnchor:anchor,network},sizeSol,Date.now(),options);
     const funding=initial.range&&initial.priceSol.value?Math.round(initial.range.bins.reduce((n,b)=>n+b.token*initial.priceSol.value!,0)*1e9)/1e9:0;
     const entryQuotes=funding>0?await readResearchQuotes(current,context,rpc.decimals,mark,{sizes:[funding],modes:['best'],freshOnly:true,supplementalRpcFees:false}):[];
-    const input={pool:current,quotes,entryQuotes,safety:{rpc},rug,candles,rangeAnchor:anchor,network};
+    const accountCosts=await readStillAccountCosts(env,pool.address,initial.range,true);
+    const input={pool:current,quotes,entryQuotes,safety:{rpc},rug,candles,rangeAnchor:anchor,network,accountCosts};
     try{await env.LP_CACHE.put(savedKey,JSON.stringify({at:new Date().toISOString(),input}),{expirationTtl:60});}catch{}
     return buildStillPreflight(input,sizeSol,Date.now(),options);
   }
@@ -410,7 +438,7 @@ export function combineStillBasketPreflight(basket: StillBasket, preflights: Sti
     {label: 'Skip', reason: `${skip.preflight.name}: ${skip.preflight.verdict.reason}`} :
     {label: 'Marginal', reason: 'Complete costs are unavailable for at least one component. Review both pre-flights; a basket does not remove token or liquidity risk.'};
   return {paper: true, basket, sizeSol, components, canOpen, expectedFeesPerDaySol: sum(item => item.expectedFeesPerDaySol), scenarios,
-    entryCostSol: sum(item => item.entryCostSol), exitCostSol: sum(item => item.exitCostSol), roundTripCostSol: sum(item => item.roundTripCostSol), verdict,
+    entryCostSol: sum(item => item.entryCostSol), exitCostSol: sum(item => item.exitCostComplete ? item.exitCostSol : unknown()), roundTripCostSol: sum(item => item.roundTripCostSol), verdict,
     missingEvidence: !complete ? ['A current, complete basket allocation'] : [...new Set(components.flatMap(item => item.preflight.missingEvidence))]};
 }
 export async function getStillBasketPreflight(env: Env, basketId: string, sizeSol = 0.5, live=false): Promise<StillBasketPreflight | null> {

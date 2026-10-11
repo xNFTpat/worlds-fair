@@ -21,7 +21,7 @@ try {
   const candles={status:'available',asOf:at,note:'Synthetic exact-pool Meteora candles',candles:Array.from({length:24},(_,i)=>({t:now/1000-(24-i)*3600,o:.01,c:.01,h:.0105,l:.0095,v:100}))};
   const quote={mode:'best',sizeSol:.5,status:'quoted',asOf:at,buyAsOf:at,sellAsOf:at,expiresAt:now+45000,exitFeeSource:'jupiter-route',exitCostSol:.001,roundTripCostSol:.002};
   const network={asOf:at,singleLamports:5000,doubleLamports:10000,source:'Synthetic RPC fees'};
-  const input=pool=>({pool,safety:{rpc},candles,quotes:[quote],network,rug:{mint,status:'available',asOf:at,holderExclusions:{mint,status:'available',asOf:at,addresses:[]}}});
+  const input=pool=>({accountCosts:{asOf:at,poolAddress:pool.address,positionBytes:8120,positionRentLamports:57406080,setupRentLamports:0,missingAccounts:0,rangeKey:'-1'},rangeAnchor:{status:'available',asOf:at,activeBinId:0,activeBinPriceSol:.01,binStep:100,minNativeBinId:-10000,maxNativeBinId:10000},pool,safety:{rpc},candles,quotes:[quote],network,rug:{mint,status:'available',asOf:at,holderExclusions:{mint,status:'available',asOf:at,addresses:[]}}});
   let cacheMode='fresh';
   const env={LP_CACHE:{async get(key){
     reads.push(key);
@@ -29,7 +29,7 @@ try {
     if(key==='cesto:v1:/products')return {readAt:now,data:[]};
     if(key==='cesto:v1:/products/analytics')return {readAt:now,data:{}};
     if(key.startsWith('long-game:v1:'))return {readAt:at,items:[]};
-    const pool=pools.find(p=>key==='still:preflight-input:v2:'+p.address+':500000000:null');
+    const pool=pools.find(p=>key==='still:preflight-input:v3:'+p.address+':500000000:null');
     if(!pool||cacheMode==='missing')return null;
     const detail=input(pool);
     if(cacheMode==='expired-quote')detail.quotes=[{...quote,expiresAt:now-1}];

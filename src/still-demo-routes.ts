@@ -1,3 +1,4 @@
+import {withStillDemoObservation} from './still-demo-pools';
 import {stillParkData} from './still-park';
 import {parseStillRangeOptions} from './still-preflight-config';
 import type {Env} from './env';
@@ -18,7 +19,7 @@ export async function stillDemoRoute(req: Request, env: Env): Promise<Response |
     }
     if(url.pathname==='/api/still/park')return json(await stillParkData(env));
     if (url.pathname === '/api/still/pools' || url.pathname === '/api/baskets') {
-      const snapshot = await getSnapshot(env);
+      const snapshot = await withStillDemoObservation(await getSnapshot(env),env);
       return json({paper: true, updatedAt: snapshot.updatedAt, ...(url.pathname === '/api/baskets'
         ? {baskets: buildStillBaskets(snapshot)} : {pools: await listStillPoolsWithSummaries(snapshot,env),baskets:buildStillBaskets(snapshot)})});
     }

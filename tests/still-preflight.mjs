@@ -113,7 +113,9 @@ try {
     accounts: Array.from({length: 40}, (_, i) => ({address: 'account-' + i, owner: 'owner-' + i, amountRaw: '25'}))}};
   const candles = {status: 'available', asOf: at, note: 'Meteora exact-pool fixture', candles: Array.from({length: 24}, (_, i) =>
     ({t: now / 1000 - (24 - i) * 3600, o: .01, c: .01, h: .0105, l: .0095, v: 100}))};
-  const healthyInput = {pool: healthyPool, safety: {rpc: healthyRpc}, network, quotes: [quote], candles,
+  const setupAnchor={status:'available',asOf:at,activeBinId:0,activeBinPriceSol:.01,binStep:100,minNativeBinId:-10000,maxNativeBinId:10000};
+  const accountCosts={asOf:at,poolAddress:healthyPool.address,positionBytes:8120,positionRentLamports:57406080,setupRentLamports:0,missingAccounts:0,rangeKey:'-1',source:'Fixture RPC',note:'Fixture'};
+  const healthyInput = {accountCosts,rangeAnchor:setupAnchor,pool: healthyPool, safety: {rpc: healthyRpc}, network, quotes: [quote], candles,
     rug: {mint: rpc.mint, status: 'available', asOf: at, holderExclusions: {mint: rpc.mint, status: 'available', asOf: at, addresses: []}}};
   const modeled = buildStillPreflight(healthyInput, .5, now);
   const closeTo = (actual, expected, message) => assert(Math.abs(actual - expected) < 1e-12, message + ': ' + actual + ' vs ' + expected);
@@ -174,19 +176,19 @@ try {
   assert.match(apiMarked.exitConversionSol.source, /Meteora DLMM Data API exact-pool price/);
   assert.match(apiMarked.exitCostSol.source, /Meteora DLMM Data API/);
   assert.equal(apiMarked.exitConversionSol.asOf, iso(now - 1000));
-  assert.doesNotMatch(apiMarked.range.note, /Native bin alignment is verified/);
+  assert.match(apiMarked.range.note, /Native bin alignment is verified/);
   const entryWithoutExit = buildStillPreflight({...healthyInput, quotes: []}, .5, now);
   closeTo(entryWithoutExit.entryCostSol.value, .00001, 'entry estimate does not depend on exit quote availability');
   assert.equal(entryWithoutExit.entryCostSol.asOf, at); assert.equal(entryWithoutExit.exitCostSol.value, null);
   assert.equal(entryWithoutExit.paperCostModel.netAfterHoldSol.value, null);
   const dated = buildStillPreflight({...healthyInput, network: {...network, asOf: iso(now - 1000)}, safety: {rpc: {...healthyRpc, asOf: iso(now - 2000)}},
     quotes: [{...quote, asOf: iso(now - 3000), buyAsOf: iso(now - 3000), sellAsOf: iso(now - 3000), expiresAt: now + 42000}]}, .5, now);
-  assert.equal(dated.entryCostSol.asOf, iso(now - 2000)); assert.equal(dated.exitCostSol.asOf, iso(now - 3000)); assert.equal(dated.paperCostModel.asOf, iso(now - 3000));
+  assert.equal(dated.entryCostSol.asOf, iso(now - 1000)); assert.equal(dated.exitCostSol.asOf, iso(now - 3000)); assert.equal(dated.paperCostModel.asOf, iso(now - 3000));
   for (const [bps, authority, expectedTax] of [[0, null, 'pass'], [0, 'active', 'fail'], [150, null, 'caution'], [201, null, 'fail']]) {
     const result = buildStillPreflight({...healthyInput, safety: {rpc: {...healthyRpc, transferFeeStatus: 'known', transferFee: {bps, maximumRaw: '10000', configAuthority: authority}}}}, .5, now);
     assert.equal(result.checks.find(c => c.id === 'tax').status, expectedTax);
     if (authority) {assert.equal(result.verdict.label, 'Skip'); assert.match(result.verdict.reason, /authority/);}
-    if (bps > 0) {assert.equal(result.roundTripCostSol.value, null, 'nonzero tax needs exact transfer amounts; no uncapped percentage guess'); assert.equal(result.paperCostModel.netAfterHoldSol.value, null);}
+    if (bps > 0) {closeTo(result.exitTransferFeeSol.value,.0001,'Token-2022 cap applies to raw token units');closeTo(result.roundTripCostSol.value,modeled.roundTripCostSol.value+.0001,'Jupiter swap tax is embedded; only separate withdrawal tax is added');}
     else assert(result.roundTripCostSol.value > 0, 'observed zero-tax costs remain visible even when mutable policy separately fails');
   }
   const twoSidedRange = {shape: 'Spot', floorPct: 10, ceilingPct: 10, holdMinutes: 30};
@@ -195,7 +197,7 @@ try {
     const funding = Math.round(preliminary.range.bins.reduce((sum, b) => sum + b.token * .01, 0) * 1e9) / 1e9;
     assert(funding > .001 && funding < size, 'two-sided range needs a genuine partial token purchase');
     const fundingQuote = {...quote, sizeSol: funding, inputRaw: String(Math.round(funding * 1e9)), tokenRaw: String(Math.floor((funding - .001) / .01 * 1e6))};
-    return {...detail, entryQuotes: [fundingQuote]};
+    return {...detail, accountCosts:{...accountCosts,rangeKey:'-1,0'}, entryQuotes: [fundingQuote]};
   }
   const fundedDetail = fundedInput(.5), funded = buildStillPreflight(fundedDetail, .5, now, twoSidedRange), fundingQuote = fundedDetail.entryQuotes[0];
   const quotedEntryLoss = Number(fundingQuote.inputRaw) / 1e9 - Number(fundingQuote.tokenRaw) / 1e6 * .01;
@@ -233,15 +235,15 @@ try {
     assert.equal(fetches, 0);
     // Pool cards reuse only exact default-size evidence, with bounded KV reads.
     const cardKeys = [], firstAddress = cards[0].address;
-    const cardInput = {...healthyInput, pool: {...healthyPool, id: cards[0].id, address: firstAddress}};
+    const cardInput = {...healthyInput,accountCosts:{...accountCosts,poolAddress:firstAddress}, pool: {...healthyPool, id: cards[0].id, address: firstAddress}};
     const cardEnv = {LP_CACHE: {async get(key) {
       cardKeys.push(key);
-      return key === 'still:preflight-input:v2:' + firstAddress + ':500000000:null' ? {at, input: cardInput} : null;
+      return key === 'still:preflight-input:v3:' + firstAddress + ':500000000:null' ? {at, input: cardInput} : null;
     }}};
     const summaries = await listStillPoolsWithSummaries(snapshot, cardEnv, now);
     assert.equal(summaries.length, 8); assert.equal(cardKeys.length, 8);
     assert.equal(new Set(cardKeys).size, 8);
-    assert.deepEqual(cardKeys, cards.map(card => 'still:preflight-input:v2:' + card.address + ':500000000:null'));
+    assert.deepEqual(cardKeys, cards.map(card => 'still:preflight-input:v3:' + card.address + ':500000000:null'));
     assert.equal(summaries[0].cardSummary.verdict.label, 'Worth it', 'fresh default evidence may produce a real passing card');
     for (const card of summaries) {
       assert.equal(card.cardSummary.sizeSol, .5); assert.equal(card.cardSummary.scope, '0.5 paper SOL · default range');
@@ -259,7 +261,7 @@ try {
     async function oneSummary(saved) {
       let reads = 0;
       const result = await listStillPoolsWithSummaries(singleSnapshot, {LP_CACHE: {async get(key) {
-        reads++; assert.equal(key, 'still:preflight-input:v2:steady-a:500000000:null');
+        reads++; assert.equal(key, 'still:preflight-input:v3:steady-a:500000000:null');
         if (saved instanceof Error) throw saved;
         return saved;
       }}}, now);
@@ -303,7 +305,7 @@ try {
     assert.equal(fetches, 0, 'card summaries make no provider calls, even on cache misses or corrupt evidence');
     // A live pre-flight's exact evidence survives the cached-only paper-open path.
     const cachedRange = twoSidedRange, cachedSize = .37, cachedInput = fundedInput(cachedSize);
-    const cacheKey = 'still:preflight-input:v2:steady-a:370000000:' + JSON.stringify(cachedRange);
+    const cacheKey = 'still:preflight-input:v3:steady-a:370000000:' + JSON.stringify(cachedRange);
     let savedInput = {at, input: cachedInput};
     const cachedEnv = {LP_CACHE: {async get(key) {return key === 'snapshot:v1' ? snapshot : key === cacheKey ? savedInput : null;}}};
     const cached = await getStillPreflight(cachedEnv, 'steady-a', cachedSize, cachedRange);
@@ -340,7 +342,7 @@ try {
   let rpcRequests = 0, quoteRequests = 0;
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
-    if (url.hostname === 'rpc.test') {rpcRequests++; throw Error('The native anchor cooldown must not be retried');}
+    if (url.hostname === 'rpc.test') {rpcRequests++;const body=JSON.parse(init.body);assert.equal(body.method,'getMinimumBalanceForRentExemption','No native-anchor retry');return Response.json({jsonrpc:'2.0',id:body.id,result:57406080});}
     if (url.hostname === 'dlmm.datapi.meteora.ag' && url.pathname === '/pools') return Response.json({data: [{address: liveAddress, name: 'USDC/SOL', is_blacklisted: false, tvl: 200000, current_price: .5, created_at: Date.now() - 48 * 3600000,
       token_x: {address: liveMint, symbol: 'USDC', price: 50}, token_y: {address: SOL, symbol: 'SOL', price: 100}, pool_config: {bin_step: 100, base_fee_pct: .3}, fees: {'1h': 1200, '24h': 4800}, volume: {'24h': 100000}, fee_tvl_ratio: {'1h': .6, '24h': 2.4}, tags: []}]});
     if (url.hostname === 'api.jup.ag') {quoteRequests++;const buy = url.searchParams.get('inputMint') === SOL;return Response.json({inputMint: buy ? SOL : liveMint, outputMint: buy ? liveMint : SOL, inAmount: url.searchParams.get('amount'), outAmount: buy ? '1000000' : '490000000', routePlan: [{swapInfo: {ammKey: liveAddress, label: 'Meteora DLMM'}}]});}
@@ -349,10 +351,10 @@ try {
   try {
     const live = await getStillPreflight(liveEnv, liveAddress, .5, undefined, true);
     closeTo(live.exitCostSol.value, .01001, 'fresh exact-pool API mark sustains genuine exit cost during native-anchor cooldown');
-    assert(live.paperCostModel.netAfterHoldSol.value !== null);
+    assert.equal(live.paperCostModel.netAfterHoldSol.value,null,'Unverified bin setup keeps all-in net unavailable even with real exit quote');
     assert.match(live.exitConversionSol.source, /Meteora DLMM Data API exact-pool price/);
     assert.match(live.range.note, /native bin alignment is unverified/i);
-    assert.equal(rpcRequests, 0);assert.equal(quoteRequests, 2);
+    assert.equal(rpcRequests, 1);assert.equal(quoteRequests, 2);
     const reopened = await getStillPreflight(liveEnv, liveAddress, .5);
     assert.equal(reopened.exitCostSol.value, live.exitCostSol.value, 'paper-open rebuild preserves this exact dated API-marked quote');
     assert.equal(quoteRequests, 2);
