@@ -1,30 +1,33 @@
 /** Fixed public OnFinality mainnet allowance. Their published public limit is
  * five requests/sec; count each JSON-RPC method, including genesis proof, and
- * keep one request of headroom. No transaction permission is granted here.
+ * keep a conservative two-method allowance. No transaction permission is granted here.
  * https://www.onfinality.io/en/networks/solana */
-export const PUBLIC_RPC_BUDGET = Object.freeze({methodsPerSecond:4, windowMs:1250, dispatchMs:250});
+export const PUBLIC_RPC_BUDGET = Object.freeze({methodsPerSecond:2, windowMs:1250, dispatchMs:250});
 export interface PublicRpcBudgetEnv {RANGE_ALERTS?:DurableObjectNamespace}
 export interface PublicRpcBudgetState {recent:number[];updatedAt:number;cooldownUntil:number;attempts:number;last429At:number}
 export interface PublicRpcReservation {allowed:boolean;reason:'allowed'|'budget'|'cooldown'|'unavailable';retryAt:number|null;reservedAt:number|null;dispatchUntil:number|null;observedAt?:number;retryAfterMs?:number;detail?:'budget-unbound'|'budget-deadline'|'budget-storage'|'budget-route'|'budget-response'|'budget-transport'|'grant-future'|'grant-expired'}
 const key='still-onfinality-mainnet-budget-v1';
+// Earlier releases granted four methods. Preserve their persisted reservations
+// until the original hold expires instead of resetting history during rollout.
+const maxRecordedMethods=Math.max(4,PUBLIC_RPC_BUDGET.methodsPerSecond);
 const finite=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
 const reply=(value:unknown,status=200)=>Response.json(value,{status,headers:{'cache-control':'no-store'}});
 const unavailable=(detail?:PublicRpcReservation['detail']):PublicRpcReservation=>({allowed:false,reason:'unavailable',retryAt:null,reservedAt:null,dispatchUntil:null,...(detail?{detail}:{})});
 function stateAt(previous:PublicRpcBudgetState|undefined,now:number):PublicRpcBudgetState {
  if(!previous)return {recent:[],updatedAt:now,cooldownUntil:0,attempts:0,last429At:0};
- const valid=finite(previous.updatedAt)&&previous.updatedAt<=now&&finite(previous.cooldownUntil)&&previous.cooldownUntil>=0&&Number.isSafeInteger(previous.attempts)&&previous.attempts>=0&&finite(previous.last429At)&&previous.last429At<=now&&Array.isArray(previous.recent)&&previous.recent.length<=4&&previous.recent.every(at=>finite(at)&&at<=now);
- if(!valid)return {recent:[now,now,now,now],updatedAt:now,cooldownUntil:Math.max(now+1250,finite(previous.cooldownUntil)?previous.cooldownUntil:0),attempts:0,last429At:now};
- return {...previous,recent:previous.recent.filter(at=>at>now-1250),updatedAt:now};
+ const valid=finite(previous.updatedAt)&&previous.updatedAt<=now&&finite(previous.cooldownUntil)&&previous.cooldownUntil>=0&&Number.isSafeInteger(previous.attempts)&&previous.attempts>=0&&finite(previous.last429At)&&previous.last429At<=now&&Array.isArray(previous.recent)&&previous.recent.length<=maxRecordedMethods&&previous.recent.every(at=>finite(at)&&at<=now);
+ if(!valid)return {recent:Array.from({length:PUBLIC_RPC_BUDGET.methodsPerSecond},()=>now),updatedAt:now,cooldownUntil:Math.max(now+PUBLIC_RPC_BUDGET.windowMs,finite(previous.cooldownUntil)?previous.cooldownUntil:0),attempts:0,last429At:now};
+ return {...previous,recent:previous.recent.filter(at=>at>now-PUBLIC_RPC_BUDGET.windowMs),updatedAt:now};
 }
 export function reservePublicRpcBudget(previous:PublicRpcBudgetState|undefined,count:number,now=Date.now()){
  const state=stateAt(previous,now);
- if(!Number.isSafeInteger(count)||count<1||count>4)return {state,reservation:unavailable()};
+ if(!Number.isSafeInteger(count)||count<1||count>PUBLIC_RPC_BUDGET.methodsPerSecond)return {state,reservation:unavailable()};
  if(state.cooldownUntil>now)return {state,reservation:{...unavailable(),reason:'cooldown',retryAt:state.cooldownUntil,observedAt:now,retryAfterMs:state.cooldownUntil-now} as PublicRpcReservation};
- if(state.recent.length+count>4){const sorted=[...state.recent].sort((a,b)=>a-b),needed=state.recent.length+count-4,retryAt=sorted[needed-1]+1250;return {state,reservation:{...unavailable(),reason:'budget',retryAt,observedAt:now,retryAfterMs:retryAt-now} as PublicRpcReservation};}
+ if(state.recent.length+count>PUBLIC_RPC_BUDGET.methodsPerSecond){const sorted=[...state.recent].sort((a,b)=>a-b),needed=state.recent.length+count-PUBLIC_RPC_BUDGET.methodsPerSecond,retryAt=sorted[needed-1]+PUBLIC_RPC_BUDGET.windowMs;return {state,reservation:{...unavailable(),reason:'budget',retryAt,observedAt:now,retryAfterMs:retryAt-now} as PublicRpcReservation};}
  state.recent.push(...Array.from({length:count},()=>now));
  // A grant is usable for only 250ms, while its capacity remains held for
- // 1250ms. Even maximally delayed sends stay <=4 per rolling 1000ms window.
- return {state,reservation:{allowed:true,reason:'allowed',retryAt:null,reservedAt:now,dispatchUntil:now+250} as PublicRpcReservation};
+ // 1250ms. Even maximally delayed sends stay <=2 per rolling 1000ms window.
+ return {state,reservation:{allowed:true,reason:'allowed',retryAt:null,reservedAt:now,dispatchUntil:now+PUBLIC_RPC_BUDGET.dispatchMs} as PublicRpcReservation};
 }
 export function cooldownPublicRpcBudget(previous:PublicRpcBudgetState|undefined,headers:{retryAfter?:string|null;rateLimitReset?:string|null},now=Date.now()):PublicRpcBudgetState{
  const state=stateAt(previous,now),attempts=state.cooldownUntil>now?Math.max(1,state.attempts):Math.min(8,state.attempts+1);
@@ -39,7 +42,7 @@ export async function publicRpcBudgetRequest(ctx:DurableObjectState,request:Requ
  if(request.method!=='POST')return reply({error:'Method not allowed'},405);
  let body:any;try{body=await request.json();}catch{return reply({error:'Invalid RPC budget request'},400);}
  if(!body||typeof body!=='object'||Array.isArray(body))return reply({error:'Invalid RPC budget request'},400);
- if(path.endsWith('/reserve')&&(!Number.isSafeInteger(body.count)||body.count<1||body.count>4||Object.keys(body).some(k=>k!=='count')))return reply({error:'Invalid method count'},400);
+ if(path.endsWith('/reserve')&&(!Number.isSafeInteger(body.count)||body.count<1||body.count>PUBLIC_RPC_BUDGET.methodsPerSecond||Object.keys(body).some(k=>k!=='count')))return reply({error:'Invalid method count'},400);
  if(path.endsWith('/cooldown')&&(Object.keys(body).some(k=>!['retryAfter','rateLimitReset'].includes(k))||Object.values(body).some(v=>v!==null&&(typeof v!=='string'||v.length>128))))return reply({error:'Invalid provider cooldown'},400);
  try{return await ctx.blockConcurrencyWhile(async()=>{
   const previous=await ctx.storage.get<PublicRpcBudgetState>(key);
@@ -56,17 +59,17 @@ export async function reservePublicRpc(env:PublicRpcBudgetEnv,count:number,deadl
   if(!response.ok)return unavailable(response.status===503?'budget-storage':'budget-route');const value=await response.json() as PublicRpcReservation;
   if(typeof value?.allowed!=='boolean'||!['allowed','budget','cooldown','unavailable'].includes(value.reason)||value.allowed!==(value.reason==='allowed')||(value.retryAt!==null&&!finite(value.retryAt)))return unavailable('budget-response');
   if(value.allowed){
-   if(value.retryAt!==null||!finite(value.reservedAt)||value.dispatchUntil!==value.reservedAt+250||Date.now()<requestedAt)return unavailable('budget-response');
+   if(value.retryAt!==null||!finite(value.reservedAt)||value.dispatchUntil!==value.reservedAt+PUBLIC_RPC_BUDGET.dispatchMs||Date.now()<requestedAt)return unavailable('budget-response');
    // DO and Worker clocks are independent. The caller's entire round trip
    // upper-bounds grant age, so it gives a stricter local dispatch deadline
    // without comparing timestamps across hosts or extending the 250ms lease.
-   if(Date.now()>=requestedAt+250)return {...unavailable('grant-expired'),reason:'budget',retryAt:requestedAt+1250};
-   value.reservedAt=requestedAt;value.dispatchUntil=requestedAt+250;
+   if(Date.now()>=requestedAt+PUBLIC_RPC_BUDGET.dispatchMs)return {...unavailable('grant-expired'),reason:'budget',retryAt:requestedAt+PUBLIC_RPC_BUDGET.windowMs};
+   value.reservedAt=requestedAt;value.dispatchUntil=requestedAt+PUBLIC_RPC_BUDGET.dispatchMs;
   }
   else{
    if(value.reservedAt!==null||value.dispatchUntil!==null)return unavailable('budget-response');
    if(value.reason!=='unavailable'){
-    if(!finite(value.retryAt)||!finite(value.observedAt)||!finite(value.retryAfterMs)||value.retryAfterMs<0||value.retryAfterMs!==Math.max(0,value.retryAt-value.observedAt)||(value.reason==='budget'&&value.retryAfterMs>1250))return unavailable('budget-response');
+    if(!finite(value.retryAt)||!finite(value.observedAt)||!finite(value.retryAfterMs)||value.retryAfterMs<0||value.retryAfterMs!==Math.max(0,value.retryAt-value.observedAt)||(value.reason==='budget'&&value.retryAfterMs>PUBLIC_RPC_BUDGET.windowMs))return unavailable('budget-response');
     // Reacquire after this caller-local wait. Adding the full observed remaining
     // duration at receipt is conservative despite cross-host clock skew.
     value.retryAt=Date.now()+value.retryAfterMs;

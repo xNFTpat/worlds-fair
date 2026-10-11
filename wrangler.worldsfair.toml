@@ -29,7 +29,7 @@ ROBINHOOD_CHAIN_ID = "4663"
 WALLETS = ""
 # Explicit mainnet provider selection after PublicNode's intermittent read limits.
 # https://www.onfinality.io/en/networks/solana publishes 5 requests/sec. Still's
-# private shared budget allows at most 4 JSON-RPC methods/sec, including proof.
+# private shared budget allows at most 2 JSON-RPC methods/sec, including proof.
 # A 429 remains a cooldown; no provider rotation or signing is performed.
 SOLANA_RPC = "https://solana.api.onfinality.io/public"
 

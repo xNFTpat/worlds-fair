@@ -407,7 +407,7 @@ const futureEpoch=JSON.parse(feePublic.LP_CACHE.values.get('research:v1:mint-epo
 // of that optional observation erase a successful mandatory mint-policy read.
 const holderAddress=new web3.PublicKey(new Uint8Array(32).fill(9)).toBase58(),holderOwner=new web3.PublicKey(new Uint8Array(32).fill(10)).toBase58();
 let holderFails=false,onMethods=[];
-const onEnv=()=>({...env(),SOLANA_RPC:'https://solana.api.onfinality.io/public',RANGE_ALERTS:{idFromName:name=>{assert.equal(name,'still-public-rpc-budget-v1');return name;},get:()=>({fetch:async request=>{assert.equal(new URL(request.url).pathname,'/public-rpc/reserve');const {count}=await request.json();assert.ok(count>=1&&count<=4);const now=Date.now();return json({allowed:true,reason:'allowed',retryAt:null,reservedAt:now,dispatchUntil:now+250});}})}});
+const onEnv=()=>({...env(),SOLANA_RPC:'https://solana.api.onfinality.io/public',RANGE_ALERTS:{idFromName:name=>{assert.equal(name,'still-public-rpc-budget-v1');return name;},get:()=>({fetch:async request=>{assert.equal(new URL(request.url).pathname,'/public-rpc/reserve');const {count}=await request.json();assert.ok(count>=1&&count<=2);const now=Date.now();return json({allowed:true,reason:'allowed',retryAt:null,reservedAt:now,dispatchUntil:now+250});}})}});
 globalThis.fetch=async(input,init)=>{
  assert.equal(String(input),'https://solana.api.onfinality.io/public');const body=JSON.parse(init.body),batch=Array.isArray(body),rows=batch?body:[body];onMethods.push(rows.map(r=>r.method));
  const results=rows.map(r=>{

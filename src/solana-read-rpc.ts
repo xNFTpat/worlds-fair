@@ -1,6 +1,6 @@
 // Public mainnet reads only. PublicNode documents this unauthenticated endpoint:
 // https://solana.publicnode.com/ . Custom RPC URLs never leave their own provider.
-import {reservePublicRpc,notePublicRpcRateLimit,type PublicRpcBudgetEnv} from './public-rpc-budget';
+import {PUBLIC_RPC_BUDGET,reservePublicRpc,notePublicRpcRateLimit,type PublicRpcBudgetEnv} from './public-rpc-budget';
 export const PUBLIC_SOLANA_READ_RPC = 'https://solana-rpc.publicnode.com';
 export const ONFINALITY_SOLANA_READ_RPC = 'https://solana.api.onfinality.io/public';
 export const SOLANA_MAINNET_GENESIS = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
@@ -78,7 +78,8 @@ export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => n
     // The proof consumes allowance too. Put it first so a larger request cannot
     // progress through further chunks before chain identity is established.
     if(onfinality&&proof)outgoing.unshift(outgoing.pop()!);
-    const chunks:RpcRead[][]=onfinality?Array.from({length:Math.ceil(outgoing.length/4)},(_,i)=>outgoing.slice(i*4,i*4+4)):[outgoing];
+    const chunkSize=PUBLIC_RPC_BUDGET.methodsPerSecond;
+    const chunks:RpcRead[][]=onfinality?Array.from({length:Math.ceil(outgoing.length/chunkSize)},(_,i)=>outgoing.slice(i*chunkSize,(i+1)*chunkSize)):[outgoing];
     const rows:any[]=[];
     for(const chunk of chunks){
     let dispatchUntil:number|null=null;

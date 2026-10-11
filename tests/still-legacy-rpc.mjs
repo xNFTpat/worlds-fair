@@ -13,10 +13,10 @@ const reply=value=>Response.json(value);
 const env={SOLANA_RPC:RPC,MIN_TVL_USD:'5000',WALLETS:'',JUPITER_API_KEY:'synthetic-quote-key',LP_CACHE:{get:async(key,type)=>{const value=stored.get(key);return typeof value==='string'&&type==='json'?JSON.parse(value):value??null;},put:async(key,value)=>stored.set(key,value)},RANGE_ALERTS:{idFromName:name=>name,get:()=>({fetch:async request=>{
  const path=new URL(request.url).pathname;
  if(path==='/public-rpc/reserve'){
-  const body=await request.json(),now=Date.now();assert.deepEqual(Object.keys(body),['count']);budgets.push(body.count);
-  return reply(allowRpc?{allowed:true,reason:'allowed',retryAt:null,reservedAt:now,dispatchUntil:now+250}:{allowed:false,reason:'cooldown',retryAt:now+30000,reservedAt:null,dispatchUntil:null});
+  const body=await request.json(),now=Date.now();assert.deepEqual(Object.keys(body),['count']);assert(body.count<=2);budgets.push(body.count);
+  return reply(allowRpc?{allowed:true,reason:'allowed',retryAt:null,reservedAt:now,dispatchUntil:now+250}:{allowed:false,reason:'cooldown',retryAt:now+30000,reservedAt:null,dispatchUntil:null,observedAt:now,retryAfterMs:30000});
  }
- if(path==='/public-rpc/cooldown'){rpcCooldowns++;return reply({recorded:true,retryAt:Date.now()+30000});}
+ if(path==='/public-rpc/cooldown'){rpcCooldowns++;const now=Date.now();return reply({recorded:true,retryAt:now+30000,observedAt:now,retryAfterMs:30000});}
  if(path==='/jupiter/reserve')return reply({allowed:allowQuotes,reason:allowQuotes?'allowed':'budget',retryAt:allowQuotes?null:Date.now()+30000});
  if(path==='/jupiter/cooldown'){quoteCooldowns++;return reply({recorded:true,retryAt:Date.now()+30000});}
  throw Error('Unexpected private budget path '+path);

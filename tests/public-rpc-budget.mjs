@@ -20,17 +20,23 @@ const init=body=>({method:'POST',headers:{'content-type':'application/json'},bod
 try{
  const state=new State(),a=envFor(state),b=envFor(state),start=clock;
  const burst=await Promise.all(Array.from({length:20},(_,i)=>reservePublicRpc(i%2?a:b,1)));
- assert.equal(burst.filter(x=>x.allowed).length,4);assert.ok(burst.filter(x=>!x.allowed).every(x=>x.retryAt===start+1250));
+ assert.equal(burst.filter(x=>x.allowed).length,2);assert.ok(burst.filter(x=>!x.allowed).every(x=>x.retryAt===start+1250));
  assert.ok(burst.filter(x=>x.allowed).every(x=>x.reservedAt===start&&x.dispatchUntil===start+250));
  clock+=1000;assert.equal((await reservePublicRpc(a,1)).allowed,false,'dispatch grace remains held beyond the provider second');
- clock+=250;assert.equal((await reservePublicRpc(a,4)).allowed,true);
- let weighted=reservePublicRpcBudget(undefined,3,clock);assert.equal(reservePublicRpcBudget(weighted.state,2,clock).reservation.allowed,false);assert.equal(reservePublicRpcBudget(weighted.state,1,clock).reservation.allowed,true);
+ clock+=250;assert.equal((await reservePublicRpc(a,2)).allowed,true);
+ let weighted=reservePublicRpcBudget(undefined,1,clock);assert.equal(reservePublicRpcBudget(weighted.state,2,clock).reservation.allowed,false);assert.equal(reservePublicRpcBudget(weighted.state,1,clock).reservation.allowed,true);
+ // Reducing capacity must retain four-entry history and the original cooldown.
+ const legacy={recent:[clock,clock,clock,clock],updatedAt:clock,cooldownUntil:clock+60000,attempts:3,last429At:clock-1000};
+ const legacyDenied=reservePublicRpcBudget(legacy,1,clock);assert.equal(legacyDenied.reservation.reason,'cooldown');assert.equal(legacyDenied.reservation.retryAt,legacy.cooldownUntil);assert.equal(legacyDenied.state.attempts,3);assert.deepEqual(legacyDenied.state.recent,legacy.recent);
+ const oldGrants={...legacy,cooldownUntil:0};const oldDenied=reservePublicRpcBudget(oldGrants,1,clock);assert.equal(oldDenied.reservation.reason,'budget');assert.equal(oldDenied.reservation.retryAt,clock+1250);assert.deepEqual(oldDenied.state.recent,oldGrants.recent);
+ assert.equal(reservePublicRpcBudget(oldDenied.state,1,clock+1249).reservation.allowed,false);assert.equal(reservePublicRpcBudget(oldDenied.state,2,clock+1250).reservation.allowed,true,'legacy grants naturally expire before new two-method grants');
+ assert.equal(reservePublicRpcBudget(undefined,3,clock).reservation.allowed,false,'new three-method grants are rejected');
  let history;const sends=[];
- for(let step=0;step<20000;step+=17){const count=step%4+1,next=reservePublicRpcBudget(history,count,start+step);history=next.state;if(next.reservation.allowed)sends.push(...Array.from({length:count},()=>start+step+(step%2?249:0)));}
- sends.sort((a,b)=>a-b);for(const at of sends)assert.ok(sends.filter(t=>t>at-1000&&t<=at).length<=4,'delayed dispatches remain <=4 methods in every rolling second');
+ for(let step=0;step<20000;step+=17){const count=step%2+1,next=reservePublicRpcBudget(history,count,start+step);history=next.state;if(next.reservation.allowed)sends.push(...Array.from({length:count},()=>start+step+(step%2?249:0)));}
+ sends.sort((a,b)=>a-b);for(const at of sends)assert.ok(sends.filter(t=>t>at-1000&&t<=at).length<=2,'delayed dispatches remain <=2 methods in every rolling second');
  const delayedState=new State(),delayed=envFor(delayedState);const normalFetch=delayed.RANGE_ALERTS.get;
  delayed.RANGE_ALERTS.get=()=>({fetch:async request=>{const response=await normalFetch().fetch(request);clock+=251;return response;}});
- const late=await reservePublicRpc(delayed,4);assert.equal(late.allowed,false);assert.equal(late.reason,'budget');assert.equal((await reservePublicRpc(envFor(delayedState),1)).allowed,false,'expired grants are never released early');
+ const late=await reservePublicRpc(delayed,2);assert.equal(late.allowed,false);assert.equal(late.reason,'budget');assert.equal((await reservePublicRpc(envFor(delayedState),1)).allowed,false,'expired grants are never released early');
  const future={RANGE_ALERTS:{idFromName:()=>'',get:()=>({fetch:async()=>Response.json({allowed:true,reason:'allowed',retryAt:null,reservedAt:clock+1,dispatchUntil:clock+251})})}};
  assert.equal((await reservePublicRpc(future,1)).allowed,true,'DO clock skew does not reject an otherwise fresh grant');
  for(const skew of [-60000,60000]){const skewed={RANGE_ALERTS:{idFromName:()=>'',get:()=>({fetch:async()=>Response.json({allowed:true,reason:'allowed',retryAt:null,reservedAt:clock+skew,dispatchUntil:clock+skew+250})})}};const received=await reservePublicRpc(skewed,1);assert.equal(received.allowed,true);assert.equal(received.dispatchUntil,clock+250,'client request-start bounds dispatch independently of server clock');}
@@ -43,7 +49,7 @@ try{
  assert.equal(reservePublicRpcBudget({...saved,updatedAt:clock+1},1,clock).reservation.allowed,false,'future stored state fails closed');
  assert.equal(await publicRpcBudgetRequest(state,new Request('https://internal/other')),null);
  assert.equal((await publicRpcBudgetRequest(state,new Request('https://internal/public-rpc/reserve'))).status,405);
- assert.equal((await publicRpcBudgetRequest(state,new Request('https://internal/public-rpc/reserve',{method:'POST',body:JSON.stringify({count:5})}))).status,400);
+ assert.equal((await publicRpcBudgetRequest(state,new Request('https://internal/public-rpc/reserve',{method:'POST',body:JSON.stringify({count:3})}))).status,400);
  const privateState=new State();let posted;
  await notePublicRpcRateLimit(envFor(privateState,r=>posted=r.clone()),new Headers({'retry-after':'60','x-api-key':'never-forward','authorization':'never-forward'}));
  assert.deepEqual(await posted.json(),{retryAfter:'60',rateLimitReset:null});assert.deepEqual([...posted.headers.keys()],['content-type']);
@@ -55,8 +61,8 @@ try{
  const wireState=new State(),wireEnv=envFor(wireState),rpc=createSolanaReadRpc({fetcher,now:()=>clock});
  const noBinding=await rpc(URL,init(req('getSlot')));assert.equal(noBinding.status,503);assert.equal(noBinding.headers.get('x-still-rpc-local'),'budget-unbound');assert.equal(wire.length,0,'public OnFinality without a shared binding fails closed');
  const nine=Array.from({length:9},(_,i)=>req('getSlot',i+1));const output=await rpc(URL,init(nine),{env:wireEnv,deadline:clock+8000}).then(r=>r.json());
- assert.deepEqual(output.map(r=>r.id),nine.map(r=>r.id));assert.deepEqual(wire.map(r=>r.methods.length),[4,4,2],'genesis is counted and large batches are bounded chunks');
- const dispatched=wire.flatMap(r=>r.methods.map(()=>r.at));for(const at of dispatched)assert.ok(dispatched.filter(t=>t>at-1000&&t<=at).length<=4);
+ assert.deepEqual(output.map(r=>r.id),nine.map(r=>r.id));assert.deepEqual(wire.map(r=>r.methods.length),[2,2,2,2,2],'genesis is counted and large batches are bounded chunks');
+ const dispatched=wire.flatMap(r=>r.methods.map(()=>r.at));for(const at of dispatched)assert.ok(dispatched.filter(t=>t>at-1000&&t<=at).length<=2);
  assert.equal(wire.flatMap(r=>r.methods).filter(m=>m==='getGenesisHash').length,1);
  const previous=wire.length,short=createSolanaReadRpc({fetcher,now:()=>clock});assert.equal((await short(URL,init(nine),{env:wireEnv,deadline:clock+50})).status,503);assert.equal(wire.length,previous,'insufficient queue deadline sends no ungranted request');
  clock+=1250;const lateDispatch=createSolanaReadRpc({fetcher,now:()=>clock});const beforeLate=wire.length;assert.equal((await lateDispatch(URL,init(req('getSlot')),{env:wireEnv,onRequest:()=>{clock+=251;}})).status,503);assert.equal(wire.length,beforeLate,'slow callbacks cannot dispatch an expired grant');
@@ -76,7 +82,7 @@ try{
   const skewState=new State(),baseEnv=envFor(skewState),skewEnv={RANGE_ALERTS:{idFromName:baseEnv.RANGE_ALERTS.idFromName,get:()=>({fetch:async request=>{const callerClock=clock;clock+=skew;try{return await baseEnv.RANGE_ALERTS.get().fetch(request);}finally{clock=callerClock;}}})}};
   failure=null;const before=wire.length,skewRpc=createSolanaReadRpc({fetcher,now:()=>clock});
   const response=await skewRpc(URL,init(nine),{env:skewEnv,deadline:clock+8000});assert.equal(response.status,200,'full multi-chunk queue works with independent server clocks');
-  assert.deepEqual(wire.slice(before).map(r=>r.methods.length),[4,4,2]);const sent=wire.slice(before).flatMap(r=>r.methods.map(()=>r.at));for(const at of sent)assert.ok(sent.filter(t=>t>at-1000&&t<=at).length<=4);
+  assert.deepEqual(wire.slice(before).map(r=>r.methods.length),[2,2,2,2,2]);const sent=wire.slice(before).flatMap(r=>r.methods.map(()=>r.at));for(const at of sent)assert.ok(sent.filter(t=>t>at-1000&&t<=at).length<=2);
   const cooldown=await notePublicRpcRateLimit(skewEnv,new Headers({'retry-after':'120'}));assert.equal(cooldown.retryAt,clock+120000);
   const denied=await reservePublicRpc(skewEnv,1);assert.equal(denied.reason,'cooldown');assert.equal(denied.retryAt,clock+120000,'cooldown remaining duration translates to caller time without shortening it');
   const providerUntil=Math.ceil((clock+180000)/1000)*1000,dated=await notePublicRpcRateLimit(skewEnv,new Headers({'retry-after':new RealDate(providerUntil).toUTCString()}));assert.ok(dated.retryAt>=providerUntil&&dated.retryAt<providerUntil+1000,'HTTP-date wait is normalized before crossing a skewed clock');assert.equal((await reservePublicRpc(skewEnv,1)).retryAt,dated.retryAt);
