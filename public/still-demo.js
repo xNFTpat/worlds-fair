@@ -15,7 +15,7 @@ export function netSummary(data) {
   const pct=data?.netReturnPct?.value;
   const net=finite(pct)?`${pct>0?'+':''}${number(pct,4)}%`:'Unavailable';
   const hours=data?.breakEvenHours?.value;
-  const cover=data?.breakEvenStatus==='never'?"Fees don't cover costs":finite(hours)?hours<1/60?'Under 1 min':`Fees cover costs in about ${number(hours,2)} hours`:'Fees cover costs: Unavailable';
+  const cover=data?.breakEvenStatus==='never'?"Fees don't cover costs":finite(hours)?hours<1/60?'Under 1 min':hours>48?'More than 2 days to cover costs':`Fees cover costs in about ${number(hours,2)} hours`:'Fees cover costs: Unavailable';
   return {net,cover};
 }
 export function directPoolAddress(search){const value=new URLSearchParams(search).get('pool');return value&&/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value)?value:null;}

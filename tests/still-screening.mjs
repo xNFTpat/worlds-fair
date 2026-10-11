@@ -6,8 +6,8 @@ import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 const dir=await mkdtemp(join(tmpdir(),'still-screening-'));
 try{
- await build({stdin:{contents:"export * from './src/still-preflight'; export * from './src/still-preflight-config';",resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',outfile:join(dir,'test.mjs')});
- const {buildStillPreflight,parseStillRangeOptions}=await import(pathToFileURL(join(dir,'test.mjs')));
+ await build({stdin:{contents:"export * from './src/still-preflight'; export * from './src/still-preflight-config'; export * from './src/still-checks';",resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',outfile:join(dir,'test.mjs')});
+ const {buildStillPreflight,parseStillRangeOptions,stillChecks}=await import(pathToFileURL(join(dir,'test.mjs')));
  const now=Date.UTC(2026,9,11,12),at=new Date(now).toISOString(),mint='synthetic-mint';
  const pool={id:'solana:synthetic',address:'synthetic',chain:'solana',venue:'meteora-dlmm',pair:'TEST/SOL',base:{address:mint,symbol:'TEST'},quote:{address:'So11111111111111111111111111111111111111112',symbol:'SOL'},tvlUsd:100000,priceQuote:.01,priceUsd:1,quotePriceUsd:100,ageHours:200,fetchedAt:at,volume24hUsd:240000,activity:{fees1h:500,volume1h:10000},fees24hUsd:12000,poolConfig:{binStep:100},tags:[]};
  const rpc={mint,status:'available',asOf:at,transferFeeStatus:'none',transferFee:null};
@@ -34,5 +34,16 @@ try{
  assert.equal(custom.checks.find(c=>c.id==='floor').status,'fail');
  assert.equal(custom.ledger.entryCostsSol,null);assert.equal(custom.ledger.exitCostsSol,null);
  for(const patch of [{floorPct:NaN},{ceilingPct:-20},{shape:'custom'},{holdMinutes:0},{holdMinutes:3.5},{extra:'forged'}])assert.throws(()=>parseStillRangeOptions({...range,...patch}));
+ for(const fees of [500,200,100]) {
+  const d={...detail,pool:{...pool,activity:{fees1h:fees,volume1h:10000}}};
+  const base=buildStillPreflight(d,.5,now);
+  const atHours=hours=>stillChecks({...base,breakEvenHours:{...base.breakEvenHours,value:hours},roundTripCostSol:{...base.roundTripCostSol,value:.001}},d,now).find(c=>c.id==='fees');
+  const normal=atHours(48),long=atHours(48.000001);
+  assert.match(normal.result,/48 hours/);
+  assert.match(long.result,/More than 2 days to cover costs/);
+  assert(!long.result.includes('48.000001'));
+  assert.equal(long.status,normal.status);assert.equal(long.shortReason,normal.shortReason,'Deciding reason is unchanged');
+  assert.match(atHours(0).result,/Under 1 min/);
+ }
  console.log('Still screening: threshold edges, mutable tax, excluded pools, partial holders, candle gaps, range funding and unavailable net passed.');
 }finally{await rm(dir,{recursive:true,force:true});}

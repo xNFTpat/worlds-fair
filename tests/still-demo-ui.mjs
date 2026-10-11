@@ -310,3 +310,11 @@ const directHtml=direct.elements['#screen'].innerHTML,front=directHtml.split('<d
 assert(front.includes('Liquidity under $5k'));assert(front.includes('0.14 SOL'));assert(front.includes('28%'));assert(front.includes('Better than mid'));assert(front.includes('Top holders unavailable'));assert(front.includes('still-chip--caution'));assert(front.includes('still-chip--fail'));
 assert(front.includes('visible-preflight-checks'),'All short check reasons are visible outside the numbers fold');
 console.log('PASS positive cost presentation, sub-minute coverage, direct thin-example entry and visible deciding checks');
+
+for(const hours of [48.000001,49,44044.11]) {
+ const data={breakEvenStatus:'covered',breakEvenHours:{value:hours}};
+ assert.equal(helpers.netSummary(data).cover,'More than 2 days to cover costs');
+ assert.equal(data.breakEvenHours.value,hours,'Display cap never changes the underlying hours');
+}
+assert.equal(helpers.netSummary({breakEvenStatus:'covered',breakEvenHours:{value:48}}).cover,'Fees cover costs in about 48 hours');
+assert.equal(helpers.netSummary({breakEvenStatus:'covered',breakEvenHours:{value:1/60}}).cover,'Fees cover costs in about 0.02 hours');
