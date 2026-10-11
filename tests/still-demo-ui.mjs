@@ -4,7 +4,7 @@ import {runInNewContext} from 'node:vm';
 
 const source = await readFile('public/still-demo.js', 'utf8');
 const browserSource = source.replace(/^export /gm, '');
-const helpers = runInNewContext(browserSource + '\n({esc,number,sol,groupPositions,requestFingerprint})', {Intl});
+const helpers = runInNewContext(browserSource + '\n({esc,number,sol,groupPositions,requestFingerprint,readOnboarding,sortForPreference})', {Intl});
 assert.equal(helpers.sol(null), 'Unavailable');
 assert.equal(helpers.sol(0), '0 SOL');
 assert.equal(helpers.sol(Infinity), 'Unavailable');
@@ -13,6 +13,14 @@ const individual = [{id:'paper:one',positionAddress:'paper:one',poolAddress:'sam
 const groups = helpers.groupPositions(individual);
 assert.equal(groups.length, 1); assert.equal(groups[0].positions.length, 2);
 assert.equal(groups[0].positions[0], individual[0]); assert.equal(groups[0].positions[1], individual[1], 'Grouping preserves each distinct position record');
+
+assert.equal(helpers.readOnboarding({getItem(){throw Error('blocked');}}).complete,false);
+assert.equal(helpers.readOnboarding({getItem(){return '{bad';}}).preference,'balanced');
+assert.equal(helpers.readOnboarding({getItem(){return '{"complete":true,"preference":"calm"}';}}).preference,'calm');
+const unordered = ['Spicy','Steady','Busy'].map(label=>({risk:{label}}));
+assert.equal(helpers.sortForPreference(unordered,'calm')[0].risk.label,'Steady');
+assert.equal(helpers.sortForPreference(unordered,'quick')[0].risk.label,'Spicy');
+assert.equal(unordered[0].risk.label,'Spicy','Sorting preferences never mutate source data');
 
 class Element {
   innerHTML = ''; textContent = ''; hidden = false; disabled = false; value = '0.5'; dataset = {}; open = false; attributes = {}; listeners = new Map();
@@ -54,7 +62,7 @@ function fixture() {
   };
   class TestDate extends Date {constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}}
   const sessionStorage = {getItem:key=>stored.get(key) ?? null,setItem:(key,value)=>stored.set(key,value),removeItem:key=>stored.delete(key)};
-  runInNewContext(browserSource, {document,window,location,history,sessionStorage,fetch,Date:TestDate,URLSearchParams,AbortController,Intl,crypto:{randomUUID:()=>`request-${++serial}`},setTimeout:()=>1,clearTimeout:()=>{}});
+  runInNewContext(browserSource, {document,window,location,history,sessionStorage,localStorage:sessionStorage,fetch,Date:TestDate,URLSearchParams,AbortController,Intl,crypto:{randomUUID:()=>`request-${++serial}`},setTimeout:()=>1,clearTimeout:()=>{}});
   const click = async dataset => {await document.dispatch('click',{target:{closest:()=>({dataset,disabled:false})}}); await flush();};
   const confirm = async () => {await elements['#confirm-submit'].dispatch('click'); await flush();};
   return {elements,requests,stored,click,confirm,address,async ready(){await flush();await click({go:'pools'});await click({pool:address});},advance(ms){clock+=ms;},fail(value){failMode=value;}};
@@ -90,3 +98,11 @@ const changedAmount = fixture(); await changedAmount.ready(); changedAmount.elem
 assert.equal(changedAmount.elements['#confirmation'].open,false,'Edited amount needs a new pre-flight before confirmation');
 assert.equal(changedAmount.requests.filter(r=>r.method==='POST').length,0);
 console.log('Still guided browser: escaping, position identity, explicit confirmation, stale evidence, and interrupted-response idempotency passed.');
+
+const intro = fixture(); await intro.click({action:'start'});
+assert.ok(intro.elements['#screen'].innerHTML.includes('You lend tokens to a pool. Traders pay you fees.'));
+await intro.click({onboard:'next'}); assert.ok(intro.elements['#screen'].innerHTML.includes('This is paper.'));
+await intro.click({onboard:'next'}); await intro.click({pace:'calm'}); await intro.click({onboard:'finish'});
+assert.equal(JSON.parse(intro.stored.get('still:onboarding:v1')).preference,'calm');
+await intro.click({go:'home'});await intro.click({action:'start'});
+assert.ok(intro.elements['#screen'].innerHTML.includes('Check this pool'),'Returning visitors go directly to pools');

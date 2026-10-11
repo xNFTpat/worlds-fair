@@ -27,9 +27,19 @@ export function preflightIsFresh(data, now = Date.now()) {
 }
 export function requestFingerprint(action, body) { return JSON.stringify([action, body]); }
 
+export function readOnboarding(storage) {
+  try { const saved=JSON.parse(storage.getItem('still:onboarding:v1')||'null'); return {complete:saved?.complete===true, preference:['calm','balanced','quick'].includes(saved?.preference)?saved.preference:'balanced'}; }
+  catch { return {complete:false,preference:'balanced'}; }
+}
+export function sortForPreference(pools,preference) {
+  const order={calm:['Steady','Busy','Spicy'],balanced:['Busy','Steady','Spicy'],quick:['Spicy','Busy','Steady']}[preference]||['Busy','Steady','Spicy'];
+  return [...pools].sort((a,b)=>order.indexOf(a.risk.label)-order.indexOf(b.risk.label));
+}
 if (typeof document !== 'undefined') {
 const $ = selector => document.querySelector(selector);
 const state = {view:'home',pool:null,basket:null,preflight:null,account:null,pools:[],baskets:[],amount:'0.5',load:0,pending:null};
+let preferences; try {preferences=readOnboarding(localStorage);} catch {preferences={complete:false,preference:'balanced'};}
+let onboardingStep=0;
 const screen = $('#screen'), dialog = $('#confirmation');
 let dialogAction = null, submitting = false, noticeTimer;
 const pendingKey = 'still:guided:pending:v1';
@@ -55,25 +65,28 @@ function errorPanel(message, retry = state.view) { show(`<div class="empty error
 function pendingBanner() { const pending = readPending(); if (pendingReadError) return `<div class="panel error"><h3>Saved action unavailable</h3><p class="note">Browser storage could not be read. Check your positions before trying another deposit. Restore storage access and reload to recover the saved request.</p><button class="secondary" data-go="positions">Check positions</button></div>`; return pending ? `<div class="panel"><h3>A paper action needs checking</h3><p class="note">${esc(pending.description || 'The last response was interrupted.')} Retry the saved request to check its result without opening or closing twice.</p><button class="secondary" data-action="resume">Check saved action</button></div>` : ''; }
 async function ensureAccount() { if (!state.account) { const data = await api('/api/paper/still-account'); state.account = data.account; } return state.account; }
 function navigate(view, replace = false) {
-  if (!['home','pools','preflight','positions','baskets','basket-preflight'].includes(view)) view = 'home';
+  if (!['home','pools','preflight','positions','baskets','basket-preflight','onboarding','follow','park','learn'].includes(view)) view = 'home';
   if (view === 'preflight' && !state.pool) view = 'pools';
   if (view === 'basket-preflight' && !state.basket) view = 'baskets';
   const path = view === 'home' ? location.pathname + location.search : '#' + view;
   if (location.hash !== path) history[replace ? 'replaceState':'pushState'](null,'',path);
   state.view = view;
-  $('#home').hidden = view !== 'home'; $('#journey').hidden = view === 'home';
+  $('#home').hidden = view !== 'home'; if($('#pillars'))$('#pillars').hidden=view!=='home'; $('#journey').hidden = view === 'home';
   for (const button of document.querySelectorAll('.steps button')) button.setAttribute('aria-current', button.dataset.go === (view === 'basket-preflight' ? 'baskets' : view) ? 'step':'false');
+  for(const button of document.querySelectorAll('.primary-nav button,.mobile-nav button'))button.setAttribute('aria-current',button.dataset.go===(view==='preflight'||view==='basket-preflight'||view==='baskets'?'pools':view)?'page':'false');
   $('#step-preflight').disabled = !state.pool;
   window.scrollTo({top:0,behavior:'instant'});
-  if (view !== 'home') loadView(view); else state.load++;
+  if (view !== 'home') loadView(view); else {state.load++;onboardingStep=0;}
 }
 async function loadView(view) {
   const load = ++state.load;
   loading(view === 'pools' ? 'Finding current SOL pools…' : view === 'positions' ? 'Reading your practice positions…' : view === 'baskets' ? 'Reading current basket pools…' : 'Checking the range, costs and downside…');
   try {
+    if(view==='onboarding'){renderOnboarding();ensureAccount().then(()=>{if(load===state.load)renderOnboarding();}).catch(()=>{});return;}
+    if(['follow','park','learn'].includes(view)){renderPreview(view);return;}
     if (view === 'pools') {
       const [data] = await Promise.all([api('/api/still/pools'),ensureAccount()]); if (load !== state.load) return;
-      state.pools = data.pools; renderPools(data);
+      state.pools = sortForPreference(data.pools,preferences.preference); renderPools(data);
     } else if (view === 'preflight' || view === 'basket-preflight') {
       const basket = view === 'basket-preflight';
       const params = new URLSearchParams({amountSol:state.amount,[basket ? 'basketId':'poolAddress']:basket ? state.basket.id : state.pool.address});
@@ -88,9 +101,19 @@ async function loadView(view) {
     }
   } catch (error) { if (load === state.load) errorPanel(error.message, view); }
 }
+function renderOnboarding() {
+  const steps=[['You lend tokens to a pool. Traders pay you fees.', 'On Meteora you pick a price range. While the price trades inside it, you earn a share of every swap. If the price leaves your range, you stop earning, and you may end up holding more of the token that fell.'],['This is paper.', 'Nothing here touches your wallet. Positions use live prices and fees, but the money is pretend. Use it to see what a trade would cost you before it does.'],['How calm do you want to be?', 'This sets your defaults. Change it any time in Settings.']];
+  const [title,copy]=steps[onboardingStep];
+  show(`<div class="onboarding"><div class="intro-top"><div class="step-dots" aria-label="Step ${onboardingStep+1} of 3">${[0,1,2].map(n=>`<i class="${n===onboardingStep?'selected':''}"></i>`).join('')}</div><button class="text-button" data-onboard="skip">Skip intro</button></div><h2>${title}</h2>${onboardingStep!==2?`<p>${copy}</p>`:''}${onboardingStep===0?'<div class="lesson-range" role="img" aria-label="Illustration: inside your range, trades use your liquidity; below it you hold the paired token, above it SOL"><span>Paired token</span><b>Your range<i class="price-dot"></i></b><span>SOL</span></div>':onboardingStep===1?`<div class="balance"><div><span>Your practice balance</span><strong>${sol(state.account?.balanceSol)}</strong><small class="source">Still paper ledger · ${esc(date(state.account?.updatedAt))}</small></div></div>`:`<div class="pace-options" role="group" aria-label="Your preferred pace">${['calm','balanced','quick'].map(key=>`<button class="secondary" data-pace="${key}" aria-pressed="${preferences.preference===key}"><strong>${key[0].toUpperCase()+key.slice(1)}</strong><span>${{calm:'Wider ranges, established pools, fewer prompts.',balanced:'A mix. Some busy pools, sensible floors.',quick:'Narrow, short positions on busy pools. More checks, more attention.'}[key]}</span></button>`).join('')}</div><p class="note">${copy}</p>`}<div class="onboarding-actions"><button class="primary" data-onboard="${onboardingStep===2?'finish':'next'}">${['Next','Got it','Show me pools'][onboardingStep]}</button>${onboardingStep?'<button class="text-button" data-onboard="back">Back</button>':''}</div></div>`);
+}
+function finishOnboarding(){preferences.complete=true;try{localStorage.setItem('still:onboarding:v1',JSON.stringify(preferences));}catch{show(`<div class="empty"><h3>Couldn't save that. Your pick still works this session.</h3><button class="primary" data-go="pools">Continue</button></div>`);return;}navigate('pools');}
+function renderPreview(view){
+  const details={follow:['Follow a strategy','Choose a pace you can understand.','The new strategy cards are being prepared. Existing paper trials are available in Advanced.','/advanced#bot','Explore paper trials'],park:['Park your profits','A purpose for your next step.','The new profit allocation flow is being prepared. You can keep practising with pools while it is completed.','#pools','Explore pools'],learn:['Learn','A little clarity goes a long way.','An LP range defines where your liquidity can trade. Outside the range, you hold one side and stop earning swap fees. Price moves and exit costs can outweigh the fees you earn.','/advanced#learn','Read the existing guide']}[view];
+  show(heading(details[0],details[1],details[2])+`<div class="panel"><a class="secondary" href="${details[3]}">${details[4]} ↗</a></div>`);
+}
 function renderPools(data) {
   const cards = state.pools.map(pool => `<article class="pool-card"><div class="card-title"><div><h3>${esc(pool.name)}</h3><small>Meteora DLMM · ${esc(short(pool.address))} · ${esc(number(pool.binStep.value,0))} bps bins</small></div>${tag(pool.risk)}</div><p class="reason">${esc(pool.risk.reason)}</p><div class="metrics">${metric('Pool liquidity (TVL)',pool.tvlUsd,money)}${metric('24h fees / TVL',pool.fees24hFraction,percent)}${metric('1h pace vs daily average',pool.feeTrend,value=>finite(value)?`${value>0?'+':''}${percent(value)}`:'Unavailable')}${metric('Pool age',pool.ageHours,age)}</div><button class="secondary" data-pool="${esc(pool.address)}">Check this pool <span aria-hidden="true">↗</span></button></article>`).join('');
-  show(heading('Step 1 · Choose a pool','A small list. A closer look.','Live SOL-paired pools from Meteora. The tags describe liquidity and activity, not safety.', '<button class="secondary" data-go="pools">Refresh list</button>') + pendingBanner() + (cards ? `<div class="cards">${cards}</div><p class="note">Source: Meteora DLMM Data API · catalogue ${esc(date(data.updatedAt))}. At most eight pools with at least $5,000 liquidity and a price read within ten minutes. Fees are shared by active liquidity; these percentages are not your return.</p>` : `<div class="empty"><h3>No current pools to show</h3><p>The live catalogue has no eligible pools with fresh prices. It refreshes automatically every five minutes. Try the list again shortly.</p><button class="primary" data-go="pools">Check again</button></div>`));
+  show(heading('Step 1 · Choose a pool','A small list. A closer look.','Live SOL-paired pools from Meteora. The tags describe liquidity and activity, not safety.', '<button class="secondary" data-go="pools">Refresh list</button>') + `<p class="note">${esc({calm:'Calm · deeper, longer-established pools first. Suggested style: Overnight patience.',balanced:'Balanced · established activity first. Suggested style: Steady drip.',quick:'Quick · recent bursts first. Suggested style: Narrow and quick.'}[preferences.preference])} <button class="text-button" data-action="preferences">Change pace</button></p>` + pendingBanner() + (cards ? `<div class="cards">${cards}</div><p class="note">Source: Meteora DLMM Data API · catalogue ${esc(date(data.updatedAt))}. At most eight pools with at least $5,000 liquidity and a price read within ten minutes. Fees are shared by active liquidity; these percentages are not your return.</p>` : `<div class="empty"><h3>No current pools to show</h3><p>The live catalogue has no eligible pools with fresh prices. It refreshes automatically every five minutes. Try the list again shortly.</p><button class="primary" data-go="pools">Check again</button></div>`));
 }
 function costRow(label,evidence,format=sol) { return `<div class="cost-row"><div>${esc(label)}${source(evidence)}<small class="source">${esc(evidence?.note || '')}</small></div><strong>${esc(format(evidence?.value))}</strong></div>`; }
 function scenarioCards(data) { return `<section class="panel"><h3>If the paired token price in SOL falls…</h3><p class="note">Both scenarios are in SOL terms, before fees and trading costs. The price floor is not a stop-loss.${data.basket ? ' Each paired token falls by the same percentage.' : ''}</p><div class="scenario-grid">${data.scenarios.map(item=>`<article class="scenario"><h4>Price drops ${percent(item.dropFraction)}</h4><strong>${sol(item.grossValueSol.value)}</strong><small>Modelled inventory value</small>${source(item.grossValueSol)}<p class="note">${signed(item.grossPnlSol.value)} vs holding ${sol(data.sizeSol)}<br>Net proceeds: ${sol(item.netValueSol.value)}</p></article>`).join('')}</div><p class="note">Holding SOL keeps ${sol(data.sizeSol)} in either scenario. This ideal model follows a downward price path through the bins. It excludes transfer taxes, slippage and liquidity limits.</p></section>`; }
@@ -148,7 +171,7 @@ function prepareDeposit() {
   const basket = state.view === 'basket-preflight', amount = String(data.sizeSol), label = basket ? `${data.basket.name} basket` : data.name;
   const body = basket ? {basketId:data.basket.id,amountSol:amount,poolAddresses:data.components.map(item=>item.poolAddress),confirmed:true} : {poolAddress:data.poolAddress,amountSol:amount,confirmed:true};
   const allocation = basket ? `<br>${data.components.map(item=>`${esc(item.preflight.name)}: ${sol(item.sizeSol)}`).join('<br>')}` : '';
-  confirmAction(basket?'still-basket':'still-open',body,`Paper deposit of ${amount} SOL into ${label}.`,basket?'Open this paper basket?':'Open this paper position?',`Use <strong>${sol(data.sizeSol)}</strong> of your <strong>${sol(state.account.balanceSol)}</strong> practice balance for ${esc(label)}.${allocation}<br><br>${esc(data.verdict.label)}: ${esc(data.verdict.reason)}`,'Confirm paper deposit');
+  confirmAction(basket?'still-basket':'still-open',body,`Paper deposit of ${amount} SOL into ${label}.`,basket?'Open this paper basket?':'Open this paper position?',`Use <strong>${sol(data.sizeSol)}</strong> of your <strong>${sol(state.account?.balanceSol)}</strong> practice balance for ${esc(label)}.${allocation}<br><br>${esc(data.verdict.label)}: ${esc(data.verdict.reason)}`,'Confirm paper deposit');
 }
 function prepareClose(id) {
   if (readPending()) {resumePending(); return;}
@@ -183,6 +206,11 @@ dialog.addEventListener('cancel',event=>{if(submitting)event.preventDefault();})
 dialog.querySelector('form').addEventListener('submit',event=>{if(submitting)event.preventDefault();});
 document.addEventListener('click',async event=>{
   const button = event.target.closest('button'); if (!button || button.disabled) return;
+  if(button.hasAttribute?.('data-ripple') && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches){button.classList.remove('ripple');void button.offsetWidth;button.classList.add('ripple');setTimeout(()=>button.classList.remove('ripple'),600);}
+  if(button.dataset.action==='start'){onboardingStep=0;navigate(preferences.complete?'pools':'onboarding');return;}
+  if(button.dataset.action==='preferences'){onboardingStep=2;navigate('onboarding');return;}
+  if(button.dataset.pace){preferences.preference=button.dataset.pace;renderOnboarding();return;}
+  if(button.dataset.onboard){if(['skip','finish'].includes(button.dataset.onboard))finishOnboarding();else{onboardingStep+=button.dataset.onboard==='back'?-1:1;renderOnboarding();}return;}
   if (button.dataset.go) {navigate(button.dataset.go);return;}
   if (button.dataset.pool) {state.pool=state.pools.find(pool=>pool.address===button.dataset.pool);state.amount='0.5';navigate('preflight');return;}
   if (button.dataset.basket) {state.basket=state.baskets.find(basket=>basket.id===button.dataset.basket);state.amount='0.5';navigate('basket-preflight');return;}

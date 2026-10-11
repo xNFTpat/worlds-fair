@@ -2,6 +2,18 @@
 
 Product: **Still — Clarity before capital.** Public repository: [xNFTpat/worlds-fair](https://github.com/xNFTpat/worlds-fair). The original LP Terminal repository remains private.
 
+## 11 October — Claude copy and UI pass
+
+Current freeze: **Monday 12 October 2026 at 15:00 UK**, replacing the earlier deadline below. Scope remains the standalone public `worldsfair` branch and `lp-terminal-worldsfair` Worker, paper only.
+
+- [x] Stage (a): Claude Home and onboarding copy, Still ring, exact palette, Home/Pools/Positions/Follow/Grow navigation, footer-only Research, persisted pace preferences with blocked-storage fallback. Browser checked at 375px and 1280px.
+- [ ] Stage (b): live sourced pre-flight checks, threshold config, range controls, starter mixes, individual positions and polished states.
+- [ ] Stage (c): seven forward-only paper strategies, source-post attribution, follow confirmations and custom bot controls.
+- [ ] Stage (d): paper profit allocations into pools, Cesto baskets and Backyard, with quote availability and atomic accounting.
+- [ ] Stage (e): eight lessons using the supplied copy, diagrams and contextual links.
+- [ ] Stage (f): all-page mobile/desktop, state and accessibility review.
+- [ ] Stage (g): README, honest prior-work disclosure and final live release verification.
+
 ## 9 October — guided demo before feature freeze
 
 Scope: branch **worldsfair**, public repository **xNFTpat/worlds-fair**, Worker **lp-terminal-worldsfair** only. Feature freeze: **Saturday 10 October 2026 at 12:00 UK**. The personal terminal and `lp-agg` are excluded.
