@@ -31,7 +31,7 @@ const compiled=await build({stdin:{contents:`
   }
  }
  export default {fetch:async(req,env)=>(await worldsfairPaperRoute(req,env))||new Response('Not found',{status:404})};
-`,resolveDir:process.cwd(),loader:'js'},bundle:true,platform:'browser',format:'esm',write:false,plugins:[{name:'bounded-synthetic-providers',setup(b){
+`,resolveDir:process.cwd(),loader:'js'},bundle:true,platform:'browser',format:'esm',write:false,alias:{util:'./tests/fixtures/worker-util.mjs'},plugins:[{name:'bounded-synthetic-providers',setup(b){
  for(const kind of ['basket','vault']){
   b.onResolve({filter:new RegExp('^\\./worldsfair-paper-'+kind+'s$')},()=>({path:kind,namespace:'fixture'}));
  }

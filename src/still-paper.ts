@@ -1,3 +1,4 @@
+import type {getStillWalletPaperPreflight} from './still-wallet';
 import {EXAMPLE_PARK_LAMPORTS,parseParkInput,parkSplit,parkProviders,validateParkQuotes,parkView,type StillParkRecord} from './still-park';
 import {getSnapshot} from './refresh';
 import {listStillPools} from './still-preflight';
@@ -55,6 +56,7 @@ export interface StillPaperAccount {
 }
 interface Receipt {requestId: string; action: string; fingerprint: string; at: string; positionIds: string[]; amountSol: number; settledSol?: number; settlementNote: string; basket?: StillBasketEvidence}
 export interface StillPaperProviders {
+  walletPreflight:typeof getStillWalletPaperPreflight;
   park:typeof parkProviders;
   snapshot:typeof getSnapshot;
   preflight: typeof getStillPreflight; baskets: typeof getStillBaskets; mark: typeof getStillPoolMark;
@@ -170,7 +172,7 @@ export class StillPaperLedger {
   private deps: StillPaperProviders;
   private preparing = new Map<string, {fingerprint: string; promise: Promise<Response>}>();
   constructor(private ctx: DurableObjectState, private env: Env, deps: Partial<StillPaperProviders> = {}) {
-    this.deps = {park:parkProviders,snapshot:getSnapshot,preflight: getStillPreflight, baskets: getStillBaskets, mark: getStillPoolMark, now: Date.now, id: () => crypto.randomUUID(), ...deps};
+    this.deps = {walletPreflight:(...args)=>import('./still-wallet').then(module=>module.getStillWalletPaperPreflight(...args)),park:parkProviders,snapshot:getSnapshot,preflight: getStillPreflight, baskets: getStillBaskets, mark: getStillPoolMark, now: Date.now, id: () => crypto.randomUUID(), ...deps};
   }
   private async lock<T>(fn: () => Promise<T>): Promise<T> {
     const result = await this.ctx.blockConcurrencyWhile(async () => {
@@ -199,7 +201,7 @@ export class StillPaperLedger {
         if (!await this.ctx.storage.get(accountKey(account))) await this.ctx.storage.put(accountKey(account), state);
         return this.result(state);
       });
-      if (!['still-open', 'still-basket', 'still-close', 'still-refresh'].includes(action)) throw new StillPaperError('Unknown paper action.', 404);
+      if (!['still-open', 'still-clone', 'still-basket', 'still-close', 'still-refresh'].includes(action)) throw new StillPaperError('Unknown paper action.', 404);
       const id = requestId(input);
       let normalized: Record<string, unknown>;
       if (action === 'still-refresh') {
@@ -210,6 +212,9 @@ export class StillPaperLedger {
           inputFields(input, ['requestId', 'confirmed', 'positionId']);
           if (typeof input.positionId !== 'string' || !/^paper:[a-zA-Z0-9-]{8,80}$/.test(input.positionId)) throw new StillPaperError('Choose a saved paper position.');
           normalized = {positionId: input.positionId};
+        } else if(action==='still-clone'){
+          inputFields(input,['requestId','confirmed','walletAddress','poolAddress','positionAddress','amountSol']);
+          normalized={walletAddress:address(input.walletAddress),poolAddress:address(input.poolAddress),positionAddress:address(input.positionAddress),amountLamports:amount(input.amountSol)};
         } else if (action === 'still-open') {
           inputFields(input, ['requestId', 'confirmed', 'poolAddress', 'amountSol', 'range']);
           let range;try{range=parseStillRangeOptions(input.range);}catch(error){throw new StillPaperError((error as Error).message);}
@@ -221,7 +226,10 @@ export class StillPaperLedger {
           normalized = {basketId: input.basketId, poolAddresses: input.poolAddresses.map(address), amountLamports: amount(input.amountSol)};
         }
       }
-      const fingerprint = JSON.stringify({action, ...normalized}), key = account + ':' + id;
+      const canonical = JSON.stringify({action, ...normalized});
+      // Preserve idempotency without persisting the source wallet or its position address.
+      const fingerprint = action === 'still-clone' ? 'sha256:' + Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(account + ':' + canonical))), byte => byte.toString(16).padStart(2, '0')).join('') : canonical;
+      const key = account + ':' + id;
       const existing = this.preparing.get(key);
       if (existing) {
         if (existing.fingerprint !== fingerprint) throw new StillPaperError('That paper action is already preparing different details.', 409, 'still_request_conflict');
@@ -240,7 +248,7 @@ export class StillPaperLedger {
       const saved = await this.saved(account, id, fingerprint); if (saved) return saved;
       const current = await this.read(account);
       if (current.actionCount >= MAX_RECEIPTS && action !== 'still-close') throw new StillPaperError('This browser has reached its demo action limit. Saved positions are retained.', 409, 'still_journal_limit');
-      if ((action === 'still-open' || action === 'still-basket') && Number(input.amountLamports) > current.balanceLamports) throw new StillPaperError('There is not enough practice SOL for this amount.', 409, 'still_insufficient_balance');
+      if ((action === 'still-open' || action === 'still-clone' || action === 'still-basket') && Number(input.amountLamports) > current.balanceLamports) throw new StillPaperError('There is not enough practice SOL for this amount.', 409, 'still_insufficient_balance');
       if (action === 'still-close') {
         const position = current.positions.find(position => position.id === input.positionId);
         if (!position) throw new StillPaperError('This paper position is not in this browser journal.', 404, 'still_position_missing');
@@ -249,7 +257,7 @@ export class StillPaperLedger {
       return current;
     });
     if (snapshot instanceof Response) return snapshot;
-    const prepared = action === 'still-open' || action === 'still-basket' ? await this.prepare(action, input) : null;
+    const prepared = action === 'still-open' || action === 'still-clone' || action === 'still-basket' ? await this.prepare(action, input) : null;
     const marking = action === 'still-close' ? snapshot.positions.filter(position => position.id === input.positionId) : action === 'still-refresh' ? snapshot.positions.filter(position => position.status === 'open') : [];
     // Read each pool once, but mark and settle each distinct position independently.
     const observations = new Map<string, Awaited<ReturnType<typeof getStillPoolMark>>>();
@@ -295,7 +303,7 @@ export class StillPaperLedger {
   private async prepare(action: string, input: Record<string, unknown>): Promise<StillPaperPosition[]> {
     let mixRange: StillRangeOptions|undefined;
     let legs: {poolAddress: string; weightBps: number}[], basketId: string | null = null, basketName: string | null = null;
-    if (action === 'still-open') legs = [{poolAddress: input.poolAddress as string, weightBps: 10000}];
+    if (action === 'still-open'||action==='still-clone') legs = [{poolAddress: input.poolAddress as string, weightBps: 10000}];
     else {
       const basket = (await this.deps.baskets(this.env)).find(basket => basket.id === input.basketId);
       if (!basket || !Array.isArray(basket.legs) || basket.legs.length < 1 || basket.legs.length > 3) throw new StillPaperError('This basket does not yet have enough live pools. No positions were opened.', 409, 'still_basket_unavailable');
@@ -307,7 +315,7 @@ export class StillPaperLedger {
     const total = input.amountLamports as number; let remaining = total;
     const sizes = legs.map((leg, index) => {const size = index === legs.length - 1 ? remaining : Math.floor(total * leg.weightBps / 10000); remaining -= size; return size;});
     if (sizes.some(size => size < 1)) throw new StillPaperError('The paper amount is too small for this split.');
-    const results = await Promise.all(legs.map((leg, index) => this.deps.preflight(this.env, leg.poolAddress, sizes[index] / LAMPORTS_PER_SOL,(input.range as StillRangeOptions|undefined)||mixRange,true)));
+    const results = action==='still-clone'?[await this.deps.walletPreflight(this.env,input.walletAddress as string,input.poolAddress as string,input.positionAddress as string,total/LAMPORTS_PER_SOL)]:await Promise.all(legs.map((leg, index) => this.deps.preflight(this.env, leg.poolAddress, sizes[index] / LAMPORTS_PER_SOL,(input.range as StillRangeOptions|undefined)||mixRange,true)));
     const now = this.deps.now(), at = new Date(now).toISOString();
     return results.map((result, index) => {
       const leg = legs[index], size = sizes[index], ledger = result?.ledger;

@@ -4,7 +4,8 @@ import {runInNewContext} from 'node:vm';
 
 const source = await readFile('public/still-demo.js', 'utf8');
 const lessons = await readFile('public/still-lessons.js', 'utf8');
-const browserSource = lessons.replace(/^export /gm, '') + source.replace(/^import .*from '\.\/still-lessons.js';$/m, '').replace(/^export /gm, '');
+const walletClient = await readFile('public/still-wallet-client.js','utf8');
+const browserSource = walletClient.replace(/^export /gm,'') + lessons.replace(/^export /gm, '') + source.replace(/^import .*from '\.\/still-(lessons|wallet-client).js';$/gm, '').replace(/^export /gm, '');
 const helpers = runInNewContext(browserSource + '\n({esc,number,sol,groupPositions,requestFingerprint,readOnboarding,sortForPreference})', {Intl});
 assert.equal(helpers.sol(null), 'Unavailable');
 assert.equal(helpers.sol(0), '0 SOL');
@@ -34,26 +35,36 @@ class Element {
   async dispatch(kind, event = {}) {for (const callback of this.listeners.get(kind) || []) await callback(event);}
 }
 const flush = async () => {for(let i=0;i<5;i++) await new Promise(resolve => setImmediate(resolve));};
-function fixture() {
+function fixture({initialHash="",walletPositions=[],walletStatus="available"}={}) {
   let clock = Date.parse('2026-10-09T12:00:00.000Z'), serial = 0;
   const address = 'A'.repeat(32), requests = [], stored = new Map(), steps = ['pools','preflight','positions','baskets'].map(go => Object.assign(new Element(),{dataset:{go}}));
-  const ids = ['screen','confirmation','notice','home','journey','step-preflight','build-version','confirm-submit','confirm-cancel','confirm-error','confirm-content','paper-amount'];
+  const ids = ['screen','confirmation','notice','home','journey','step-preflight','build-version','confirm-submit','confirm-cancel','confirm-error','confirm-content','paper-amount','wallet-address'];
   const elements = Object.fromEntries(ids.map(id => ['#'+id,new Element()]));
   elements['#confirmation'].form = new Element(); elements['#screen'].deposit = new Element();
   const document = new Element(); document.querySelector = selector => elements[selector]; document.querySelectorAll = () => steps;
   const window = new Element(); window.scrollTo = () => {};
-  const location = {hash:''}; const history = {pushState(_state,_unused,hash){location.hash=hash;},replaceState(_state,_unused,hash){location.hash=hash;}};
+  const location = {hash:initialHash,pathname:'/',search:''}; const history = {pushState(_state,_unused,hash){location.hash=hash;},replaceState(_state,_unused,hash){location.hash=hash;}};
   const evidence = value => ({value,status:value === null?'unavailable':'available',asOf:new Date(clock).toISOString(),source:'Synthetic observed source',note:'Synthetic note'});
   const pool = {address,id:'solana:'+address,name:'<img src=x onerror="run()">/SOL',binStep:evidence(100),risk:{label:'Busy',reason:'<script>not code</script>'},tvlUsd:evidence(50000),fees24hFraction:evidence(.01),feeTrend:evidence(.2),ageHours:evidence(100),priceSol:evidence(1)};
   const account = {balanceSol:10,seededSol:10,seedNote:'Practice seed',settlementNote:'Gross model only',feeModelNote:'Modelled fees only',positions:[]};
   const preflight = () => ({poolAddress:address,name:pool.name,sizeSol:.5,fetchedAt:new Date(clock).toISOString(),canOpen:true,priceSol:evidence(1),range:{bins:[{sol:.5}],floorPriceSol:.6,topPriceSol:.95,depthFraction:.4,binCount:3,alignment:'estimated',source:'Synthetic model',asOf:new Date(clock).toISOString(),note:'No live execution'},expectedFeesPerDaySol:evidence(.001),transferFeeBps:evidence(null),entryCostSol:evidence(null),exitCostSol:evidence(null),entryConversionSol:evidence(0),exitConversionSol:evidence(null),networkCostSol:evidence(null),missingEvidence:['Costs'],verdict:{label:'Marginal',reason:'<script>unknown costs</script>'},scenarios:[.2,.5].map(dropFraction=>({dropFraction,grossValueSol:evidence(.4),grossPnlSol:evidence(-.1),netValueSol:evidence(null)}))});
-  let failMode = null;
+  let failMode = null,accountReady=false;
   const fetch = async (path, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : undefined; requests.push({path,method:options.method,body});
     if(path === '/api/version')return new Response(JSON.stringify({gitSha:'abcdef0123'}));
     if(path === '/api/still/pools')return new Response(JSON.stringify({pools:[pool],updatedAt:new Date(clock).toISOString()}));
     if(path.startsWith('/api/still/preflight?'))return new Response(JSON.stringify(preflight()));
-    if(path === '/api/paper/still-account')return new Response(JSON.stringify({paper:true,account}));
+    if(path.startsWith('/api/still/wallet?'))return new Response(JSON.stringify({status:walletStatus,positions:walletPositions,source:'Synthetic public index',asOf:new Date(clock).toISOString()}));
+    if(path.startsWith('/api/still/wallet-position?'))return new Response(JSON.stringify({status:'available',canPractise:true,checks:[],valueSol:1,feesSol:0,feeRateHourly:.001,feeAsOf:new Date(clock).toISOString(),floorPriceSol:.5,topPriceSol:1.5,distanceToFloorPct:50,inRange:true,source:'Synthetic confirmed bins',asOf:new Date(clock).toISOString(),exitQuote:{costSol:.01,asOf:new Date(clock).toISOString(),source:'Synthetic quote'}}));
+    if(path === '/api/paper/still-account'){
+      if(failMode==='account')return new Response(JSON.stringify({error:'Synthetic account temporarily unavailable'}),{status:403});
+      accountReady=true;return new Response(JSON.stringify({paper:true,account}));
+    }
+    if(path === '/api/paper/still-clone'){
+      if(!accountReady)return new Response(JSON.stringify({error:'Paper account cookie missing'}),{status:401});
+      if(failMode==='network')throw new Error('Synthetic interrupted response');
+      return new Response(JSON.stringify({paper:true,account,receipt:{requestId:body.requestId,action:'still-clone',positionIds:['paper:clone-1'],amountSol:.5}}));
+    }
     if(path === '/api/paper/still-open'){
       if(failMode === 'network')throw new Error('Synthetic interrupted response');
       if(failMode === 'invalid')return new Response('{}');
@@ -66,7 +77,7 @@ function fixture() {
   runInNewContext(browserSource, {document,window,location,history,sessionStorage,localStorage:sessionStorage,fetch,Date:TestDate,URLSearchParams,AbortController,Intl,crypto:{randomUUID:()=>`request-${++serial}`},setTimeout:()=>1,clearTimeout:()=>{}});
   const click = async dataset => {await document.dispatch('click',{preventDefault(){},target:{closest:selector=>selector==='[data-lesson]'&&!dataset.lesson?null:({dataset,disabled:false})}}); await flush();};
   const confirm = async () => {await elements['#confirm-submit'].dispatch('click'); await flush();};
-  return {elements,requests,stored,click,confirm,address,async ready(){await flush();await click({go:'pools'});await click({pool:address});},advance(ms){clock+=ms;},fail(value){failMode=value;}};
+  return {elements,requests,stored,click,confirm,address,window,location,async ready(){await flush();await click({go:'pools'});await click({pool:address});},advance(ms){clock+=ms;},fail(value){failMode=value;}};
 }
 const browser = fixture(); await browser.ready();
 assert.ok(browser.elements['#screen'].innerHTML.includes('&lt;img'), 'Source names are escaped in rendered pre-flight');
@@ -113,3 +124,71 @@ assert.ok(reading.elements['#screen'].innerHTML.includes('Why exit cost matters 
 assert.deepEqual(JSON.parse(reading.stored.get('still:lessons:v1')),[3]);
 await reading.click({lesson:'4'}); assert.deepEqual(JSON.parse(reading.stored.get('still:lessons:v1')),[3,4]);
 assert.equal(reading.requests.filter(r=>r.method==='POST').length,0,'Reading lessons never changes paper money');
+
+const walletBrowser=fixture();await walletBrowser.click({go:'wallet'});
+assert.match(walletBrowser.elements['#screen'].innerHTML,/Connect Phantom/);
+assert.match(walletBrowser.elements['#screen'].innerHTML,/Read-only. No signing./);
+await walletBrowser.click({action:'wallet-connect'});
+assert.match(walletBrowser.elements['#screen'].innerHTML,/Phantom isn&#39;t available here/);
+assert.equal(walletBrowser.requests.filter(r=>r.method==='POST').length,0);
+walletBrowser.elements['#wallet-address'].value='So11111111111111111111111111111111111111112';
+await walletBrowser.elements['#screen'].dispatch('submit',{target:{id:'wallet-form'},preventDefault(){}});await flush();
+assert.match(walletBrowser.elements['#screen'].innerHTML,/No open Meteora positions found/);
+assert.equal(walletBrowser.stored.get('still:wallet-address:v1'),'So11111111111111111111111111111111111111112');
+assert.equal(walletBrowser.requests.filter(r=>r.method==='POST').length,0,'Wallet browsing never mutates paper money or signs');
+await walletBrowser.click({action:'wallet-forget'});assert.equal(walletBrowser.stored.has('still:wallet-address:v1'),false);
+
+
+const walletAddress='So11111111111111111111111111111111111111112';
+const livePosition={positionAddress:'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',poolAddress:walletAddress,name:'Synthetic/SOL',supported:true};
+const pasteWallet=async browser=>{browser.elements['#wallet-address'].value=walletAddress;await browser.elements['#screen'].dispatch('submit',{target:{id:'wallet-form'},preventDefault(){}});await flush();};
+const directWallet=fixture({initialHash:'#wallet',walletPositions:[livePosition]});await flush();await pasteWallet(directWallet);
+assert.match(directWallet.elements['#screen'].innerHTML,/Practise this on paper/);
+assert.equal(directWallet.requests.filter(r=>r.path==='/api/paper/still-account').length,0,'Read-only wallet browsing does not create a practice account');
+assert.equal(directWallet.requests.filter(r=>r.method==='POST').length,0);
+await directWallet.click({walletPractise:livePosition.positionAddress});
+assert.equal(directWallet.elements['#confirmation'].open,true);
+assert.equal(directWallet.requests.filter(r=>r.method==='POST').length,0,'Copying a live setup requires explicit paper confirmation');
+await directWallet.confirm();
+const cloneIndex=directWallet.requests.findIndex(r=>r.path==='/api/paper/still-clone');
+const accountIndex=directWallet.requests.findIndex(r=>r.path==='/api/paper/still-account');
+assert.ok(accountIndex>=0&&cloneIndex>accountIndex,'Direct #wallet confirmation establishes the paper cookie before cloning');
+assert.equal(directWallet.requests[cloneIndex].body.positionAddress,livePosition.positionAddress);
+assert.equal(directWallet.requests[cloneIndex].body.walletAddress,walletAddress);
+assert.equal(directWallet.requests[cloneIndex].body.confirmed,true);
+assert.equal(directWallet.elements['#confirmation'].open,false);
+assert.equal(directWallet.location.hash,'#positions');
+assert.deepEqual([...directWallet.stored.keys()],['still:wallet-address:v1'],'Wallet results and balances never persist locally; only the public address remains after the paper receipt');
+
+const recoveredWallet=fixture({initialHash:'#wallet'});await flush();
+const recovery={action:'still-clone',body:{requestId:'saved-clone-request',walletAddress,poolAddress:walletAddress,positionAddress:livePosition.positionAddress,amountSol:'0.5',confirmed:true},description:'Recover the confirmed paper copy.'};
+recoveredWallet.stored.set('still:guided:pending:v1',JSON.stringify(recovery));await recoveredWallet.click({go:'wallet'});
+assert.match(recoveredWallet.elements['#screen'].innerHTML,/Check saved action/,'Recovery stays visible on the direct wallet route');
+await recoveredWallet.click({action:'resume'});recoveredWallet.fail('account');await recoveredWallet.confirm();
+assert.deepEqual(JSON.parse(recoveredWallet.stored.get('still:guided:pending:v1')),recovery,'A failed account bootstrap cannot erase the previously confirmed recovery request');
+assert.equal(recoveredWallet.requests.filter(r=>r.method==='POST').length,0,'Failed account bootstrap cannot attempt a clone');
+recoveredWallet.fail(null);await recoveredWallet.confirm();
+assert.deepEqual(recoveredWallet.requests.find(r=>r.method==='POST').body,recovery.body,'Recovery after bootstrap reuses the same exact request');
+
+const unavailableWallet=fixture({initialHash:'#wallet',walletStatus:'unavailable'});await flush();await pasteWallet(unavailableWallet);
+assert.match(unavailableWallet.elements['#screen'].innerHTML,/Positions are unavailable right now/);
+assert.ok(!unavailableWallet.elements['#screen'].innerHTML.includes('No open Meteora positions found'),'Failed reads cannot claim that a wallet is empty');
+await unavailableWallet.click({action:'wallet-retry'});
+assert.equal(unavailableWallet.requests.filter(r=>r.path.startsWith('/api/still/wallet?')).length,2);
+
+const lateWallet=fixture({initialHash:'#wallet'});await flush();
+let resolveConnection;let signingReads=0;
+const phantom={isPhantom:true,connect:()=>new Promise(resolve=>{resolveConnection=resolve;})};
+for(const method of ['signTransaction','signAllTransactions','signAndSendTransaction','signMessage','request'])Object.defineProperty(phantom,method,{get(){signingReads++;throw Error('Signing is forbidden');}});
+lateWallet.window.phantom={solana:phantom};
+const connecting=lateWallet.click({action:'wallet-connect'});await flush();
+await lateWallet.click({go:'home'});await lateWallet.click({go:'wallet'});
+resolveConnection({publicKey:{toBase58:()=>walletAddress}});await connecting;
+assert.equal(lateWallet.requests.filter(r=>r.path.startsWith('/api/still/wallet?')).length,0,'A late Phantom result cannot replace a later navigation state');
+assert.equal(lateWallet.stored.has('still:wallet-address:v1'),false);
+assert.equal(signingReads,0,'The integrated wallet flow never even accesses signing methods');
+const navigateAway=fixture({initialHash:'#wallet',walletPositions:[livePosition]});await flush();await pasteWallet(navigateAway);await navigateAway.click({walletPractise:livePosition.positionAddress});
+navigateAway.location.hash='#home';await navigateAway.window.dispatch('popstate');await flush();
+assert.equal(navigateAway.elements['#confirmation'].open,false,'Leaving the wallet dismisses an unsubmitted copy review');
+await navigateAway.confirm();assert.equal(navigateAway.requests.filter(r=>r.method==='POST').length,0,'A dismissed review cannot be submitted by a stale button event');
+console.log('Still wallet UI: direct-entry account bootstrap, explicit paper copy, recovery retention, unavailable states, navigation races and no signing passed.');

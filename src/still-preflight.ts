@@ -134,7 +134,7 @@ export function buildStillBaskets(snapshot: Snapshot, now = Date.now()): StillBa
 }
 
 export interface StillRange {
-  shape: 'Spot'|'BidAsk'|'Curve'; floorPriceSol: number; topPriceSol: number; binStep: number; binCount: number;
+  shape: 'Spot'|'BidAsk'|'Curve'|'Observed wallet allocation'; floorPriceSol: number; topPriceSol: number; binStep: number; binCount: number;
   depthFraction: number; bins: ResearchRangeBin[]; alignment: string; source: string; asOf: string; note: string;
 }
 export interface StillScenario {
@@ -309,7 +309,8 @@ export async function getStillBaskets(env: Env): Promise<StillBasket[]> {
   return buildStillBaskets(await getSnapshot(env));
 }
 export async function getStillPoolMark(env: Env, poolAddress: string) {
-  const snapshot = await getSnapshot(env), pool = snapshot.pools.find(item => item.address === poolAddress || item.id === poolAddress);
+  const snapshot = await getSnapshot(env);
+  const pool = snapshot.pools.find(item => item.address === poolAddress || item.id === poolAddress) || (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(poolAddress)?await fetchMeteoraPool(poolAddress).catch(()=>null):null);
   if (!pool || pool.venue !== 'meteora-dlmm' || !researchToken(pool)) return null;
   const now = Date.now(), current = recent(pool.fetchedAt, STILL_MAX_PRICE_AGE_MS, now), token = researchToken(pool), rates = researchFeeRates(pool);
   return {poolAddress: pool.address, name: pool.pair, priceSol: current && positive(token?.priceSol) ? token.priceSol : null,

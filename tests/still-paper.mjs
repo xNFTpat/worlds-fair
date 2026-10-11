@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
 const dir = await mkdtemp(join(tmpdir(), 'still-paper-'));
-await build({entryPoints: ['src/still-paper.ts', 'src/worldsfair-paper.ts'], outdir: dir, bundle: true, platform: 'node', format: 'esm', mainFields: ['main'], outExtension: {'.js': '.mjs'}});
+await build({entryPoints: ['src/still-paper.ts', 'src/worldsfair-paper.ts'], outdir: dir, bundle: true, platform: 'node', format: 'esm', mainFields: ['main'], banner: {js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);"}, outExtension: {'.js': '.mjs'}});
 const {StillPaperLedger, markStillPosition, STILL_SETTLEMENT_NOTE} = await import(join(dir, 'still-paper.mjs'));
 const {worldsfairPaperRoute} = await import(join(dir, 'worldsfair-paper.mjs'));
 class Storage {
@@ -24,7 +24,9 @@ const accountA = 'a'.repeat(64), accountB = 'b'.repeat(64);
 const storage = new Storage(); let queue = Promise.resolve();
 const ctx = {storage, blockConcurrencyWhile(fn) {const result = queue.then(fn); queue = result.catch(() => {}); return result;}};
 const observation = poolAddress => ({poolAddress, name: 'TEST/SOL', priceSol: 1, fetchedAt: new Date(now).toISOString(), feeRateHourly: .002, feeRateAsOf: new Date(now).toISOString(), source: 'Synthetic test pool'});
-let receivedRange;
+let receivedRange, walletFailure = null;
+const walletReads = [];
+const walletA = 'D'.repeat(44), walletB = 'E'.repeat(44), livePositionA = 'F'.repeat(44), livePositionB = 'G'.repeat(44);
 const preflight = async (_env, poolAddress, amountSol, range) => {
   receivedRange=range;
   if (unavailablePool === poolAddress) return null;
@@ -35,8 +37,20 @@ const preflight = async (_env, poolAddress, amountSol, range) => {
     range: {shape: 'BidAsk', floorPriceSol: .6, topPriceSol: .95, bins, note: 'Synthetic ideal bins'},
     ledger: {priceSol: 1, feeRateHourly: .002, entryCostsSol: null, exitCostsSol: null, transferFeeBps: null, bins}};
 };
+const walletPreflight = async (_env, walletAddress, poolAddress, positionAddress, amountSol) => {
+  walletReads.push({walletAddress, poolAddress, positionAddress, amountSol});
+  if (walletFailure === 'unavailable') return null;
+  if (walletFailure === 'throws') throw Error('Synthetic public read failed');
+  const base = await preflight(_env, poolAddress, amountSol), tokenWeight = positionAddress === livePositionA ? .25 : .5;
+  const bins = [{priceSol: .8, sol: amountSol * (1 - tokenWeight), token: 0}, {priceSol: 1.2, sol: 0, token: amountSol * tokenWeight}];
+  if (walletFailure === 'funding') bins[0].sol += .1;
+  return {...base, poolAddress: walletFailure === 'wrong-pool' ? poolB : poolAddress,
+    fetchedAt: walletFailure === 'stale' ? new Date(now - 11 * 60000).toISOString() : base.fetchedAt,
+    range: {shape: 'Observed live bins', floorPriceSol: .8, topPriceSol: 1.2, bins, note: 'Synthetic read-only position: ' + positionAddress},
+    ledger: {...base.ledger, bins}};
+};
 let basketLegs = [{poolAddress: poolA, weightBps: 3333}, {poolAddress: poolB, weightBps: 3333}, {poolAddress: poolC, weightBps: 3334}];
-const deps = {now: () => now, id: () => 'fixture-' + String(++counter).padStart(8, '0'), preflight,
+const deps = {walletPreflight, now: () => now, id: () => 'fixture-' + String(++counter).padStart(8, '0'), preflight,
   baskets: async () => [{id: 'steady', name: 'Steady', legs: basketLegs}], mark: async (_env, poolAddress) => unavailableMark ? null : observation(poolAddress)};
 let ledger = new StillPaperLedger(ctx, {}, deps);
 const call = async (action, input, account = accountA) => {const response = await ledger.handle(account, action, input); return {status: response.status, body: await response.json()};};
@@ -184,6 +198,66 @@ assert.equal((await call('still-open',customOpen,customAccount)).body.account.ba
 assert.equal((await call('still-open',{...customOpen,range:{...customRange,shape:'Curve'}},customAccount)).status,409);
 assert.equal((await call('still-open',{...open('bad-range-001'),range:{...customRange,floorPct:NaN}},customAccount)).status,400);
 
+// Wallet practice clones trust only the server's exact observed setup, never client bins.
+const cloneAccount = 'e'.repeat(64);
+const cloneRequest = {walletAddress: walletA, poolAddress: poolA, positionAddress: livePositionA, amountSol: '0.375000001', requestId: 'wallet-clone-001', confirmed: true};
+const cloneBefore = (await call('still-account', undefined, cloneAccount)).body.account;
+for (const confirmed of [false, undefined]) assert.equal((await call('still-clone', {...cloneRequest, confirmed}, cloneAccount)).status, 400, 'cloning needs explicit paper confirmation');
+for (const extra of [{bins: [{priceSol: 1, sol: 1000, token: 0}]}, {range: customRange}, {entryCostsSol: 0}, {sizeSol: 50}]) {
+  assert.equal((await call('still-clone', {...cloneRequest, ...extra}, cloneAccount)).status, 400, 'client inventory and cost overrides are rejected');
+}
+for (const field of ['walletAddress', 'poolAddress', 'positionAddress']) {
+  assert.equal((await call('still-clone', {...cloneRequest, [field]: 'invalid-address'}, cloneAccount)).status, 400, 'every live identity must be a valid address');
+}
+for (const amountSol of ['0', '-0.5', '11', '0.1234567891', '1e1']) assert.equal((await call('still-clone', {...cloneRequest, amountSol}, cloneAccount)).status, 400, 'clone amount follows exact paper lamport rules');
+assert.equal(walletReads.length, 0, 'invalid clone requests are rejected before any public wallet lookup');
+assert.deepEqual((await call('still-account', undefined, cloneAccount)).body.account, cloneBefore);
+const duplicateClones = await Promise.all([call('still-clone', cloneRequest, cloneAccount), call('still-clone', cloneRequest, cloneAccount)]);
+assert(duplicateClones.every(r => r.status === 200));
+assert.deepEqual(duplicateClones[0].body.receipt, duplicateClones[1].body.receipt);
+assert.equal(walletReads.length, 1, 'concurrent duplicate confirmations share one authoritative read');
+assert.deepEqual(walletReads[0], {walletAddress: walletA, poolAddress: poolA, positionAddress: livePositionA, amountSol: .375000001}, 'all exact selected identities and requested SOL amount reach the provider');
+let cloneResult = duplicateClones[0].body, clonedPosition = cloneResult.account.positions[0];
+assert.equal(cloneResult.account.balanceLamports, 9624999999); assert.equal(cloneResult.account.positions.length, 1);
+assert.equal(clonedPosition.amountLamports, 375000001); assert.equal(clonedPosition.amountSol, .375000001);
+assert.equal(clonedPosition.range.shape, 'Observed live bins');
+assert.equal(clonedPosition.range.floorPriceSol, .8); assert.equal(clonedPosition.range.topPriceSol, 1.2);
+near(clonedPosition.range.bins[0].sol, .375000001 * .75); near(clonedPosition.range.bins[1].token, .375000001 * .25);
+near(clonedPosition.range.bins.reduce((sum, b) => sum + b.sol + b.token * clonedPosition.entryPriceSol, 0), .375000001);
+assert.notEqual(clonedPosition.positionAddress, livePositionA, 'paper clone gets its own address rather than overwriting the live identity');
+assert.match(clonedPosition.positionAddress, /^paper:/);
+const savedClone = await storage.get('still:receipt:' + cloneAccount + ':' + cloneRequest.requestId);
+assert.deepEqual(savedClone.positionIds, [clonedPosition.id]);
+assert.match(savedClone.fingerprint, /^sha256:[a-f0-9]{64}$/);
+assert.ok(!JSON.stringify(savedClone).includes(walletA), 'the source wallet is not persisted in its receipt');
+assert.ok(!JSON.stringify(savedClone).includes(livePositionA), 'the live position identity is not persisted in its receipt');
+ledger = new StillPaperLedger(ctx, {}, deps);
+assert.deepEqual((await call('still-clone', cloneRequest, cloneAccount)).body.receipt, cloneResult.receipt, 'clone receipt survives durable-object reconstruction');
+assert.equal(walletReads.length, 1, 'committed retry does not repeat wallet provider work');
+for (const changed of [{walletAddress: walletB}, {positionAddress: livePositionB}, {poolAddress: poolB}, {amountSol: '0.5'}]) {
+  assert.equal((await call('still-clone', {...cloneRequest, ...changed}, cloneAccount)).status, 409, 'same request ID cannot retarget a different observed setup');
+}
+assert.equal(walletReads.length, 1, 'replay conflicts are rejected before provider reads');
+cloneResult = (await call('still-clone', {...cloneRequest, positionAddress: livePositionB, amountSol: '0.5', requestId: 'wallet-clone-002'}, cloneAccount)).body;
+assert.equal(cloneResult.account.positions.length, 2); assert.equal(cloneResult.account.balanceLamports, 9124999999);
+assert.equal(cloneResult.account.groups.length, 1); assert.equal(cloneResult.account.groups[0].openCount, 2);
+assert.equal(new Set(cloneResult.account.positions.map(p => p.positionAddress)).size, 2, 'same-pool source positions create separate paper records');
+assert.deepEqual(cloneResult.account.groups[0].positionIds, cloneResult.account.positions.map(p => p.id));
+near(cloneResult.account.positions[1].range.bins[1].token, .25, 1e-12);
+const beforeFailedClone = structuredClone(cloneResult.account), recoveryClone = {...cloneRequest, amountSol: '0.125000009', requestId: 'wallet-clone-retry'};
+for (const [failure, expected] of [['unavailable', 409], ['throws', 503], ['wrong-pool', 409], ['stale', 409], ['funding', 409]]) {
+  walletFailure = failure;
+  assert.equal((await call('still-clone', recoveryClone, cloneAccount)).status, expected, 'failed or incoherent wallet evidence cannot open a clone: ' + failure);
+  assert.deepEqual((await call('still-account', undefined, cloneAccount)).body.account, beforeFailedClone, 'failed public reads cannot debit or alter paper positions');
+  assert.equal(await storage.get('still:receipt:' + cloneAccount + ':' + recoveryClone.requestId), undefined, 'failed read does not consume the idempotency ID');
+}
+walletFailure = null;
+assert.equal((await call('still-clone', recoveryClone, cloneAccount)).status, 200, 'the original failed request can retry after evidence recovers');
+const recoveredClone = (await call('still-account', undefined, cloneAccount)).body.account;
+assert.equal(recoveredClone.balanceLamports, 8999999990); assert.equal(recoveredClone.positions.length, 3);
+assert.equal(new Set(recoveredClone.positions.map(p => p.positionAddress)).size, 3, 'repeating one source position intentionally still creates a new independent paper address');
+assert.equal((await call('still-clone', recoveryClone, cloneAccount)).body.account.positions.length, 3, 'retry never creates an extra copy');
+
 // Public route keeps existing HttpOnly session and strict same-origin mutation checks.
 let forwarded;
 const env = {RANGE_ALERTS: {idFromName: name => name, get: () => ({fetch: async (url, options) => {forwarded = {url, options}; return new Response('{}', {headers: {'content-type': 'application/json'}});}})}};
@@ -196,4 +270,12 @@ assert.equal(response.status, 403);
 response = await worldsfairPaperRoute(new Request(url + 'still-open', {method: 'POST', headers: {'content-type': 'application/json', origin: 'https://still.example', cookie}, body: JSON.stringify(firstRequest)}), env);
 assert.equal(response.status, 200); assert.match(forwarded.url, /worldsfair-paper\/still-open$/);
 assert.equal(forwarded.options.headers['x-worldsfair-account'].length, 64); assert.ok(!forwarded.url.includes(cookie));
-console.log('Still paper ledger: identity, atomic baskets, confirmations, persistent idempotency, evidence gaps, gross settlement, and session isolation passed.');
+response = await worldsfairPaperRoute(new Request(url + 'still-clone', {method: 'POST', headers: {'content-type': 'application/json', origin: 'https://attacker.example', cookie}, body: JSON.stringify(cloneRequest)}), env);
+assert.equal(response.status, 403, 'wallet cloning retains same-origin mutation protection');
+response = await worldsfairPaperRoute(new Request(url + 'still-clone', {method: 'POST', headers: {'content-type': 'application/json', origin: 'https://still.example'}, body: JSON.stringify(cloneRequest)}), env);
+assert.equal(response.status, 401, 'wallet cloning needs the existing private paper session');
+response = await worldsfairPaperRoute(new Request(url + 'still-clone', {method: 'POST', headers: {'content-type': 'application/json', origin: 'https://still.example', cookie}, body: JSON.stringify(cloneRequest)}), env);
+assert.equal(response.status, 200); assert.match(forwarded.url, /worldsfair-paper\/still-clone$/);
+assert.deepEqual(JSON.parse(forwarded.options.body), cloneRequest, 'router preserves exact clone selection for server validation');
+assert.equal(forwarded.options.headers['x-worldsfair-account'].length, 64);
+console.log('Still paper ledger: identity, atomic baskets, confirmations, persistent idempotency, evidence gaps, gross settlement, exact read-only wallet clones, and session isolation passed.');

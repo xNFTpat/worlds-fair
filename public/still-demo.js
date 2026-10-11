@@ -1,3 +1,4 @@
+import {normalizeWalletAddress,connectPhantomAddress} from './still-wallet-client.js';
 import {STILL_LESSONS} from './still-lessons.js';
 // This page can only call read-only evidence routes and the isolated paper ledger.
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -55,7 +56,7 @@ const screen = $('#screen'), dialog = $('#confirmation');
 let dialogAction = null, submitting = false, noticeTimer;
 const pendingKey = 'still:guided:pending:v1';
 let pendingReadError = false;
-function readPending() { try { const value = JSON.parse(sessionStorage.getItem(pendingKey) || 'null'); pendingReadError = !!value && (!['still-open','still-basket','still-close','still-follow','still-unfollow','still-bot','still-park'].includes(value.action) || !value.body?.requestId); return pendingReadError ? {invalid:true} : value; } catch { pendingReadError = true; return {invalid:true}; } }
+function readPending() { try { const value = JSON.parse(sessionStorage.getItem(pendingKey) || 'null'); pendingReadError = !!value && (!['still-open','still-clone','still-basket','still-close','still-follow','still-unfollow','still-bot','still-park'].includes(value.action) || !value.body?.requestId); return pendingReadError ? {invalid:true} : value; } catch { pendingReadError = true; return {invalid:true}; } }
 function savePending(pending) { sessionStorage.setItem(pendingKey, JSON.stringify(pending)); state.pending = pending; }
 function clearPending() { sessionStorage.removeItem(pendingKey); state.pending = null; }
 async function api(path, body) {
@@ -74,17 +75,19 @@ function loading(message, count = 2) { screen.setAttribute('aria-busy','true'); 
 function show(html) { screen.setAttribute('aria-busy','false'); screen.innerHTML = html; }
 function errorPanel(message, retry = state.view) { show(`<div class="empty error"><h3>This reading is unavailable</h3><p>${esc(message)}</p><button class="primary" data-go="${esc(retry)}">Try again</button> <button class="text-button" data-go="pools">Choose a pool</button></div>`); }
 function pendingBanner() { const pending = readPending(); if (pendingReadError) return `<div class="panel error"><h3>Saved action unavailable</h3><p class="note">Browser storage could not be read. Check your positions before trying another deposit. Restore storage access and reload to recover the saved request.</p><button class="secondary" data-go="positions">Check positions</button></div>`; return pending ? `<div class="panel"><h3>A paper action needs checking</h3><p class="note">${esc(pending.description || 'The last response was interrupted.')} Retry the saved request to check its result without opening or closing twice.</p><button class="secondary" data-action="resume">Check saved action</button></div>` : ''; }
-async function ensureAccount() { if (!state.account) { const data = await api('/api/paper/still-account'); state.account = data.account; } return state.account; }
+async function ensureAccount() { if (!state.account) { const data = await api('/api/paper/still-account'); if(!data?.paper||!data.account||!Array.isArray(data.account.positions)||!finite(data.account.balanceSol))throw new Error('Your paper account could not be read. Try again before opening a position.'); state.account = data.account; } return state.account; }
 function navigate(view, replace = false) {
-  if (!['home','pools','preflight','positions','baskets','basket-preflight','onboarding','follow','park','learn'].includes(view)) view = 'home';
+  if (!['home','pools','preflight','positions','baskets','basket-preflight','onboarding','follow','park','learn','wallet'].includes(view)) view = 'home';
   if (view === 'preflight' && !state.pool) view = 'pools';
   if (view === 'basket-preflight' && !state.basket) view = 'baskets';
+  if(view!==state.view&&dialog.open&&!submitting){dialog.close();dialogAction=null;}
   const path = view === 'home' ? location.pathname + location.search : '#' + view;
   if (location.hash !== path) history[replace ? 'replaceState':'pushState'](null,'',path);
+  if(state.view==='wallet'&&view!=='wallet'){walletGeneration++;walletBusy=false;walletReading.clear();}
   state.view = view;
   $('#home').hidden = view !== 'home'; if($('#pillars'))$('#pillars').hidden=view!=='home'; $('#journey').hidden = view === 'home';
   for (const button of document.querySelectorAll('.steps button')) button.setAttribute('aria-current', button.dataset.go === (view === 'basket-preflight' ? 'baskets' : view) ? 'step':'false');
-  for(const button of document.querySelectorAll('.primary-nav button,.mobile-nav button'))button.setAttribute('aria-current',button.dataset.go===(view==='preflight'||view==='basket-preflight'||view==='baskets'?'pools':view)?'page':'false');
+  for(const button of document.querySelectorAll('.primary-nav button,.mobile-nav button'))button.setAttribute('aria-current',button.dataset.go===(view==='preflight'||view==='basket-preflight'||view==='baskets'?'pools':view==='wallet'?'positions':view)?'page':'false');
   $('#step-preflight').disabled = !state.pool;
   window.scrollTo({top:0,behavior:'instant'});
   if (view !== 'home') loadView(view); else {state.load++;onboardingStep=0;}
@@ -93,6 +96,7 @@ async function loadView(view) {
   const load = ++state.load;
   loading({pools:'Loading pools from Meteora…',positions:'Marking positions to live prices…',baskets:'Loading pools from Meteora…',preflight:'Running checks…','basket-preflight':'Running checks…',follow:'Loading strategies…',park:'Getting live vault and basket rates…',learn:'Loading lesson…'}[view]||'Getting live pool data…');
   try {
+    if(view==='wallet'){renderWallet();return;}
     if(view==='onboarding'){renderOnboarding();ensureAccount().then(()=>{if(load===state.load)renderOnboarding();}).catch(()=>{});return;}
     if(view==='follow'){const data=await api('/api/paper/still-account');if(load!==state.load)return;state.account=data.account;state.strategies=data.strategies||[];renderFollow();return;}
     if(view==='park'){const [account,rates]=await Promise.all([api('/api/paper/still-account'),api('/api/still/park').catch(()=>null)]);if(load!==state.load)return;state.account=account.account;parkData=rates;renderPark();return;}
@@ -183,25 +187,49 @@ function positionCard(position) {
   const closed=position.status==='closed', held=closed?holdLabel(Math.max(0,Math.round((Date.parse(position.closedAt)-Date.parse(position.openedAt))/60000))):null;
   return `<article class="position-card ${recentPositions.has(position.id)?'new-position':''}" id="position-${esc(position.id)}">${closed?`<p>${esc(position.name)} · held ${held}</p><p>Paper fees ${sol(mark.feesSol)} · Paper costs ${sol(finite(position.entryCostsSol)&&finite(position.exitCostsSol)?position.entryCostsSol+position.exitCostsSol:null)} · Paper net ${signed(mark.netPnlSol)}</p><small class="source">Paper net on the saved entry-cost basis, not an executed exit. ${esc(mark.source)} · ${esc(date(mark.asOf))}</small>`:''}<div class="card-title"><h3>${position.status === 'closed' ? 'Closed paper position' : status}</h3><span class="tag">${position.basketName ? esc(position.basketName)+' mix' : 'Paper'}</span></div><code class="position-id">${esc(position.positionAddress)}</code>${reminder}${position.examplePark?'<p class="note">Separate Park example. Closing does not credit the practice balance.</p>':''}${position.strategyName?`<p class="note">Paper strategy: ${esc(position.strategyName)}</p>`:''}<div class="metrics">${metric('Paper inventory P&L vs holding SOL',markEvidence(position,mark.grossPnlSol),signed)}${metric('Paper net · entry-cost basis',{value:mark.netPnlSol,source:'Paper inventory and fees minus saved entry cost model',asOf:position.costModel?.asOf||mark.asOf},signed)}${metric('Paper exit estimate at entry',{value:position.exitCostsSol,source:position.costModel?.source||'Entry cost evidence unavailable',asOf:position.costModel?.asOf||null})}${metric('Paper fees · modelled',markEvidence(position,mark.feesSol))}${metric('Paper distance to floor',markEvidence(position,mark.distanceToFloorPct),value=>finite(value)?`${number(value,2)}%`:'Unavailable')}${metric('Paper inventory value',markEvidence(position,mark.grossValueSol))}<div class="metric"><span>Original paper amount</span><strong>${sol(position.amountSol)}</strong><small class="source">Your confirmed paper allocation · ${esc(date(position.openedAt))}</small></div></div><p class="note">${position.status==='closed' ? `Settled ${sol(position.settledLamports/1e9)} on ${esc(date(position.closedAt))}. ` : ''}${esc(position.settlementNote)}</p><details class="evidence-details"><summary>Range & evidence</summary><p>Floor ${number(position.range.floorPriceSol,9)} SOL/token · top ${number(position.range.topPriceSol,9)} SOL/token. Source: saved paper range at ${esc(date(position.entryAsOf))}.</p><p>${esc(position.range.note)}</p>${position.costModel?`<p>${esc(position.costModel.note)} ${source(position.costModel)}</p>`:''}<p>${(mark.unavailableReasons || []).map(esc).join(' ')}</p><p>${esc(state.account.feeModelNote)}</p></details>${position.status==='open'?`<div class="position-actions"><small>Opened ${esc(date(position.openedAt))}</small><button class="secondary" data-close="${esc(position.id)}">Close on paper</button><button class="text-button" data-recheck="${esc(position.poolAddress)}">Re-run Pre-flight</button></div>`:''}</article>`;
 }
-function basketProof(account) {
-  return account.latestBasket?.stampTarget ? `<section class="panel"><p class="eyebrow">Optional · Solana devnet</p><h3>Record your basket choice.</h3><p class="note">${esc(account.latestBasket.basketName)} · ${sol(account.latestBasket.amountSol)} · ${esc(date(account.latestBasket.at))}. Connect Phantom and review a Memo to record this saved choice. Your wallet signs only after you approve; devnet SOL pays the fee.</p><div id="basket-proof"><p class="note" role="status">Loading the optional receipt controls…</p></div><p class="note">The receipt records the basket allocation. It does not deposit tokens or prove investment performance.</p></section>` : '';
-}
-let devnetModule;
-async function mountBasketProof(account) {
-  const host = $('#basket-proof'); if (!host || !account.latestBasket?.stampTarget) return;
-  try {
-    devnetModule ||= import('/worldsfair-devnet.js'); await devnetModule;
-    if (!host.isConnected) return;
-    if (!window.WorldsfairDevnet?.renderButton) throw new Error('Receipt controls are unavailable.');
-    host.replaceChildren(window.WorldsfairDevnet.renderButton(account.latestBasket.stampTarget,'Record basket on devnet'));
-  } catch {devnetModule=null;if(host.isConnected)host.innerHTML='<p class="error-text">Devnet controls are unavailable. Your paper positions are saved. Reload Positions to try again.</p>';}
-}
 function renderPositions() {
  const account=state.account,all=account.positions||[],positions=all.filter(p=>p.status===state.positionTab),groups=groupPositions(positions),open=all.filter(p=>p.status==='open');
  const total=key=>sumKnown(open.map(p=>key==='exit'?p.exitCostsSol:p.mark[key])),evidence=value=>({value,source:'Still paper ledger + saved market observations',asOf:open.length?open.map(p=>p.mark.asOf||p.mark.checkedAt).filter(Boolean).sort()[0]||account.updatedAt:account.updatedAt});
  const groupHtml=groups.map(g=>`<details class="position-group" data-group="${esc(g.poolAddress)}" ${expandedGroups.has(g.poolAddress)?'open':''}><summary>${esc(g.name)} <small>${g.positions.length} positions · ${g.positions.every(p=>p.mark.inRange!==null)?g.positions.filter(p=>p.mark.inRange===true).length:'Unavailable'} in range · Paper net ${sol(sumKnown(g.positions.map(p=>p.mark.netPnlSol)))}</small>${source({source:'Still paper ledger + saved observations',asOf:g.positions.map(p=>p.mark.asOf||p.mark.checkedAt).filter(Boolean).sort()[0]||account.updatedAt})}</summary>${g.positions.map(positionCard).join('')}</details>`).join('');
- show(heading('Practise','Positions','Your paper positions, marked to live prices.','<button class="secondary" data-action="refresh-positions">Refresh</button>')+pendingBanner()+`<div class="summary-strip">${metric('Paper open positions',{value:open.length,source:'Still paper ledger',asOf:account.updatedAt},v=>number(v,0))}${metric('Paper fees',evidence(total('feesSol')))}${metric('Paper exit estimate at entry',evidence(total('exit')))}${metric('Paper net',evidence(total('netPnlSol')),signed)}</div><p class="note">Paper net uses the saved entry cost model and modelled fee observations. It is not an executed LP result. Missing costs or fee coverage stay Unavailable; check the source times.</p><div class="filter-chips" aria-label="Position status"><button class="secondary" data-position-tab="open" aria-pressed="${state.positionTab==='open'}">Open</button><button class="secondary" data-position-tab="closed" aria-pressed="${state.positionTab==='closed'}">Closed</button></div><p class="note">Practice balance: ${sol(account.balanceSol)}${source({source:'Still paper ledger',asOf:account.updatedAt})}</p>`+(groupHtml||`<div class="empty"><h3>${state.positionTab==='open'?'No paper positions yet.':'Nothing closed yet.'}</h3><button class="primary" ${state.positionTab==='open'?'data-go="pools"':'data-position-tab="open"'}>${state.positionTab==='open'?'Pick a pool':'See open positions'}</button></div>`)+`<button class="text-button" data-go="pools">Pick a pool</button>`+(account.park?.records||[]).map(parkRecord).join('')+basketProof(account));
- mountBasketProof(account);
+ show(heading('Practise','Positions','Your paper positions, marked to live prices.','<div class="actions"><button class="secondary" data-go="wallet">View a live wallet · read-only</button><button class="secondary" data-action="refresh-positions">Refresh paper</button></div>')+pendingBanner()+`<div class="summary-strip">${metric('Paper open positions',{value:open.length,source:'Still paper ledger',asOf:account.updatedAt},v=>number(v,0))}${metric('Paper fees',evidence(total('feesSol')))}${metric('Paper exit estimate at entry',evidence(total('exit')))}${metric('Paper net',evidence(total('netPnlSol')),signed)}</div><p class="note">Paper net uses the saved entry cost model and modelled fee observations. It is not an executed LP result. Missing costs or fee coverage stay Unavailable; check the source times.</p><div class="filter-chips" aria-label="Position status"><button class="secondary" data-position-tab="open" aria-pressed="${state.positionTab==='open'}">Open</button><button class="secondary" data-position-tab="closed" aria-pressed="${state.positionTab==='closed'}">Closed</button></div><p class="note">Practice balance: ${sol(account.balanceSol)}${source({source:'Still paper ledger',asOf:account.updatedAt})}</p>`+(groupHtml||`<div class="empty"><h3>${state.positionTab==='open'?'No paper positions yet.':'Nothing closed yet.'}</h3><button class="primary" ${state.positionTab==='open'?'data-go="pools"':'data-position-tab="open"'}>${state.positionTab==='open'?'Pick a pool':'See open positions'}</button></div>`)+`<button class="text-button" data-go="pools">Pick a pool</button>`+(account.park?.records||[]).map(parkRecord).join(''));
+
+}
+let walletAddress='';try{walletAddress=normalizeWalletAddress(localStorage.getItem('still:wallet-address:v1')||'');}catch{}
+let walletData=null,walletError='',walletBusy=false,walletGeneration=0;
+const walletDetails=new Map(),walletReading=new Set();
+function walletEvidence(value,read){return {value,source:read.source||'Meteora DLMM read-only position data',asOf:read.asOf};}
+function walletDetailCard(p){
+ const d=walletDetails.get(p.positionAddress);
+ if(walletReading.has(p.positionAddress))return '<div class="skeleton" aria-label="Reading live position checks"></div>';
+ if(!d)return `<p class="note">Run Pre-flight on this position's observed inventory.</p><button class="secondary" data-wallet-check="${esc(p.positionAddress)}">Run Pre-flight</button>`;
+ if(d.error)return `<p class="error-text">${esc(d.error)}</p><button class="secondary" data-wallet-check="${esc(p.positionAddress)}">Retry Pre-flight</button>`;
+ const q=d.exitQuote||{};
+ return `${d.checks?.length?`<section class="check-card">${checkRows(d)}</section>`:''}<div class="metrics">${metric('Live inventory value',walletEvidence(d.valueSol,d))}${metric('Live unclaimed trading fees',walletEvidence(d.feesSol,d))}${metric('Pool hourly fee pace',{value:d.feeRateHourly,source:'Meteora DLMM pool observation',asOf:d.feeAsOf},percent)}${metric('Live exit swap drag',{value:q.costSol,source:q.source,asOf:q.asOf})}${metric('Live distance to floor',walletEvidence(d.distanceToFloorPct,d),v=>finite(v)?number(v,2)+'%':'Unavailable')}${metric('Live range',walletEvidence(typeof d.inRange==='boolean'?(d.inRange?1:0):null,d),v=>v===null?'Unavailable':v===1?'In range':'Out of range')}</div><p class="note">${esc(q.note||'Exit quote unavailable.')} ${esc(d.note||'')}</p><p class="source">Observed floor ${number(d.floorPriceSol,9)} · top ${number(d.topPriceSol,9)} SOL/token · ${esc(date(d.asOf))}</p><div class="actions"><button class="primary" data-wallet-practise="${esc(p.positionAddress)}" ${d.canPractise?'':'disabled'}>Practise this on paper</button><button class="text-button" data-wallet-check="${esc(p.positionAddress)}">Refresh Pre-flight</button></div>${!d.canPractise?'<p class="note">This setup cannot be copied yet. Its exact bin allocation must be available. You can still <button class="text-button" data-go="pools">pick a pool</button>.</p>':''}`;
+}
+function renderWallet(){
+ const positions=walletData?.positions||[],groups=groupPositions(positions);
+ show(heading('Your wallet','Live positions','Read public Meteora positions, then practise a setup on paper.','<button class="secondary" data-go="positions">Paper positions</button>')+pendingBanner()+`<section class="panel wallet-access"><p class="eyebrow">Live, read-only</p><div class="wallet-choices"><button class="primary" data-action="wallet-connect" ${walletBusy?'disabled':''}>Connect Phantom <small>Read-only. No signing.</small></button><form id="wallet-form"><label for="wallet-address">Or paste a wallet address</label><div class="wallet-address-row"><input id="wallet-address" name="address" value="${esc(walletAddress)}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Solana public address" required><button class="secondary" type="submit" ${walletBusy?'disabled':''}>View wallet</button></div></form></div><p class="note">Only your public address is saved in this browser. Public position reads go to Meteora, Solana RPC and Jupiter. No signature, token approval or transaction is requested.</p>${walletError?`<p class="error-text" role="alert">${esc(walletError)}</p>`:''}${walletAddress?'<button class="text-button" data-action="wallet-forget">Forget address</button>':''}</section>`+(walletBusy?'<p role="status">Reading public positions…</p><div class="skeleton" aria-hidden="true"></div>':walletData?`<p class="note">${esc(walletData.note||'Each position keeps its own address and range.')} ${source(walletData)}</p>${groups.length?groups.map(g=>`<section class="wallet-pool"><h3>${esc(g.name)}</h3>${g.positions.map(p=>`<article class="panel live-position"><div class="card-title"><h4>${esc(p.name)}</h4><span class="tag live">Live, read-only</span></div><code class="position-id">${esc(p.positionAddress)}</code>${walletDetailCard(p)}</article>`).join('')}</section>`).join(''):walletData.status==='unavailable'?'<div class="empty"><h3>Positions are unavailable right now.</h3><p>Try the wallet read again or paste another address. A failed read cannot tell us whether this wallet has open positions.</p><button class="secondary" data-action="wallet-retry">Retry wallet read</button></div>':'<div class="empty"><h3>No open Meteora positions found.</h3><p>You can paste another address or start with a live pool on paper.</p><button class="primary" data-go="pools">Pick a pool</button></div>'}`:'<div class="empty"><h3>Your wallet, with a little perspective.</h3><p>Connect Phantom or paste a public address above. Your funds stay where they are.</p></div>'));
+}
+async function loadWallet(value){
+ if(state.view!=='wallet')return;
+ try{walletAddress=normalizeWalletAddress(value);}catch(error){walletError=error.message;renderWallet();return;}
+ const generation=++walletGeneration;walletData=null;walletDetails.clear();walletReading.clear();walletError='';walletBusy=true;
+ try{localStorage.setItem('still:wallet-address:v1',walletAddress);}catch{}
+ renderWallet();
+ try{const data=await api('/api/still/wallet?'+new URLSearchParams({address:walletAddress}));if(generation!==walletGeneration)return;walletData=data;if(data.status==='unavailable')walletError=data.note||'Position reads are unavailable. Try again or paste another address.';}
+ catch(error){if(generation===walletGeneration)walletError='Position reads are unavailable. '+error.message+' You can paste another address.';}
+ finally{if(generation===walletGeneration){walletBusy=false;if(state.view==='wallet'){renderWallet();const first=walletData?.positions?.find(p=>p.supported!==false);if(first)checkWalletPosition(first.positionAddress);}}}
+}
+async function checkWalletPosition(id){
+ const p=walletData?.positions?.find(p=>p.positionAddress===id);if(state.view!=='wallet'||!p||walletReading.has(id))return;
+ const generation=walletGeneration;walletReading.add(id);renderWallet();
+ try{const d=await api('/api/still/wallet-position?'+new URLSearchParams({address:walletAddress,poolAddress:p.poolAddress,positionAddress:id}));if(generation===walletGeneration)walletDetails.set(id,d);}
+ catch(error){if(generation===walletGeneration)walletDetails.set(id,{error:error.message});}
+ finally{if(generation===walletGeneration){walletReading.delete(id);if(state.view==='wallet')renderWallet();}}
+}
+function practiseWallet(id){
+ const p=walletData?.positions?.find(p=>p.positionAddress===id),d=walletDetails.get(id);if(state.view!=='wallet'||!p||!d?.canPractise)return;if(readPending()){resumePending();return;}
+ confirmAction('still-clone',{walletAddress,poolAddress:p.poolAddress,positionAddress:id,amountSol:'0.5',confirmed:true},`Practise the observed ${p.name} setup with 0.5 paper SOL.`,'Practise this setup?',`Use <strong>0.5 paper SOL</strong> to copy the observed bin allocation of ${esc(p.name)}.<br>Source position: ${esc(short(id))}. Exact range and relative SOL/token allocation are re-read before opening. Your live position is unchanged. Costs for the copied allocation may be Unavailable.`,'Open on paper');
 }
 function renderBaskets(data) {
   show(heading('Practise','Starter mixes','Not sure where to begin? Three ready-made paper sets.', '<button class="secondary" data-go="positions">View positions</button>') + pendingBanner() + `<div class="basket-grid">${state.baskets.map(basket=>`<article class="basket-card"><span class="tag ${esc(basket.name.toLowerCase())}">${esc(basket.status==='available'?'Paper mix':'Unavailable')}</span><h3>${esc(basket.name)}</h3><p class="reason">${esc(basket.reason)}</p>${basket.components.length?`<ul>${basket.components.map(item=>`<li><span>${esc(item.pool.name)}<br><small>${esc(short(item.pool.address))} · ${number(item.pool.binStep.value,0)} bps</small></span><b>${percent(item.weightBps/10000)}</b></li>`).join('')}</ul>`:'<p class="note">No complete allocation yet. Refresh after the next market read.</p>'}<p class="source">${esc(basket.source)} · ${esc(date(basket.asOf))}</p><button class="secondary" data-basket="${esc(basket.id)}" ${basket.status!=='available'?'disabled':''}>Try this mix on paper <span aria-hidden="true">↗</span></button></article>`).join('')}</div><p class="note">Presets follow current liquidity, pool history and fee activity. “Steady” does not mean safe or stable-priced. Membership is checked again when you confirm.</p><button class="text-button" data-go="baskets">Refresh mix pools</button>`);
@@ -232,17 +260,20 @@ function prepareClose(id) {
   confirmAction('still-close',{positionId:id,confirmed:true},`Close the paper position ${id}.`,'Close on paper?',`Net ${sol(position.mark.netPnlSol)}.<br><br>Close <strong>${esc(position.name)}</strong> (${esc(short(id))}). The latest modelled inventory value will return to your practice balance.<br><br>Last available gross value: <strong>${sol(position.mark.grossValueSol)}</strong>. The server checks a fresh price before closing.`,'Close');
 }
 function resumePending() {
-  const pending = readPending(); if (pendingReadError) {toast('Saved action cannot be read. Check positions and restore browser storage before another deposit.'); return;} if (!pending || !['still-open','still-basket','still-close','still-follow','still-unfollow','still-bot','still-park'].includes(pending.action) || !pending.body?.requestId) {toast('No valid saved paper action was found.'); return;}
+  const pending = readPending(); if (pendingReadError) {toast('Saved action cannot be read. Check positions and restore browser storage before another deposit.'); return;} if (!pending || !['still-open','still-clone','still-basket','still-close','still-follow','still-unfollow','still-bot','still-park'].includes(pending.action) || !pending.body?.requestId) {toast('No valid saved paper action was found.'); return;}
   confirmAction(pending.action,pending.body,pending.description,'Check your saved action?',`${esc(pending.description)}<br><br>The same request ID will be reused. If it already completed, the saved receipt is returned without repeating it.`,'Check saved action',pending);
 }
 $('#confirm-submit').addEventListener('click',async()=>{
   if (submitting || !dialogAction) return;
   if (!dialogAction.pending && ['still-open','still-basket'].includes(dialogAction.action) && !preflightIsFresh(state.preflight)) {dialog.close();toast('This reading expired while you reviewed it. Refreshing the Pre-flight.');loadView(state.view);return;}
   submitting = true; $('#confirm-submit').disabled = true; $('#confirm-cancel').disabled = true; $('#confirm-error').hidden = true;
-  let pending;
+  let pending,postAttempted=false;
   try {
+    // Direct wallet entry has not visited any paper route yet. Establish its cookie first.
+    await ensureAccount();
     pending = dialogAction.pending || {action:dialogAction.action,body:{...dialogAction.body,requestId:crypto.randomUUID()},description:dialogAction.description};
     savePending(pending);
+    postAttempted=true;
     const data = await api('/api/paper/'+pending.action,pending.body);
     if (!data?.paper || !data.account || !Array.isArray(data.account.positions) || !finite(data.account.balanceSol) || data.receipt?.requestId !== pending.body.requestId) throw new Error('The action result could not be verified. Check the saved request to recover its receipt.');
     if(pending.action==='still-open'&&$('#close-reminder')?.checked){const reminders=readSaved('still:reminders:v1',{});for(const id of data.receipt.positionIds||[])reminders[id]=Date.now()+(state.preflight?.options?.holdMinutes||240)*60000;saveLocal('still:reminders:v1',reminders);}
@@ -252,7 +283,7 @@ $('#confirm-submit').addEventListener('click',async()=>{
     navigate(pending.action==='still-park'?'park':followAction?'follow':'positions'); toast(pending.action==='still-park'?'Example allocation saved. No earned profits or real funds were moved.':followAction?'Paper strategy updated. Your real funds have not moved.':pending.action==='still-close'?'Paper position closed.':'Paper position opened. Your real funds have not moved.');
   } catch(error) {
     // A known rejection cannot have committed. Unknown/network outcomes keep the exact request for recovery.
-    if (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {try {clearPending();} catch {}}
+    if (postAttempted && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {try {clearPending();} catch {}}
     $('#confirm-error').textContent = error.message + (readPending() ? ' Use Check saved action to recover this same request.' : ' Keep reviewing to refresh the Pre-flight.'); $('#confirm-error').hidden = false;
     if (readPending()) {dialogAction.pending = readPending(); $('#confirm-submit').textContent = 'Check saved action';}
   } finally {submitting = false; $('#confirm-submit').disabled = false; $('#confirm-cancel').disabled = false;}
@@ -317,6 +348,16 @@ document.addEventListener('click',async event=>{
   if(button.dataset.action==='park-example'){parkExample=true;renderPark();return;}
   if(button.dataset.action==='continue-park'){parkExample=true;renderPark();$('#park-first')?.focus();return;}
   if(button.dataset.action==='park-review'){preparePark();return;}
+  if(button.dataset.action==='wallet-connect'){
+   if(state.view!=='wallet'||walletBusy)return;
+   const generation=++walletGeneration;walletError='';walletBusy=true;renderWallet();
+   try{const address=await connectPhantomAddress(window.phantom?.solana);if(generation!==walletGeneration||state.view!=='wallet')return;walletBusy=false;await loadWallet(address);}
+   catch(error){if(generation===walletGeneration&&state.view==='wallet'){walletBusy=false;walletError=error.message;renderWallet();$('#wallet-address')?.focus();}}return;
+  }
+  if(button.dataset.action==='wallet-retry'){if(walletAddress)loadWallet(walletAddress);return;}
+  if(button.dataset.action==='wallet-forget'){walletGeneration++;walletAddress='';walletData=null;walletDetails.clear();walletReading.clear();walletError='';walletBusy=false;try{localStorage.removeItem('still:wallet-address:v1');}catch{}renderWallet();return;}
+  if(button.dataset.walletCheck){checkWalletPosition(button.dataset.walletCheck);return;}
+  if(button.dataset.walletPractise){practiseWallet(button.dataset.walletPractise);return;}
   if(button.dataset.parkPreset){parkPrefs.split=({all:[100,0,0],half:[50,50,0],mostly:[20,20,60],backyard:[0,0,100]})[button.dataset.parkPreset];saveLocal('still:park:v1',parkPrefs);renderPark();return;}
   if(button.dataset.action==='basket-allocation'){button.disabled=true;try{const d=await api('/api/cesto?slug='+encodeURIComponent(parkPrefs.basketSlug));$('#park-allocation').innerHTML=d.allocation?.complete?`<p>${d.allocation.rows.map(r=>esc(r.symbol)+': '+number(r.weight,2)+'%').join(' · ')}</p>${source({source:'Cesto allocation',asOf:new Date(d.readAt).toISOString()})}`:'<p>Allocation unavailable. This basket cannot be parked without complete quotes.</p>';}catch{$('#park-allocation').innerHTML='<p>Allocation unavailable. Try another basket or refresh rates.</p>';}return;}
   if(button.dataset.action==='refresh-park'){button.disabled=true;try{const data=await api('/api/paper/still-park-refresh',{requestId:crypto.randomUUID()});state.account=data.account;if(state.view==='park')renderPark();else renderPositions();}catch(error){toast(error.message);button.disabled=false;}return;}
@@ -346,6 +387,7 @@ document.addEventListener('click',async event=>{
 screen.addEventListener('input',event=>{if(['park-first','park-second'].includes(event.target.id)){const a=Number($('#park-first').value),b=Number($('#park-second').value),first=event.target.id==='park-first'?Math.min(a,b):a,second=event.target.id==='park-second'?Math.max(a,b):b;parkPrefs.split=[first,second-first,100-second];$('#park-first').value=first;$('#park-second').value=second;$('#split-labels').textContent=splitLabels();const track=screen.querySelector('.split-track');track.style.setProperty('--first',first+'%');track.style.setProperty('--second',second+'%');saveLocal('still:park:v1',parkPrefs);if($('#park-submit'))$('#park-submit').disabled=!parkCanSubmit();}if(event.target.id==='paper-amount'){const button=screen.querySelector('[data-action="deposit"]');if(button)button.disabled=event.target.value!==state.amount || !state.preflight?.canOpen;}});
 screen.addEventListener('input',event=>{if(event.target.closest?.('#bot-form')){const b=readBotForm(event.target.closest('#bot-form'));saveLocal('still:bot:v1',b);$('#bot-sentence').textContent=botSentence(b);$('#bot-width').textContent=b.width+'%';$('#bot-hold').textContent=holdLabel(b.holdMinutes);$('#bot-size').textContent=sol(b.sizeSol);}});
 screen.addEventListener('submit',event=>{
+  if(event.target.id==='wallet-form'){event.preventDefault();loadWallet($('#wallet-address').value);return;}
   if(event.target.id==='bot-form'){event.preventDefault();const b=readBotForm(event.target);if(!b.name.trim()||!finite(b.width)||!finite(b.sizeSol)||b.sizeSol<=0){$('#bot-error').hidden=false;return;}if(readPending()){resumePending();return;}saveLocal('still:bot:v1',b);confirmAction('still-bot',{bot:b,confirmed:true},'Start '+b.name+' on paper.','Start this paper bot?',esc(botSentence(b))+'<br><br>Permit future paper entries and closes from your practice balance. No real funds move.','Start paper bot');return;}
   if (event.target.id!=='amount-form')return;event.preventDefault();
   const value=$('#paper-amount').value.trim();

@@ -26,7 +26,7 @@ const compiled=await build({stdin:{contents:`
   }
  }
  export default worker;
-`,resolveDir:process.cwd(),loader:'js'},bundle:true,platform:'browser',format:'esm',write:false,plugins:[{name:'synthetic-paper-basket-provider',setup(b){
+`,resolveDir:process.cwd(),loader:'js'},bundle:true,platform:'browser',format:'esm',write:false,alias:{util:'./tests/fixtures/worker-util.mjs'},plugins:[{name:'synthetic-paper-basket-provider',setup(b){
  b.onResolve({filter:/^\.\/worldsfair-paper-vaults$/},()=>({path:'vault-provider',namespace:'vault-fixture'}));
  b.onLoad({filter:/.*/,namespace:'vault-fixture'},async()=>({contents:await readFile('tests/fixtures/worldsfair-vault-provider.fixture.mjs','utf8'),loader:'js'}));
  b.onResolve({filter:/^\.\/worldsfair-paper-baskets$/},()=>({path:'basket-provider',namespace:'fixture'}));

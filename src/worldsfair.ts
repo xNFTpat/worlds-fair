@@ -12,7 +12,7 @@ export {WorldsfairRangeInbox as RangeInbox} from './worldsfair-paper';
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
   status, headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
 });
-const disabled = () => json({error: 'Paper demo only. Mainnet wallet actions and live transactions are disabled. Optional receipt signing is restricted to Solana devnet.', code: 'paper_only'}, 403);
+const disabled = () => json({error: 'Paper only. Wallet access is read-only. Signing and transaction submission are disabled on every network.', code: 'paper_only'}, 403);
 const readPaths = new Set([
   '/api/version', '/api/pools', '/api/stats', '/api/pool-context', '/api/pool-lookup',
   '/api/pool-chart', '/api/suggest', '/api/check', '/api/research/pools', '/api/research/pool',
@@ -86,6 +86,10 @@ async function fetchPaper(req: Request, env: Env, ctx?: ExecutionContext): Promi
   // Deny before authentication, KV access, assets, or any legacy provider work.
   if (/^\/api\/(?:auth|paybox|solana|evm|tx|x|debug)(?:\/|$)/.test(lower)
       || lower === '/api/exit-preview'
+      // Retain the historical receipt implementation for isolated tests, but no
+      // network-signing flow or its client bundle is reachable in this release.
+      || /^\/api\/paper\/(?:devnet|stamp)/.test(lower)
+      || /^\/worldsfair-devnet(?:[./-]|$)/.test(lower)
       || /^\/(?:solana|phantom|owner-access)\.js(?:\/|$)/.test(lower)
       || /^\/(?:signing-frame|signing|paybox)(?:\/|$)/.test(lower)) return disabled();
 

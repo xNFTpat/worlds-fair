@@ -26,7 +26,7 @@ Optional starter mix: **Pools → Try this mix on paper → Open on paper → Op
 
 Optional close: expand a pool, **Close on paper → Close** (or **Keep**). The server requires a fresh price and returns gross modelled inventory to the practice balance, before fees and costs; this is not realised net profit.
 
-Optional devnet proof: after opening a starter mix, **Positions → Record basket on devnet**. Pat connects Phantom, reviews the Memo and signs on devnet himself. The signature links to Solana Explorer. No signature was produced during this build; the real-wallet check is still pending.
+Wallet reading: **Positions → View a live wallet · read-only → Connect Phantom (Read-only. No signing.)** or paste an address and **View wallet**. Open a position’s **Run Pre-flight**, then **Practise this on paper → Open on paper** to copy its observed bin allocation with 0.5 paper SOL. Missing or unrepresentable bin data keeps copying unavailable. No default range is substituted.
 
 ### Recording caveats
 
@@ -47,7 +47,7 @@ Optional devnet proof: after opening a starter mix, **Positions → Record baske
 | Manual positions | Confirmed paper inventory, separate address per position, modelled fee observations and gross settlement. Fees are not actual LP earnings. Missing intervals are not backfilled. |
 | Follow / custom bots | Durable forward-only paper runs. No mainnet transaction is built or sent. Net/win/loss results remain unknown when costs are missing. |
 | Grow | Atomic example split. Cesto records quoted raw token units. Backyard accrues linearly at the saved quoted rate on original deposit units, even if that rate is labelled APY; no compounding, acquired vault shares, LST tokens or actual yield. Non-SOL model value needs current price evidence. |
-| Devnet | Optional signed Memo of a saved starter-mix choice. It records evidence, not a deposit or investment performance. Devnet SOL pays the fee; Pat reviews and signs. |
+| Wallet | Public-key-only Phantom connection or pasted address. Real positions are labelled Live, read-only. Only the address is saved in browser local state. No signing routes or devnet controls are exposed in this pass. |
 
 The browser's random Secure, HttpOnly, SameSite=Strict cookie identifies its isolated account. Clearing it loses access; there is no account recovery. Balances and action receipts are server-owned. Confirmed changes are serialized and atomic; replaying a request returns the saved result. Research's earlier paper accounts remain separate.
 
@@ -79,7 +79,7 @@ npm run build
 npm run dev
 ```
 
-Open Wrangler's local URL. Local storage starts empty; a successful public market refresh is needed before pools appear. Optional dedicated demo read credentials belong in ignored `.dev.vars`, using `.dev.vars.example`. Do not copy another deployment's secrets. No private wallet key is needed. The inherited `execution` dependencies support range mathematics and the optional devnet client; installation does not enable mainnet execution.
+Open Wrangler's local URL. Local storage starts empty; a successful public market refresh is needed before pools appear. Optional dedicated demo read credentials belong in ignored `.dev.vars`, using `.dev.vars.example`. Do not copy another deployment's secrets. No private wallet key is needed. The inherited `execution` dependencies support range mathematics and the public wallet reader; installation does not expose any signing.
 
 ```sh
 npm test
@@ -149,3 +149,9 @@ The declared plan prices one unsigned two-signature open, one close and one exit
 The planned-hold net figure is pool-average fee pace × size × hold, minus that dated plan, conditional on staying in range and unchanged pace. A SOL-only range above current trading earns nothing until price enters. Positions retain the source, time and scope of their entry-time cost model; their paper net does not claim a current executable exit. Future stressed withdrawals are not priced using today's quote.
 
 Heart Attack accepts measured five-minute volume or an observed cumulative-volume increase of at least $1M within five minutes. It starts collecting after following, never scales a longer window or backfills a signal, and resets on counter regressions or stale observations.
+
+## Read-only wallet scope
+
+Wallet positions are read separately by position address, even within one pool. Actual balances, native bins and ownership come from read-only Solana RPC; pool fee pace comes from Meteora. The exit swap uses that position’s observed paired-token raw balance, excludes unclaimed fees and is not an LP withdrawal quote. Unsupported pairs and missing reads remain visible as Unavailable.
+
+Paper copies are independently funded from the browser's practice balance and retain the observed absolute bin range and relative SOL/token allocation. They do not move or manage the live position. Copies wider than the 69-bin demo limit, stale data, foreign ownership or unsupported token behaviour are rejected. The backend re-reads before confirming; a failed read spends nothing. Historical devnet code remains in the repository for provenance, but its public routes and signing bundle are blocked for this release.

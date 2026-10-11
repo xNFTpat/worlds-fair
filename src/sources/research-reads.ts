@@ -44,10 +44,21 @@ async function saveRead<T>(env:Env,name:string,saved:SavedRead<T>,ttl:number){
 async function readJson<T>(context:ResearchReadContext,options:{name:string;provider:string;url:string;ttl:number;init?:RequestInit;forceFresh?:boolean}):Promise<ResearchRead<T>>{
  const saved=await savedRead<T>(context.env,options.name),now=Date.now();
  if(!options.forceFresh&&saved&&saved.expiresAt>now){context.cacheHits++;return {...saved,asOf:saved.at,cached:true};}
- let cooldown:ProviderBackoff|null=null;
- try{cooldown=await context.env.LP_CACHE.get<ProviderBackoff>(key('backoff:'+options.provider),'json');}catch{}
+ const legacyBackoffKey=key('backoff:'+options.provider);
+ // RPC cooldowns belong to the explicitly configured provider. Hash the full
+ // normalized URL so private provider credentials never appear in KV key names.
+ let providerUrl=options.url;try{providerUrl=new URL(providerUrl).href;}catch{/* The bounded fetch below reports an invalid configured URL as unavailable. */}
+ const rpcScope=options.provider==='Solana RPC'?await keyHash(providerUrl):null;
+ const backoffKey=rpcScope?legacyBackoffKey+':'+rpcScope:legacyBackoffKey;
+ const [cooldown,legacyCooldown]=await Promise.all([
+  context.env.LP_CACHE.get<ProviderBackoff>(backoffKey,'json').catch(()=>null),
+  rpcScope?context.env.LP_CACHE.get<ProviderBackoff>(legacyBackoffKey,'json').catch(()=>null):Promise.resolve(null),
+ ]);
+ // Migration is not a cooldown bypass: an active old shared record continues to
+ // stop all RPC research until its original expiry, even after a config change.
+ if(legacyCooldown&&legacyCooldown.until>now&&(!cooldown||legacyCooldown.until>cooldown.until))return {status:'rate-limited',data:saved?.data??null,asOf:saved?.at??null,cached:!!saved,note:options.provider+' is in a rate-limit cooldown.'};
  if(cooldown&&cooldown.until>now){if(options.provider==='Jupiter')context.jupiterRetryAt=Math.max(context.jupiterRetryAt||0,cooldown.until);return {status:'rate-limited',data:saved?.data??null,asOf:saved?.at??null,cached:!!saved,note:options.provider+' is in a rate-limit cooldown.'};}
- const pendingKey=key(options.name);
+ const pendingKey=key(options.name)+(rpcScope?':rpc:'+rpcScope:'');
  if(pending.has(pendingKey)){context.cacheHits++;return await pending.get(pendingKey)! as ResearchRead<T>;}
  if(context.requests+context.pendingRequests>=context.maxRequests||now>=context.deadline)return unknown('Research request budget reached; remaining sources are unknown.');
  // Reserve this context slot synchronously before awaiting the shared gate.
@@ -68,7 +79,7 @@ async function readJson<T>(context:ResearchReadContext,options:{name:string;prov
    const response=options.provider==='Solana RPC'?await solanaReadFetch(options.url,init,{deadline:Math.min(context.deadline,Date.now()+timeout),onRequest:countRequest}):await (countRequest(),globalThis.fetch(options.url,init));
    if(!response.ok){
     let ttl=60000,status:ResearchReadStatus='unavailable';
-    if(response.status===429){status='rate-limited';const backoff=researchBackoff(cooldown,response.headers);ttl=backoff.until-Date.now();if(options.provider==='Jupiter'){const shared=await noteResearchJupiterRateLimit(context.env,response.headers);context.jupiterRetryAt=Math.max(context.jupiterRetryAt||0,backoff.until,shared.retryAt||0);}try{await context.env.LP_CACHE.put(key('backoff:'+options.provider),JSON.stringify(backoff),{expirationTtl:86400});}catch{}}
+    if(response.status===429){status='rate-limited';const backoff=researchBackoff(cooldown,response.headers);ttl=backoff.until-Date.now();if(options.provider==='Jupiter'){const shared=await noteResearchJupiterRateLimit(context.env,response.headers);context.jupiterRetryAt=Math.max(context.jupiterRetryAt||0,backoff.until,shared.retryAt||0);}try{await context.env.LP_CACHE.put(backoffKey,JSON.stringify(backoff),{expirationTtl:86400});}catch{}}
     await response.body?.cancel();
     const note=options.provider+' returned HTTP '+response.status+'.';
     // Preserve the date of stale data, never attach a fresh date to its value.
@@ -76,7 +87,7 @@ async function readJson<T>(context:ResearchReadContext,options:{name:string;prov
     return {status,data:saved?.data??null,asOf:saved?.at??null,cached:!!saved,note};
    }
    const data=await response.json() as T,atMs=Date.now(),at=new Date(atMs).toISOString(),expiresAt=atMs+options.ttl;
-   if(cooldown&&cooldown.until<=now)try{const latest=await context.env.LP_CACHE.get<ProviderBackoff>(key('backoff:'+options.provider),'json');if(latest?.last429At===cooldown.last429At)await context.env.LP_CACHE.put(key('backoff:'+options.provider),JSON.stringify({until:0,attempts:0,last429At:cooldown.last429At}),{expirationTtl:86400});}catch{}
+   if(cooldown&&cooldown.until<=now)try{const latest=await context.env.LP_CACHE.get<ProviderBackoff>(backoffKey,'json');if(latest?.last429At===cooldown.last429At)await context.env.LP_CACHE.put(backoffKey,JSON.stringify({until:0,attempts:0,last429At:cooldown.last429At}),{expirationTtl:86400});}catch{}
    await saveRead(context.env,options.name,{data,at,expiresAt,status:'available',note:'Timestamped '+options.provider+' read.'},options.ttl);
    return {status:'available',data,asOf:at,expiresAt,cached:false,note:'Timestamped '+options.provider+' read.'};
    }catch{const note=options.provider+' timed out or returned an unreadable response.';await saveRead(context.env,options.name,{data:saved?.data??null,at:saved?.at??new Date().toISOString(),expiresAt:Date.now()+60000,status:'unavailable',note},60000);return {status:'unavailable',data:saved?.data??null,asOf:saved?.at??null,cached:!!saved,note};}

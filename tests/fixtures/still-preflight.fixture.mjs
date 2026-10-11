@@ -14,3 +14,6 @@ export async function getStillPoolMark(_env,poolAddress) {
 }
 
 export function listStillPools(){return [];}
+
+// The historical devnet fixture never runs a read-only wallet copy.
+export function buildStillPreflight(){throw new Error('Wallet Pre-flight is outside this runtime fixture.');}

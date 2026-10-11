@@ -94,7 +94,7 @@ export async function worldsfairPaperRoute(request: Request, env: Env): Promise<
   const url = new URL(request.url), path = url.pathname;
   if (!path.startsWith('/api/paper/')) return null;
   const action = path.slice('/api/paper/'.length);
-  if (!['account', 'history', 'seed', 'roll', 'basket', 'refresh', 'deposit', 'rule', 'stamp-prepare', 'stamp-confirm', 'stamps', 'still-account', 'still-open', 'still-basket', 'still-refresh', 'still-close', 'still-follow', 'still-unfollow', 'still-bot', 'still-park', 'still-park-refresh'].includes(action)) return json({error: 'Unknown Paper action.'}, 404);
+  if (!['account', 'history', 'seed', 'roll', 'basket', 'refresh', 'deposit', 'rule', 'stamp-prepare', 'stamp-confirm', 'stamps', 'still-account', 'still-open', 'still-clone', 'still-basket', 'still-refresh', 'still-close', 'still-follow', 'still-unfollow', 'still-bot', 'still-park', 'still-park-refresh'].includes(action)) return json({error: 'Unknown Paper action.'}, 404);
   const read = ['account', 'history', 'stamps', 'still-account'].includes(action);
   if (request.method !== (read ? 'GET' : 'POST')) return json({error: read ? 'Use a Paper account read.' : 'Use a Paper action.'}, 405);
   if (!env.RANGE_ALERTS) return json({error: 'The Paper journal is unavailable.'}, 503);
@@ -581,7 +581,7 @@ export class WorldsfairRangeInbox extends LegacyRangeInbox {
     const account = request.headers.get('x-worldsfair-account');
     if (!account || !/^[a-f0-9]{64}$/.test(account)) return json({error: 'Invalid Paper session.'}, 401);
     const action = path.slice('/worldsfair-paper/'.length), read = ['account', 'history', 'stamps', 'still-account'].includes(action);
-    if (!['account', 'history', 'seed', 'roll', 'basket', 'refresh', 'deposit', 'rule', 'stamp-prepare', 'stamp-confirm', 'stamps', 'still-account', 'still-open', 'still-basket', 'still-refresh', 'still-close', 'still-follow', 'still-unfollow', 'still-bot', 'still-park', 'still-park-refresh'].includes(action)) return json({error: 'Unknown Paper action.'}, 404);
+    if (!['account', 'history', 'seed', 'roll', 'basket', 'refresh', 'deposit', 'rule', 'stamp-prepare', 'stamp-confirm', 'stamps', 'still-account', 'still-open', 'still-clone', 'still-basket', 'still-refresh', 'still-close', 'still-follow', 'still-unfollow', 'still-bot', 'still-park', 'still-park-refresh'].includes(action)) return json({error: 'Unknown Paper action.'}, 404);
     if (request.method !== (read ? 'GET' : 'POST')) return json({error: 'Invalid Paper method.'}, 405);
     let input: Record<string, unknown> = {};
     if (!read) {

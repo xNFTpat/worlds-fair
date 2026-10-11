@@ -10,11 +10,12 @@ await build({entryPoints: ['src/worldsfair.ts'], outfile: join(dir, 'worldsfair.
   banner: {js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);"}});
 const {default: worker, paperEnvironment, ...exports} = await import(join(dir, 'worldsfair.mjs'));
 const origin = 'https://paper.test';
-let reads = 0, writes = 0, assets = 0, providers = 0;
+let reads = 0, writes = 0, assets = 0, providers = 0, durableCalls = 0;
 const store = new Map();
 const env = {
   LP_CACHE: {get: async key => {reads++; return store.get(key) ?? null;}, put: async () => {writes++;}},
   ASSETS: {fetch: async request => {assets++; return new Response('asset ' + new URL(request.url).pathname);}},
+  RANGE_ALERTS: {idFromName(name) {durableCalls++; return name;}, get() {durableCalls++; throw Error('Signing routes must never reach the paper durable object');}},
   MIN_TVL_USD: '5000', WALLETS: 'Sol:fixture-wallet,Other:0x0000000000000000000000000000000000000001',
   TX_KEY: 'synthetic-owner-key', PREVIEW_ORIGIN: 'https://live.test',
   EVM_EXECUTION: {get() {throw Error('Execution must never be forwarded');}},
@@ -33,12 +34,21 @@ try {
     '/api/debug/dexpaprika', '/api/%73olana/send', '/api/%2570aybox/mcp', '/api//evm/send',
     '/API/SOLANA/SEND', '/solana.js', '/phantom.js', '/owner-access.js', '/signing-frame/index.html',
     '/nested%2f..%2fsolana.js', '/nested%2f..%2fapi%2fsolana%2fsend',
+    '/api/paper/stamps', '/api/paper/stamp-prepare', '/api/paper/stamp-confirm',
+    '/api/paper/devnet', '/api/paper/devnet/prepare', '/api/paper/devnet-confirm',
+    '/API/PAPER/STAMP-PREPARE', '/api/paper/%2573tamp-confirm', '/api//paper//stamps',
+    '/api/paper/stamp-prepare?includeOther=1', '/nested%2f..%2fapi%2fpaper%2fstamp-prepare',
+    '/api/paper/devnet%252fsubmit', '/worldsfair-devnet', '/worldsfair-devnet.js',
+    '/worldsfair-devnet.js.map', '/WORLDSFAIR-DEVNET.JS', '/worldsfair-%2564evnet.js',
+    '/worldsfair-devnet.js?includeOther=1', '/nested%2f..%2fworldsfair-devnet.js',
   ];
-  for (const path of paths) for (const method of ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']) {
+  for (const path of paths) for (const method of ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
     const response = await worker.fetch(request(path, method, {origin, 'x-terminal-key': env.TX_KEY}), env);
     assert.equal(response.status, 403, method + ' ' + path);
     assert.equal(response.headers.get('cache-control'), 'no-store');
     if (method === 'HEAD') assert.equal(await response.text(), '');
+    else {const denied = await response.json(); assert.equal(denied.code, 'paper_only'); assert.match(denied.error, /read-only/); assert.match(denied.error, /every network/);}
+    assert.equal(response.headers.get('set-cookie'), null, 'Blocked signing never creates a browser session');
   }
   for (const path of ['/api/future-send', '/api/scanner/control', '/api/paper-fleet/control', '/api/active-lp/control'])
     assert.equal((await worker.fetch(request(path, 'POST', {origin}), env)).status, 404, 'Unlisted routes fail closed');
@@ -51,7 +61,7 @@ try {
   for (const headers of [{}, {origin: 'https://other.test'}])
     assert.equal((await worker.fetch(request('/api/refresh', 'POST', headers), env)).status, 403);
   assert.equal((await worker.fetch(request('/api/refresh'), env)).status, 405);
-  assert.deepEqual({reads, writes, assets, providers}, {reads: 0, writes: 0, assets: 0, providers: 0}, 'Denied requests stop before any side effects');
+  assert.deepEqual({reads, writes, assets, providers, durableCalls}, {reads: 0, writes: 0, assets: 0, providers: 0, durableCalls: 0}, 'Denied requests stop before session, cache, durable object, asset or provider work');
 
   const safe = paperEnvironment(env);
   for (const field of ['TX_KEY', 'PREVIEW_ORIGIN', 'EVM_EXECUTION', 'PRIVATE_KEY', 'OWNER_SECRET'])
@@ -131,5 +141,5 @@ try {
   assert.deepEqual({writes, assets, providers}, beforeGuided, 'Guided evidence stays read-only and uses only the supplied snapshot');
   for(const path of ['/brand/still-mark.svg','/product.css','/product-brand.js']){const response=await worker.fetch(request(path),env);assert.equal(response.status,200);assert.equal(await response.text(),'asset '+path,'public product assets reach only the static binding');}
   assert.equal(assets, 7); assert.equal(writes, 0); assert.equal(providers, 0);
-  console.log('PASS: Paper Worker blocks all signing/auth assets and endpoints before side effects; secrets excluded; read APIs and Solana defaults verified.');
+  console.log('PASS: Paper Worker blocks mainnet and devnet signing/auth assets and endpoints before side effects; secrets excluded; read APIs and Solana defaults verified.');
 } finally {globalThis.fetch = realFetch;}

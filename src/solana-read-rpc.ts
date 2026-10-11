@@ -6,8 +6,8 @@ const LABS = new Set(['https://api.mainnet-beta.solana.com/', 'https://api.mainn
 const READ_METHODS = new Set(['getAccountInfo','getMultipleAccounts','getEpochInfo','getTokenLargestAccounts','getBlockTime','getSlot','getBlockHeight','getGenesisHash','getProgramAccounts','getMinimumBalanceForRentExemption','getBalance','getTokenSupply','getLatestBlockhash','getFeeForMessage']);
 interface RpcRead {jsonrpc: '2.0'; id: number | string; method: string; params?: unknown[]}
 interface Options {deadline?: number; onRequest?: () => void}
-const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {status, headers: {'content-type':'application/json'}});
-const unavailable = (reads: RpcRead[], batch: boolean, message: string, status = 503) => json(batch ? reads.map(r=>({jsonrpc:'2.0',id:r.id,error:{code:-32004,message}})) : {jsonrpc:'2.0',id:reads[0]?.id??null,error:{code:-32004,message}}, status);
+const json = (value: unknown, status = 200, headers: Record<string,string> = {}) => new Response(JSON.stringify(value), {status, headers: {'content-type':'application/json',...headers}});
+const unavailable = (reads: RpcRead[], batch: boolean, message: string, status = 503, retrySeconds?: number) => json(batch ? reads.map(r=>({jsonrpc:'2.0',id:r.id,error:{code:-32004,message}})) : {jsonrpc:'2.0',id:reads[0]?.id??null,error:{code:-32004,message}}, status, retrySeconds===undefined?{}:{'retry-after':String(Math.max(1,Math.ceil(retrySeconds)))});
 
 /** A small, isolate-local circuit and immutable block-time cache. No account data
  * is cached here: mutable mint authorities, pool anchors and balances retain the
@@ -43,7 +43,7 @@ export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => n
     assertTime();
     const cooling=circuits.get(endpoint);
     if(cooling&&cooling.until>now()){
-     if(cooling.status===429)return unavailable(reads,batch,'Public Solana provider is cooling down.',429);
+     if(cooling.status===429)return unavailable(reads,batch,'Public Solana provider is cooling down.',429,(cooling.until-now())/1000);
      continue;
     }
     const publicNode=endpoint===PUBLIC_SOLANA_READ_RPC;
@@ -70,7 +70,9 @@ export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => n
      const status=response.status, retry=response.headers.get('retry-after'), seconds=Number(retry), retryAt=Number.isFinite(seconds)&&seconds>0?now()+seconds*1000:Date.parse(retry||'');
      await response.body?.cancel();
      if([401,403,429,500,502,503,504].includes(status))circuits.set(endpoint,{until:now()+Math.min(900000,Math.max(status===403||status===401?300000:30000,Number.isFinite(retryAt)?retryAt-now():0)),status});
-     if(status===429)return unavailable(reads,batch,'Public Solana provider is rate limited.',429);
+     // Keep the remaining provider cooldown visible to callers that persist it
+     // across Worker isolates. A synthetic response must not shorten that wait.
+     if(status===429)return unavailable(reads,batch,'Public Solana provider is rate limited.',429,(circuits.get(endpoint)!.until-now())/1000);
      if(![401,403,500,502,503,504].includes(status))return unavailable(reads,batch,'Public Solana provider rejected this read.',status);
      continue;
     }

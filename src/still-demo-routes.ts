@@ -3,13 +3,19 @@ import {parseStillRangeOptions} from './still-preflight-config';
 import type {Env} from './env';
 import {getSnapshot} from './refresh';
 import {listStillPools, buildStillBaskets, getStillPreflight, getStillBasketPreflight} from './still-preflight';
-const paths = new Set(['/api/still/park', '/api/still/pools', '/api/still/preflight', '/api/baskets', '/api/still/basket-preflight']);
+const paths = new Set(['/api/still/wallet','/api/still/wallet-position','/api/still/park', '/api/still/pools', '/api/still/preflight', '/api/baskets', '/api/still/basket-preflight']);
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {status, headers: {'content-type': 'application/json', 'cache-control': 'no-store'}});
 export async function stillDemoRoute(req: Request, env: Env): Promise<Response | null> {
   const url = new URL(req.url);
   if (!paths.has(url.pathname)) return null;
   if (!['GET', 'HEAD'].includes(req.method)) return json({error: 'This evidence endpoint is read-only.'}, 405);
   try {
+    if(url.pathname==='/api/still/wallet'||url.pathname==='/api/still/wallet-position'){
+      const address=url.searchParams.get('address')||'',pool=url.searchParams.get('poolAddress')||'',position=url.searchParams.get('positionAddress')||'';
+      if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)||(url.pathname.endsWith('wallet-position')&&[pool,position].some(v=>!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v))))return json({error:'Paste a valid Solana public address.'},400);
+      const {readStillWallet,readStillWalletPosition}=await import('./still-wallet');
+      return json(url.pathname.endsWith('wallet-position')?await readStillWalletPosition(env,address,pool,position):await readStillWallet(env,address));
+    }
     if(url.pathname==='/api/still/park')return json(await stillParkData(env));
     if (url.pathname === '/api/still/pools' || url.pathname === '/api/baskets') {
       const snapshot = await getSnapshot(env);

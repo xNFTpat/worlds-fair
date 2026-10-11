@@ -113,6 +113,24 @@ assert.equal((await readResearchRangeAnchor(anchorPool(false),noBudget,anchorMin
 const anchorRateEnv=env();globalThis.fetch=async()=>{blockedReads++;return new Response('',{status:429,headers:{'retry-after':'120'}});};
 assert.equal((await readResearchRangeAnchor(anchorPool(false),researchReadContext(anchorRateEnv),anchorMint())).status,'rate-limited');const beforeAnchorBackoff=blockedReads;
 assert.equal((await readMintSafety(pairedMint,researchReadContext(anchorRateEnv))).status,'rate-limited');assert.equal(blockedReads,beforeAnchorBackoff,'anchor429 shares RPC cooldown with mint research');
+const rpcBackoffKeys=[...anchorRateEnv.LP_CACHE.values.keys()].filter(k=>k.startsWith('research:v1:backoff:Solana RPC'));
+assert.equal(rpcBackoffKeys.length,1);assert.match(rpcBackoffKeys[0],/^research:v1:backoff:Solana RPC:[a-f0-9]{32}$/,'new RPC backoffs are scoped to a hashed provider URL');
+assert.ok(JSON.parse(anchorRateEnv.LP_CACHE.values.get(rpcBackoffKeys[0])).until>=Date.now()+119000,'RPC Retry-After persists across new request contexts');
+// Provider selection is operator configuration, never an automatic 429 retry.
+// A new configured endpoint has its own cooldown; the old one stays blocked.
+const changedProvider={...anchorRateEnv,SOLANA_RPC:'https://another-rpc.example/read?api-key=synthetic-private-key'};
+globalThis.fetch=async(input)=>{blockedReads++;assert.equal(String(input),changedProvider.SOLANA_RPC);return json(anchorRpc(binaryY));};
+assert.equal((await readResearchRangeAnchor(anchorPool(false),researchReadContext(changedProvider),anchorMint(),true)).status,'available');
+const afterProviderChange=blockedReads;assert.equal((await readResearchRangeAnchor(anchorPool(false),researchReadContext(anchorRateEnv),anchorMint(),true)).status,'rate-limited');assert.equal(blockedReads,afterProviderChange,'changing configuration does not clear the original provider cooldown');
+// Honor shared records written by the prior deployment until natural expiry.
+const legacyRateEnv={...env(),SOLANA_RPC:changedProvider.SOLANA_RPC},legacyUntil=Date.now()+120000,legacyRecord={until:legacyUntil,attempts:4,last429At:Date.now()};
+legacyRateEnv.LP_CACHE.values.set('research:v1:backoff:Solana RPC',JSON.stringify(legacyRecord));
+assert.equal((await readResearchRangeAnchor(anchorPool(false),researchReadContext(legacyRateEnv),anchorMint(),true)).status,'rate-limited');assert.equal(blockedReads,afterProviderChange,'active legacy cooldown still blocks an explicitly changed RPC');
+Date.now=()=>legacyUntil+1;assert.equal((await readResearchRangeAnchor(anchorPool(false),researchReadContext(legacyRateEnv),anchorMint(),true)).status,'available');assert.equal(blockedReads,afterProviderChange+1);Date.now=originalNow;
+assert.deepEqual(JSON.parse(legacyRateEnv.LP_CACHE.values.get('research:v1:backoff:Solana RPC')),legacyRecord,'migration never deletes or shortens the old cooldown');
+const keyedRateEnv={...env(),SOLANA_RPC:changedProvider.SOLANA_RPC};globalThis.fetch=async()=>new Response('',{status:429,headers:{'retry-after':'120'}});
+await readResearchRangeAnchor(anchorPool(false),researchReadContext(keyedRateEnv),anchorMint(),true);
+assert.ok([...keyedRateEnv.LP_CACHE.values.keys()].every(k=>!k.includes('synthetic-private-key')&&!k.includes('another-rpc.example')),'private provider URL details never enter KV key names');
 
 // Genuine dated source records; disappearing from one catalogue sample does not erase history.
 const histEnv=env(),start=now-4*HOUR;

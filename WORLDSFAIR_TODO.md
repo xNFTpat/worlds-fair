@@ -2,6 +2,20 @@
 
 Product: **Still — Clarity before capital.** Public repository: [xNFTpat/worlds-fair](https://github.com/xNFTpat/worlds-fair). The original LP Terminal repository remains private.
 
+## 11 October — final MVP pass (current scope)
+
+Deadline: **Monday 12 October 2026 at 13:00 UK**. This supersedes the dates in the historical release notes below. Branch `worldsfair`; Worker `lp-terminal-worldsfair` only. Paper actions and public wallet reads only; all signing is excluded, including the earlier optional devnet stamp.
+
+- [x] Phase 1: core path, exact wording, supplied logo/head tags, dated Jupiter conversion drag and RPC-observed base-fee model. Commit `7d64516eac95b413a79e86c63270fca8cdd6bfa5`. Local desktop/375px flow checked; live RPC provider failure found during deployment smoke check and tracked in Phase 2.
+- [x] Phase 2 implementation: public-key-only Phantom/paste address, actual Meteora position identities, read-only bin checks, independently funded paper copies and no public signing routes. Direct-entry, connection races, missing data, clone idempotency and privacy checks pass. Deployment receipt is recorded separately.
+- [ ] Verify the top five live SOL pool cost reads after the public RPC correction. Do not substitute a guessed cost for unavailable provider evidence.
+- [ ] Phase 3: verdict-first pool cards, strict brand palette/horizon layout, bounded motion, reduced-motion and mobile speed checks.
+- [ ] Phase 3b last: locally cached creator/partner/token assets, visible attribution and real public basket previews.
+- [ ] Capture the final live Home, Pre-flight and Positions at phone and desktop widths.
+- [ ] Pat: test the public-key-only Phantom connection in your own wallet; automated tests cover connection rejection and prove no signing methods are accessed. No signature is requested or needed.
+
+Cost scope: displayed net is a **paper estimate** using dated conversion drag and observed network base fees for the declared plan. It excludes refundable rent, additional account setup and later execution changes. Future downside exits and incomplete holder classification remain unavailable; no pool is promised to pass.
+
 ## 11 October — Claude copy and UI pass
 
 Current freeze: **Monday 12 October 2026 at 15:00 UK**, replacing the earlier deadline below. Scope remains the standalone public `worldsfair` branch and `lp-terminal-worldsfair` Worker, paper only.
