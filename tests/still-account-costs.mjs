@@ -33,11 +33,11 @@ try{
  store.clear();mode='missing';const missing=await readStillAccountCosts(env,poolAddress,range,true);assert.equal(missing.setupRentLamports,L.binArrayBytes*11);assert.equal(missing.missingAccounts,1);
  store.clear();mode='wrong-pool';const invalid=await readStillAccountCosts(env,poolAddress,range,true);assert.equal(invalid.positionRentLamports,L.positionBytes*11);assert.equal(invalid.setupRentLamports,null);assert.equal(store.size,0,'Incomplete setup is not cached as success');
  const now=Date.now(),at=new Date(now).toISOString(),mint='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
- const pool={id:'solana:'+poolAddress,address:poolAddress,chain:'solana',venue:'meteora-dlmm',pair:'TEST/SOL',base:{address:mint,symbol:'TEST'},quote:{address:'So11111111111111111111111111111111111111112',symbol:'SOL'},tvlUsd:100000,priceQuote:.01,priceUsd:1,quotePriceUsd:100,ageHours:200,fetchedAt:at,activity:{fees1h:500},fees24hUsd:12000,poolConfig:{binStep:100},tags:[]};
+ const pool={id:'solana:'+poolAddress,address:poolAddress,chain:'solana',venue:'meteora-dlmm',pair:'TEST/SOL',base:{address:mint,symbol:'TEST'},quote:{address:'So11111111111111111111111111111111111111112',symbol:'SOL'},tvlUsd:100000,priceQuote:.01,priceUsd:1,quotePriceUsd:100,ageHours:200,fetchedAt:at,volume24hUsd:240000,activity:{fees1h:500,volume1h:10000},fees24hUsd:12000,poolConfig:{binStep:100},tags:[]};
  const anchor={status:'available',asOf:at,activeBinId:0,activeBinPriceSol:.01,binStep:100,minNativeBinId:-10000,maxNativeBinId:10000};
  const rpc={mint,status:'available',asOf:at,decimals:6,transferFeeStatus:'known',transferFee:{bps:300,maximumRaw:'10000',configAuthority:null}};
  const network={asOf:at,singleLamports:5000,doubleLamports:10000,source:'Fixture'},accounts={...observed,asOf:at,rangeKey:'-1',setupRentLamports:1000000,missingAccounts:1};
- const quote={mode:'best',sizeSol:.25,status:'quoted',asOf:at,buyAsOf:at,sellAsOf:at,expiresAt:now+45000,exitFeeSource:'jupiter-route',verifiedExitSwapSol:.002,tokenRaw:'50000000'};
+ const quote={mode:'best',sizeSol:.25,status:'quoted',asOf:at,buyAsOf:at,sellAsOf:at,expiresAt:now+45000,exitFeeSource:'jupiter-route',verifiedExitSwapSol:.002,tokenRaw:'50000000',returnedSol:.498,priceMark:{source:'active-bin',priceSol:.01,asOf:at}};
  const input={pool,rangeAnchor:anchor,safety:{rpc},network,accountCosts:accounts,quotes:[quote]};
  const full=buildStillPreflight(input,.5,now);
  assert.equal(full.positionRentSol.value,observed.positionRentLamports/1e9);assert.equal(full.exitTransferFeeSol.value,.0001,'Fee cap is token-denominated, rounded in raw units');
@@ -51,7 +51,7 @@ try{
  const missingNetwork=buildStillPreflight({...input,network:null},.5,now);assert.equal(missingNetwork.exitCostSol.value,null,'Complete exit total requires network evidence; tax stays separately visible');assert.equal(missingNetwork.exitCostComplete,false);
  const noMint=buildStillPreflight({...input,safety:undefined},.5,now);assert.equal(noMint.entryCostSol.value,.00001);assert.equal(noMint.entryCostSol.asOf,at,'Known all-SOL entry fee retains its source date without a mint read');
  const unknown=buildStillPreflight({...input,accountCosts:null},.5,now);assert.equal(unknown.setupCostSol.value,null);assert.equal(unknown.netReturnPct.value,null);
- const zero=buildStillPreflight({...input,pool:{...pool,activity:{fees1h:0}}},.5,now);assert.equal(zero.breakEvenStatus,'never');assert.equal(zero.breakEvenHours.value,null);
+ const zero=buildStillPreflight({...input,pool:{...pool,activity:{fees1h:0,volume1h:0}}},.5,now);assert.equal(zero.breakEvenStatus,'never');assert.equal(zero.breakEvenHours.value,null);
  const stale=buildStillPreflight({...input,accountCosts:{...accounts,asOf:new Date(now-600001).toISOString()}},.5,now);assert.equal(stale.positionRentSol.value,null);assert.equal(stale.netReturnPct.value,null);
  console.log('Still account costs: SDK-verified allocation/PDA layouts, live rent, exact bin identity, missing setup, capped tax without quote, quote tax not doubled, refundable deposit excluded and honest recovery passed');
 }finally{globalThis.fetch=originalFetch;await rm(dir,{recursive:true,force:true});}

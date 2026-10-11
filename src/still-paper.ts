@@ -339,9 +339,9 @@ export class StillPaperLedger {
       const positionId = 'paper:' + this.deps.id();
       const position: StillPaperPosition = {id: positionId, positionAddress: positionId, poolAddress: leg.poolAddress, name: result.name, pairedMint:result.pool?.pairedMint, basketId, basketName,
         status: 'open', openedAt: at, closedAt: null, amountLamports: size, amountSol: size / LAMPORTS_PER_SOL,
-        entryPriceSol: ledger.priceSol, entryAsOf: result.fetchedAt!, entryCostsSol: nonnegative(ledger.entryCostsSol) ? ledger.entryCostsSol : null,
+        entryPriceSol: ledger.priceSol, entryAsOf: result.fetchedAt!, entryCostsSol: valid(ledger.entryCostsSol) ? ledger.entryCostsSol : null,
         costModel:result.paperCostModel?{asOf:result.paperCostModel.asOf,note:result.paperCostModel.note,source:result.roundTripCostSol.source}:undefined,
-        exitCostsSol: nonnegative(ledger.exitCostsSol) ? ledger.exitCostsSol : null, transferFeeBps: nonnegative(ledger.transferFeeBps) ? ledger.transferFeeBps : null,
+        exitCostsSol: valid(ledger.exitCostsSol) ? ledger.exitCostsSol : null, transferFeeBps: nonnegative(ledger.transferFeeBps) ? ledger.transferFeeBps : null,
         range: {shape: result.range.shape, floorPriceSol: floor, topPriceSol: top, bins, note: result.range.note},
         lastObservationAt: at, lastFeeRateHourly: nonnegative(ledger.feeRateHourly) ? ledger.feeRateHourly : null, lastFeeRateAsOf: result.feeRateHourly.asOf,
         settledLamports: null, settlementNote: STILL_SETTLEMENT_NOTE,

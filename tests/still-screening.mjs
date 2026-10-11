@@ -9,11 +9,11 @@ try{
  await build({stdin:{contents:"export * from './src/still-preflight'; export * from './src/still-preflight-config';",resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',outfile:join(dir,'test.mjs')});
  const {buildStillPreflight,parseStillRangeOptions}=await import(pathToFileURL(join(dir,'test.mjs')));
  const now=Date.UTC(2026,9,11,12),at=new Date(now).toISOString(),mint='synthetic-mint';
- const pool={id:'solana:synthetic',address:'synthetic',chain:'solana',venue:'meteora-dlmm',pair:'TEST/SOL',base:{address:mint,symbol:'TEST'},quote:{address:'So11111111111111111111111111111111111111112',symbol:'SOL'},tvlUsd:100000,priceQuote:.01,priceUsd:1,quotePriceUsd:100,ageHours:200,fetchedAt:at,activity:{fees1h:500},fees24hUsd:12000,poolConfig:{binStep:100},tags:[]};
+ const pool={id:'solana:synthetic',address:'synthetic',chain:'solana',venue:'meteora-dlmm',pair:'TEST/SOL',base:{address:mint,symbol:'TEST'},quote:{address:'So11111111111111111111111111111111111111112',symbol:'SOL'},tvlUsd:100000,priceQuote:.01,priceUsd:1,quotePriceUsd:100,ageHours:200,fetchedAt:at,volume24hUsd:240000,activity:{fees1h:500,volume1h:10000},fees24hUsd:12000,poolConfig:{binStep:100},tags:[]};
  const rpc={mint,status:'available',asOf:at,transferFeeStatus:'none',transferFee:null};
  const detail={pool,safety:{rpc}};
  const check=(d,id)=>buildStillPreflight(d,.5,now).checks.find(c=>c.id===id);
- for(const [fees,status] of [[500,'pass'],[499,'caution'],[150,'caution'],[149,'fail'],[0,'fail']])assert.equal(check({...detail,pool:{...pool,activity:{fees1h:fees}}},'fees').status,status);
+ for(const [fees,status] of [[500,'pass'],[499,'caution'],[150,'caution'],[149,'fail'],[0,'fail']])assert.equal(check({...detail,pool:{...pool,activity:{fees1h:fees,volume1h:10000}}},'fees').status,status);
  assert.equal(check(detail,'tax').status,'pass');
  assert.equal(check({...detail,safety:{rpc:{...rpc,transferFeeStatus:'known',transferFee:{bps:0,maximumRaw:'100',configAuthority:'authority'}}}},'tax').status,'fail','Mutable zero tax still fails');
  for(const [bps,status] of [[200,'caution'],[201,'fail']])assert.equal(check({...detail,safety:{rpc:{...rpc,transferFeeStatus:'known',transferFee:{bps,maximumRaw:'100',configAuthority:null}}}},'tax').status,status);

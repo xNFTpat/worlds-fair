@@ -99,10 +99,10 @@ try {
   assert.equal(buildStillPreflight({...input, safety: {rpc: {...rpc, freezeAuthority: 'active'}}}, .5, now).verdict.label, 'Marginal');
   const tax = buildStillPreflight({...input, safety: {rpc: {...rpc, transferFeeStatus: 'known', transferFee: {bps: 150, maximumRaw: '10000', configAuthority: 'active'}}}}, .5, now);
   assert.equal(tax.transferFeeBps.value, 150); assert.equal(tax.verdict.label, 'Marginal');
-  const quote = {mode: 'best', sizeSol: .25, status: 'quoted', asOf: at, buyAsOf: at, sellAsOf: at, expiresAt: now + 45_000, exitFeeSource: 'jupiter-route', exitCostSol: .001, verifiedExitSwapSol:.001, verifiedEntrySwapSol:.001, roundTripCostSol: .002};
+  const quote = {tokenDecimals:6,tokenRaw:'25000000',returnedSol:.249,priceMark:{source:'active-bin',priceSol:.01,asOf:at},mode: 'best', sizeSol: .25, status: 'quoted', asOf: at, buyAsOf: at, sellAsOf: at, expiresAt: now + 45_000, exitFeeSource: 'jupiter-route', exitCostSol: .001, verifiedExitSwapSol:.001, verifiedEntrySwapSol:.001, roundTripCostSol: .002};
   const quoted = buildStillPreflight({...input, quotes: [quote]}, .5, now);
   assert.equal(quoted.exitConversionSol.value, .001); assert.equal(quoted.exitCostSol.value, null, 'a swap quote alone is not an all-in LP exit cost');
-  for (const change of [{sizeSol: 1}, {verifiedExitSwapSol: null}, {verifiedExitSwapSol: undefined}, {status: 'stale'}, {expiresAt: now - 1}]) assert.equal(buildStillPreflight({...input, quotes: [{...quote, ...change}]}, .5, now).exitConversionSol.value, null);
+  for (const change of [{sizeSol: 1}, {returnedSol: null}, {tokenRaw: undefined}, {status: 'stale'}, {expiresAt: now - 1}]) assert.equal(buildStillPreflight({...input, quotes: [{...quote, ...change}]}, .5, now).exitConversionSol.value, null);
   assert.equal(buildStillPreflight({...input, quotes: [{...quote, verifiedExitSwapSol: .02}]}, .5, now).verdict.label, 'Marginal');
   assert.equal(buildStillPreflight({pool: pool('zero', {activity: {fees1h: 0}})}, .5, now).verdict.label, 'Marginal');
 
@@ -133,23 +133,20 @@ try {
   for (const field of ['entryCostSol', 'exitCostSol', 'roundTripCostSol', 'networkCostSol']) assert.equal(modeled[field].asOf, at);
   assert.equal(modeled.scenarios[0].netValueSol.value, null, 'a current reference cannot quote future stressed inventory');
   assert.match(modeled.scenarios[0].netValueSol.note, /future stressed withdrawal/);
-  // Favourable cross-venue marks cannot erase the verified fee-plus-impact floor.
-  const assumedFloorQuote={...quote,exitFeeSource:'assumed',quotedExitDragSol:0,verifiedExitSwapSol:null};
-  const actualDrag=buildStillPreflight({...healthyInput,quotes:[assumedFloorQuote]},.5,now);
-  assert.equal(actualDrag.exitCostSol.value,null,'Missing verified fee floor never becomes network-only');
-  assert.equal(actualDrag.verdict.label,'Marginal');
-  const favorableRoute=buildStillPreflight({...healthyInput,quotes:[{...quote,quotedExitDragSol:0}]},.5,now);
-  closeTo(favorableRoute.exitCostSol.value,.00101,'Favourable price retains route fee plus impact');
+  // Returned amounts are sufficient: hop fees/impact are optional and must not be added twice.
   for(const verifiedExitSwapSol of [undefined,null,0,-1,NaN,Infinity]) {
     const result=buildStillPreflight({...healthyInput,quotes:[{...quote,verifiedExitSwapSol,quotedExitDragSol:0}]},.5,now);
-    assert.equal(result.exitCostSol.value,null);assert.equal(result.netReturnPct.value,null);assert.equal(result.verdict.label,'Marginal');
+    closeTo(result.exitCostSol.value,.00101,'Ignore obsolete fee floor');
   }
+  const favourable=buildStillPreflight({...healthyInput,quotes:[{...quote,returnedSol:.251}]},.5,now);
+  closeTo(favourable.exitCostSol.value,-.00099,'Favourable execution is a signed difference, not invented fees');
+  assert.equal(favourable.breakEvenHours.value,0,'Already covered costs need no fee accrual');
   for (const change of [{sizeSol:.5},{status:'stale'},{expiresAt:now-1},{asOf:iso(now+1),buyAsOf:iso(now+1),sellAsOf:iso(now+1)}]) {
     assert.equal(buildStillPreflight({...healthyInput,quotes:[{...quote,...change}]},.5,now).exitCostSol.value,null,'Requires current half-size quote');
   }
   const longHold = {shape: 'BidAsk', floorPct: 47.5, ceilingPct: 0, holdMinutes: 2880};
   for (const [totalExit, status] of [[.005, 'pass'], [.00500001, 'caution'], [.015, 'caution'], [.01500001, 'fail']]) {
-    const result = buildStillPreflight({...healthyInput, quotes: [{...quote, verifiedExitSwapSol: totalExit - .00001}]}, .5, now, longHold);
+    const result = buildStillPreflight({...healthyInput, quotes: [{...quote, returnedSol: .25 - totalExit + .00001}]}, .5, now, longHold);
     assert.equal(result.checks.find(c => c.id === 'cost').status, status, 'exit threshold includes the RPC base-fee plan at ' + totalExit);
   }
   assert.equal(buildStillPreflight(healthyInput, .5, now, {...longHold, holdMinutes: 1}).checks.find(c => c.id === 'cost').status, 'fail', 'cost exceeding planned-hold fees fails even below 1%');
@@ -196,7 +193,7 @@ try {
     return {...detail, accountCosts:{...accountCosts,rangeKey:'-1,0'}, entryQuotes: [fundingQuote]};
   }
   const fundedDetail = fundedInput(.5), funded = buildStillPreflight(fundedDetail, .5, now, twoSidedRange), fundingQuote = fundedDetail.entryQuotes[0];
-  const quotedEntryLoss = fundingQuote.verifiedEntrySwapSol;
+  const quotedEntryLoss = Math.round((Number(fundingQuote.inputRaw)/1e9-Number(fundingQuote.tokenRaw)/1e6*.01)*1e9)/1e9;
   closeTo(funded.entryConversionSol.value, quotedEntryLoss, 'two-sided conversion uses exact funding quote amounts');
   closeTo(funded.entryCostSol.value, quotedEntryLoss + .000015, 'two-sided entry includes one funding-swap base fee');
   closeTo(funded.networkCostSol.value, .000025, 'declared open, entry swap, close and exit swap base fees');
@@ -234,12 +231,12 @@ try {
     const cardInput = {...healthyInput,accountCosts:{...accountCosts,poolAddress:firstAddress}, pool: {...healthyPool, id: cards[0].id, address: firstAddress}};
     const cardEnv = {LP_CACHE: {async get(key) {
       cardKeys.push(key);
-      return key === 'still:preflight-input:v4:' + firstAddress + ':500000000:null' ? {at, input: cardInput} : null;
+      return key === 'still:preflight-input:v5:' + firstAddress + ':500000000:null' ? {at, input: cardInput} : null;
     }}};
     const summaries = await listStillPoolsWithSummaries(snapshot, cardEnv, now);
     assert.equal(summaries.length, 8); assert.equal(cardKeys.length, 8);
     assert.equal(new Set(cardKeys).size, 8);
-    assert.deepEqual(cardKeys, cards.map(card => 'still:preflight-input:v4:' + card.address + ':500000000:null'));
+    assert.deepEqual(cardKeys, cards.map(card => 'still:preflight-input:v5:' + card.address + ':500000000:null'));
     assert.equal(summaries[0].cardSummary.verdict.label, 'Worth it', 'fresh default evidence may produce a real passing card');
     for (const card of summaries) {
       assert.equal(card.cardSummary.sizeSol, .5); assert.equal(card.cardSummary.scope, '0.5 paper SOL · default range');
@@ -257,7 +254,7 @@ try {
     async function oneSummary(saved) {
       let reads = 0;
       const result = await listStillPoolsWithSummaries(singleSnapshot, {LP_CACHE: {async get(key) {
-        reads++; assert.equal(key, 'still:preflight-input:v4:steady-a:500000000:null');
+        reads++; assert.equal(key, 'still:preflight-input:v5:steady-a:500000000:null');
         if (saved instanceof Error) throw saved;
         return saved;
       }}}, now);
@@ -301,7 +298,7 @@ try {
     assert.equal(fetches, 0, 'card summaries make no provider calls, even on cache misses or corrupt evidence');
     // A live pre-flight's exact evidence survives the cached-only paper-open path.
     const cachedRange = twoSidedRange, cachedSize = .37, cachedInput = fundedInput(cachedSize);
-    const cacheKey = 'still:preflight-input:v4:steady-a:370000000:' + JSON.stringify(cachedRange);
+    const cacheKey = 'still:preflight-input:v5:steady-a:370000000:' + JSON.stringify(cachedRange);
     let savedInput = {at, input: cachedInput};
     const cachedEnv = {LP_CACHE: {async get(key) {return key === 'snapshot:v1' ? snapshot : key === cacheKey ? savedInput : null;}}};
     const cached = await getStillPreflight(cachedEnv, 'steady-a', cachedSize, cachedRange);
@@ -350,10 +347,10 @@ try {
     assert.equal(live.paperCostModel.netAfterHoldSol.value,null,'Unverified bin setup keeps all-in net unavailable even with real exit quote');
     assert.match(live.exitConversionSol.source, /Meteora DLMM Data API exact-pool price/);
     assert.match(live.range.note, /native bin alignment is unverified/i);
-    assert.equal(rpcRequests, 1);assert.equal(quoteRequests, 2);
+    assert.equal(rpcRequests, 1);assert.equal(quoteRequests, 1);
     const reopened = await getStillPreflight(liveEnv, liveAddress, .5);
     assert.equal(reopened.exitCostSol.value, live.exitCostSol.value, 'paper-open rebuild preserves this exact dated API-marked quote');
-    assert.equal(quoteRequests, 2);
+    assert.equal(quoteRequests, 1);
   } finally {globalThis.fetch = originalFetch;}
   console.log('Still guided pre-flight: bounded current shortlist, exact basket splits, sourced fee windows, monotonic downside, native orientation, observed cost plans, funding quotes, hard rejections, exact cached inputs, card-summary identity/expiry and no provider fanout passed');
 } finally { await rm(dir, {recursive: true, force: true}); }

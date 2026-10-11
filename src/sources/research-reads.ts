@@ -160,6 +160,7 @@ export function researchToken(pool:Pool):{mint:string;solX:boolean;priceSol:numb
 interface JupiterQuote {inputMint:string;outputMint:string;inAmount:string;outAmount:string;otherAmountThreshold?:string;priceImpactPct?:string;routePlan?:{percent?:number;bps?:number;swapInfo?:{ammKey?:string;label?:string;inputMint?:string;outputMint?:string;inAmount?:string;outAmount?:string;feeAmount?:string;feeMint?:string}}[];contextSlot?:number}
 interface QuotePair {buy:JupiterQuote;sell:JupiterQuote;buyAsOf:string|null;sellAsOf:string|null}
 export interface ResearchQuote {
+ direction?:'entry'|'exit'; tokenDecimals?:number;
  priceMark?:ResearchQuoteMark;
  verifiedEntrySwapSol?:number|null; verifiedExitSwapSol?:number|null; // Still: verified route fees + reported adverse impact, never an assumed floor.
  quotedExitDragSol?:number|null; // Net quoted proceeds versus the dated mark, without any assumed fee floor.
@@ -339,6 +340,29 @@ export async function readResearchQuotes(pool:Pool,context:ResearchReadContext,d
   if(output.status==='quoted'){const remembered=await rememberEconomicQuote(pool,context.env,output,decimals);return remembered.economicEstimate?remembered:retain(remembered);}
   return retain(output);
  })));
+}
+
+/** Still needs one ExactIn leg, not a round trip or optional per-hop fee fields. */
+export async function readStillSwapQuote(pool:Pool,context:ResearchReadContext,decimals:number|null,mark:ResearchQuoteMark|null,direction:'entry'|'exit',sizeSol:number):Promise<ResearchQuote>{
+ const token=researchToken(pool),now=Date.now(),markAt=Date.parse(mark?.asOf||'');
+ const result:ResearchQuote={direction,sizeSol,mode:'best',status:'unavailable',roundTripCostSol:null,exitCostSol:null,asOf:null,note:'',selectedPoolMatched:null,buyRoutePools:[],sellRoutePools:[],buyPriceImpact:null,sellPriceImpact:null,slippageBps:50,inputRaw:null,tokenRaw:null,returnedSol:null};
+ const fail=(reason:string)=>{result.note=reason;console.warn(JSON.stringify({event:'still_quote_unavailable',poolAddress:pool.address,direction,reason}));return result;};
+ const markMatches=mark?.source==='active-bin'||mark?.source==='meteora-pool'&&mark.poolAddress===pool.address&&mark.mint===token?.mint;
+ if(!token||!markMatches||!positive(mark?.priceSol)||!Number.isFinite(markAt)||markAt>now||now-markAt>45000)return fail('Fresh exact-pool mid-price unavailable.');
+ if(!Number.isInteger(decimals)||decimals!<0||decimals!>18)return fail('Token decimals unavailable from the mint read.');
+ const amount=direction==='exit'?Math.floor(sizeSol/mark.priceSol*10**decimals!):Math.round(sizeSol*1e9);
+ if(!Number.isSafeInteger(amount)||amount<=0)return fail('Swap size cannot be represented in raw token units.');
+ const input=direction==='exit'?token.mint:RESEARCH_SOL,output=direction==='exit'?RESEARCH_SOL:token.mint;
+ const query=new URLSearchParams({inputMint:input,outputMint:output,amount:String(amount),swapMode:'ExactIn',slippageBps:'50'});
+ const read=await readJson<JupiterQuote>(context,{name:`still-swap:v1:${input}:${output}:${amount}`,provider:'Jupiter',url:'https://api.jup.ag/swap/v1/quote?'+query,ttl:45000,init:{headers:{accept:'application/json',...(context.env.JUPITER_API_KEY?{'x-api-key':context.env.JUPITER_API_KEY}:{})}}});
+ if(read.status!=='available'){result.status=read.status==='unknown'?'unknown':read.status;return fail(read.note);}
+ const q=read.data;
+ if(!q||!raw(q.outAmount)||BigInt(q.outAmount)<=0n)return fail('Jupiter returned no usable route/output amount.');
+ if(q.inputMint!==input||q.outputMint!==output||q.inAmount!==String(amount))return fail('Jupiter quote mint or input amount mismatch.');
+ result.status='quoted';result.asOf=read.asOf;result.expiresAt=read.expiresAt;result.priceMark=mark;result.tokenDecimals=decimals!;
+ result.inputRaw=direction==='entry'?q.inAmount:null;result.tokenRaw=direction==='exit'?q.inAmount:q.outAmount;result.returnedSol=direction==='exit'?Number(q.outAmount)/1e9:null;
+ result.note='Exact-size Jupiter output versus the dated pool mid-price; includes fees embedded in proceeds. Per-hop fee and impact fields are not required. Negative cost means favourable execution versus that mark.';
+ return result;
 }
 
 export interface ResearchFlag {code:string;label:string;source:'RPC'|'RugCheck'|'DexScreener';severity:'info'|'attention';asOf:string|null}
