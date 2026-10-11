@@ -1,5 +1,12 @@
 # World's Fair disclosure
 
+## 11 October — exit floor and visible reasons, 23:14 BST
+
+- [x] Deployed `fb7574e9918a955e628ed1b3f36ee1a7d8f4ef56` to Still only: concurrent exact-pool price/quote, observed pool-fee exit floor, Better than mid note, subminute recovery label and visible deciding checks.
+- [x] Same twelve pools at 0.5 SOL / four hours: all entry, rent, exit and net figures available after JUP retry. None Worth a look. DOPE remains Caution for elevated exit cost, unknown holders and insufficient six-/24-hour pool history.
+- [x] UNCC excluded by unchanged $5k minimum; direct thin view shows real costs/rent, $40.80 TVL and 31.5185% exit. SKR remains pinned. No thresholds or conservative fee projections changed.
+- [x] All 85 script tests, both type checks and five Worker runtime suites passed. Live UI checked. [Full checkpoint and exact identities](docs/FLOOR_VERDICT_CHECKPOINT.md). Stopped as requested.
+
 ## 11 October — quote proceeds and conservative fees, 22:44 BST
 
 - [x] Deployed `1e12f7eb53ab9b1d8d4859dd6d1cc09771beb484` to Still only; direct Jupiter amounts replace required per-hop fee/impact breakdowns for exit and two-sided entry.
