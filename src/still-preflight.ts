@@ -1,4 +1,4 @@
-import {readStillNetwork,type StillNetworkRead} from './still-costs';
+import {readStillNetwork,STILL_NETWORK_MAX_AGE_MS,type StillNetworkRead} from './still-costs';
 import {fetchMeteoraPool} from './sources/meteora';
 import {stillChecks, type StillCheck} from './still-checks';
 import {parseStillRangeOptions, type StillRangeOptions} from './still-preflight-config';
@@ -6,7 +6,7 @@ import type {Env} from './env';
 import type {Pool, Snapshot} from './schema';
 import {getSnapshot} from './refresh';
 import {researchFeeRates, researchPool, type ResearchPoolDetail} from './lp-research';
-import {cachedMintSafety, cachedResearchQuotes, researchReadContext, readMintSafety, readRugSafety, readResearchCandles, readResearchRangeAnchor, readResearchQuotes, type RugSafety, type ResearchCandles, researchQuoteFresh, researchEconomicQuoteFresh, researchToken, type MintSafety, type ResearchQuote, type ResearchRangeAnchor} from './sources/research-reads';
+import {cachedMintSafety, cachedResearchQuotes, researchReadContext, readMintSafety, readRugSafety, readResearchCandles, readResearchRangeAnchor, readResearchQuotes, type RugSafety, type ResearchCandles, researchQuoteFresh, researchEconomicQuoteFresh, researchToken, type MintSafety, type ResearchQuote, type ResearchQuoteMark, type ResearchRangeAnchor} from './sources/research-reads';
 import {buildResearchRange, defaultResearchFloor, inventoryAtPrice, type ResearchRangeBin} from './research-range';
 
 export const STILL_MAX_PRICE_AGE_MS = 10 * 60_000;
@@ -43,6 +43,14 @@ export interface StillPoolCard {
   priceSol: StillEvidence<number>;
   binStep: StillEvidence<number>;
   risk: {label: StillRiskLabel; reason: string; source: string; asOf: string};
+}
+export interface StillPoolCardSummary {
+  verdict: StillPreflight['verdict'];
+  reasons: Pick<StillCheck, 'id' | 'label' | 'status' | 'result' | 'source' | 'asOf'>[];
+  sizeSol: 0.5;
+  scope: string;
+  asOf: string | null;
+  note: string;
 }
 function supportedPool(pool: Pool, now: number) {
   const token = researchToken(pool);
@@ -214,11 +222,13 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
     (nonnegative(q.quotedExitDragSol) || ['jupiter-route', 'pool-config', 'pump-config'].includes(q.exitFeeSource || '') && (!q.economicEstimate || q.economicEstimate.costModelVersion === 3 && q.economicEstimate.exitFeeSource !== 'assumed')));
   const quoteData = quote?.economicEstimate && researchEconomicQuoteFresh(quote, now) ? quote.economicEstimate : quote;
   const exitValue = nonnegative(quote?.quotedExitDragSol) ? quote!.quotedExitDragSol! : nonnegative(quoteData?.exitCostSol) ? quoteData!.exitCostSol! : null;
-  const quoteAt = quoteData?.asOf ?? null;
+  const quoteDates=[quoteData?.asOf,quote?.priceMark?.asOf].filter((v):v is string=>!!v);
+  const quoteAt=quoteDates.length?quoteDates.sort()[0]:null;
+  const quoteMarkSource=quote?.priceMark?.source==='meteora-pool'?'Meteora DLMM Data API exact-pool price':quote?.priceMark?.source==='active-bin'?'Confirmed Solana RPC DLMM active bin':null;
   const entryConversionSol = evidence(range && range.bins.every(b=>b.token===0) ? 0 : null, 'Still paper range allocation', range?.asOf ?? null, range && range.bins.every(b=>b.token===0) ? 'A SOL-only paper allocation buys no paired token at entry. This excludes unmeasured network fees and refundable account rent.' : 'This range needs paired-token inventory. Its entry conversion has not been quoted; network and account setup costs are also unavailable.');
-  const exitConversionSol = evidence(exitValue, 'Jupiter dated token-to-SOL quote', quoteAt,
-    (nonnegative(quote?.quotedExitDragSol)?'':'Includes a verified route or matched-pool fee floor. ')+'Full-size token-to-SOL reference: quoted net proceeds compared with the dated pool mark, floored at zero. Route fees are already embedded in proceeds; better route pricing can offset them, so zero drag does not mean zero swap fees. Excludes network fees and additional withdrawal tax. Not a future LP exit guarantee.');
-  const netRead=detail.network,netFresh=netRead&&recent(netRead.asOf,60000,now)&&Number.isSafeInteger(netRead.singleLamports)&&netRead.singleLamports>=0&&Number.isSafeInteger(netRead.doubleLamports)&&netRead.doubleLamports>=0;
+  const exitConversionSol = evidence(exitValue, 'Jupiter dated token-to-SOL quote'+(quoteMarkSource?' + '+quoteMarkSource:''), quoteAt,
+    (quoteMarkSource?'Comparison mark: '+quoteMarkSource+' at '+quote!.priceMark!.asOf+'. ':'')+(nonnegative(quote?.quotedExitDragSol)?'':'Includes a verified route or matched-pool fee floor. ')+'Full-size token-to-SOL reference: quoted net proceeds compared with the dated pool mark, floored at zero. Route fees are already embedded in proceeds; better route pricing can offset them, so zero drag does not mean zero swap fees. Excludes network fees and additional withdrawal tax. Not a future LP exit guarantee.');
+  const netRead=detail.network,netFresh=netRead&&recent(netRead.asOf,STILL_NETWORK_MAX_AGE_MS,now)&&Number.isSafeInteger(netRead.singleLamports)&&netRead.singleLamports>=0&&Number.isSafeInteger(netRead.doubleLamports)&&netRead.doubleLamports>=0;
   const oneSided=!!range&&range.bins.every(b=>b.token===0),tokenFunding=range&&mark?Math.round(range.bins.reduce((n,b)=>n+b.token*mark,0)*1e9)/1e9:null;
   const entryQuote=(detail.entryQuotes||[]).find(q=>q.sizeSol===tokenFunding&&q.status==='quoted'&&researchQuoteFresh(q,now)&&q.tokenRaw&&q.inputRaw&&rpc?.decimals!=null);
   const entrySwap=oneSided?0:entryQuote&&policyCurrent&&Number.isInteger(rpc?.decimals)&&rpc!.decimals!>=0&&rpc!.decimals!<=18&&/^\d{1,78}$/.test(entryQuote.inputRaw||'')&&/^\d{1,78}$/.test(entryQuote.tokenRaw||'')&&mark?Math.max(0,Number(entryQuote.inputRaw)/1e9-Number(entryQuote.tokenRaw)/10**rpc!.decimals!*mark):null;
@@ -231,11 +241,11 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   // Refundable rent is excluded, not reported as an observed zero. Transfer-tax
   // tokens remain unavailable until exact deposit/withdrawal amounts are quoted.
   const taxKnownZero=bps===0,entryNetwork=netFresh?(netRead!.doubleLamports+(oneSided?0:netRead!.singleLamports))/1e9:null,exitNetwork=netFresh?2*netRead!.singleLamports/1e9:null;
-  const scope='Paper estimate: 2-signature open + one close + one exit swap; an extra entry swap for two-sided funding. RPC-priced base fees, zero priority bid by choice. Refundable account rent, extra setup transactions and execution changes are excluded. This is not an LP transaction simulation.';
+  const scope='Paper estimate: 2-signature open + one close + one exit swap; an extra entry swap for two-sided funding. Dated RPC base-fee observations (reused for at most ten minutes), zero priority bid by choice. Refundable account rent, extra setup transactions and execution changes are excluded. This is not an LP transaction simulation.';
   const networkCostSol=evidence(netFresh?(entryNetwork!+exitNetwork!):null,netRead?.source||'Solana RPC getFeeForMessage',netRead?.asOf||null,scope);
   if(entrySwap!==null&&Number.isFinite(entrySwap)){entryConversionSol.value=entrySwap;entryConversionSol.status='available';entryConversionSol.source=oneSided?'Still paper range allocation':'Jupiter exact-size funding quote + observed pool mark';entryConversionSol.asOf=oneSided?range?.asOf||null:entryQuote?.asOf||null;entryConversionSol.note=oneSided?'No token purchase for this SOL-only paper allocation.':'Quoted SOL input minus token output valued at the dated pool mark, floored at zero. Network fees are separate.';}
   const entryCostSol=evidence(taxKnownZero&&entryNetwork!==null&&entrySwap!==null?entryNetwork+entrySwap:null,'Paper cost model · RPC fee templates + exact-size Jupiter funding quote',entryAt,scope);
-  const exitCostSol=evidence(taxKnownZero&&exitNetwork!==null&&exitValue!==null?exitNetwork+exitValue:null,'Paper cost model · Jupiter exit conversion + RPC fee templates',exitAt,scope+' Uses the full-size token conversion reference, not an actual future withdrawal.');
+  const exitCostSol=evidence(taxKnownZero&&exitNetwork!==null&&exitValue!==null?exitNetwork+exitValue:null,'Paper cost model · Jupiter exit conversion + RPC fee templates'+(quoteMarkSource?' + '+quoteMarkSource:''),exitAt,scope+' Uses the full-size token conversion reference, not an actual future withdrawal.');
   const roundTripCostSol=evidence(entryCostSol.value!==null&&exitCostSol.value!==null?entryCostSol.value+exitCostSol.value:null,'Paper entry + exit cost model',costAt,scope);
   const scenarios = [0.2, 0.5].map(dropFraction => {
     const stress = mark === null ? null : mark * (1 - dropFraction);
@@ -275,19 +285,61 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   return result;
 }
 
+const preflightInputKey = (poolAddress: string, sizeSol: number, options?: StillRangeOptions) =>
+  'still:preflight-input:v2:' + poolAddress + ':' + Math.round(sizeSol * 1e9) + ':' + JSON.stringify(options || null);
+
+/** One exact default-size KV read per card, at most eight. Never refreshes the
+ * snapshot or calls providers: list views must not fan out into RPC or quotes. */
+export async function listStillPoolsWithSummaries(snapshot: Snapshot, env: Env, now = Date.now()): Promise<(StillPoolCard & {cardSummary: StillPoolCardSummary})[]> {
+  const cards = listStillPools(snapshot, now), pools = new Map(snapshot.pools.map(pool => [pool.address, pool]));
+  return Promise.all(cards.map(async card => {
+    const pool = pools.get(card.address)!;
+    let input: StillPreflightInput = {pool}, preflight = buildStillPreflight(input, 0.5, now), cached = false;
+    try {
+      const saved = await env.LP_CACHE.get<{at: string; input: StillPreflightInput}>(preflightInputKey(pool.address, 0.5), 'json');
+      const observed = saved?.input?.pool;
+      // Address alone is insufficient: bind the token sides and bin grid too.
+      // Rebuilding the input rechecks each evidence TTL instead of replaying a
+      // previously computed passing verdict after its quote has expired.
+      if (saved && recent(saved.at, 45_000, now) && observed && supportedPool(observed, now) &&
+        observed.address === pool.address && observed.base.address === pool.base.address &&
+        observed.quote.address === pool.quote.address && observed.poolConfig?.binStep === pool.poolConfig?.binStep) {
+        const rebuilt = buildStillPreflight(saved.input, 0.5, now);
+        input = saved.input; preflight = rebuilt; cached = true;
+      }
+    } catch { /* Missing, malformed or unavailable cached evidence stays unknown. */ }
+    const reasons: StillPoolCardSummary['reasons'] = (preflight.checks || []).filter(check => !['half', 'drop20'].includes(check.id))
+      .map(({id, label, status, result, source, asOf}) => ({id, label, status, result, source, asOf}));
+    const rpc = input.safety?.rpc;
+    if (!preflight.canOpen) reasons.unshift({id: 'range', label: 'Paper range', status: 'fail', result: preflight.verdict.reason,
+      source: preflight.priceSol.source + ' + Still paper range model', asOf: preflight.priceSol.asOf});
+    else if (rpc?.status === 'available' && rpc.mint === card.pairedMint && recent(rpc.asOf, MINT_MAX_AGE_MS, now) && rpc.freezeAuthority)
+      reasons.unshift({id: 'freeze', label: 'Freeze authority', status: 'fail', result: preflight.verdict.reason,
+        source: 'Confirmed Solana RPC token mint policy', asOf: rpc.asOf});
+    const priority = {fail: 0, caution: 1, unavailable: 2, pass: 3};
+    reasons.sort((a, b) => priority[a.status] - priority[b.status]);
+    const selected = reasons.slice(0, 3), dates = selected.map(check => check.asOf).filter((at): at is string => !!at && Number.isFinite(Date.parse(at)));
+    return {...card, cardSummary: {verdict: preflight.verdict, reasons: selected, sizeSol: 0.5,
+      scope: '0.5 paper SOL · default range', asOf: dates.length ? dates.sort()[0] : null,
+      note: cached ? 'Saved default Pre-flight, checked for expiry. Open Pre-flight to refresh prices and costs.'
+        : 'Pool observations only; live entry and exit costs are unavailable. Open Pre-flight to check 0.5 paper SOL.'}};
+  }));
+}
+
 /** Fast path: pool snapshot and existing provider caches only. No user click waits
  * for a fanout of RPC/quote requests. An explicit detail refresh may enrich it. */
 export async function getStillPreflight(env: Env, poolAddress: string, sizeSol = 0.5, options?: StillRangeOptions, live = false): Promise<StillPreflight | null> {
   const snapshot = await getSnapshot(env), pool = snapshot.pools.find(item => item.address === poolAddress || item.id === poolAddress);
   if (!pool || pool.venue !== 'meteora-dlmm' || !researchToken(pool)) return null;
-  const savedKey='still:preflight-input:v2:'+pool.address+':'+Math.round(sizeSol*1e9)+':'+JSON.stringify(options||null);
+  const savedKey=preflightInputKey(pool.address,sizeSol,options);
   if(!live){try{const saved=await env.LP_CACHE.get<{at:string;input:StillPreflightInput}>(savedKey,'json');if(saved&&recent(saved.at,45000,Date.now())&&saved.input.pool.address===pool.address&&researchToken(saved.input.pool)?.mint===researchToken(pool)?.mint)return buildStillPreflight(saved.input,sizeSol,Date.now(),options);}catch{}}
   if(live){
     const context=researchReadContext(env),token=researchToken(pool)!;
     const [freshPool,rpc,rug,candles,network]=await Promise.all([fetchMeteoraPool(pool.address).catch(()=>null),readMintSafety(token.mint,context),readRugSafety(token.mint,context),readResearchCandles(pool,context),readStillNetwork(env,true)]);
     const current=freshPool&&researchToken(freshPool)?.mint===token.mint?freshPool:pool;
-    const anchor=await readResearchRangeAnchor(current,context,rpc,true);
-    const mark=anchor.status==='available'&&positive(anchor.activeBinPriceSol)&&anchor.asOf?{priceSol:anchor.activeBinPriceSol,asOf:anchor.asOf,source:'active-bin' as const}:null;
+    const anchor=await readResearchRangeAnchor(current,context,rpc);
+    const apiToken=freshPool&&freshPool.address===pool.address?researchToken(freshPool):null;
+    const mark:ResearchQuoteMark|null=anchor.status==='available'&&positive(anchor.activeBinPriceSol)&&anchor.asOf?{priceSol:anchor.activeBinPriceSol,asOf:anchor.asOf,source:'active-bin'}:freshPool&&apiToken?.mint===token.mint&&positive(apiToken.priceSol)&&recent(freshPool.fetchedAt,45_000,Date.now())?{priceSol:apiToken.priceSol,asOf:freshPool.fetchedAt,source:'meteora-pool',poolAddress:pool.address,mint:token.mint}:null;
     const quotes=await readResearchQuotes(current,context,rpc.decimals,mark,{sizes:[sizeSol],modes:['best'],freshOnly:false});
     const initial=buildStillPreflight({pool:current,quotes,safety:{rpc},rug,candles,rangeAnchor:anchor,network},sizeSol,Date.now(),options);
     const funding=initial.range&&initial.priceSol.value?Math.round(initial.range.bins.reduce((n,b)=>n+b.token*initial.priceSol.value!,0)*1e9)/1e9:0;

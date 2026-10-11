@@ -60,6 +60,14 @@ async function readJson<T>(context:ResearchReadContext,options:{name:string;prov
  if(cooldown&&cooldown.until>now){if(options.provider==='Jupiter')context.jupiterRetryAt=Math.max(context.jupiterRetryAt||0,cooldown.until);return {status:'rate-limited',data:saved?.data??null,asOf:saved?.at??null,cached:!!saved,note:options.provider+' is in a rate-limit cooldown.'};}
  const pendingKey=key(options.name)+(rpcScope?':rpc:'+rpcScope:'');
  if(pending.has(pendingKey)){context.cacheHits++;return await pending.get(pendingKey)! as ResearchRead<T>;}
+ // URL hashing and provider-state reads can outlast another identical RPC.
+ // Recheck its completed cache before spending a new slot (or rejecting the
+ // read at the request ceiling). Also close the race while this KV read waits.
+ if(rpcScope&&!options.forceFresh){
+  const latest=await savedRead<T>(context.env,options.name);
+  if(latest&&latest.expiresAt>Date.now()){context.cacheHits++;return {...latest,asOf:latest.at,cached:true};}
+  if(pending.has(pendingKey)){context.cacheHits++;return await pending.get(pendingKey)! as ResearchRead<T>;}
+ }
  if(context.requests+context.pendingRequests>=context.maxRequests||now>=context.deadline)return unknown('Research request budget reached; remaining sources are unknown.');
  // Reserve this context slot synchronously before awaiting the shared gate.
  // Otherwise parallel quote legs can each see the same final free slot.
@@ -107,6 +115,7 @@ export function researchToken(pool:Pool):{mint:string;solX:boolean;priceSol:numb
 interface JupiterQuote {inputMint:string;outputMint:string;inAmount:string;outAmount:string;otherAmountThreshold?:string;priceImpactPct?:string;routePlan?:{percent?:number;bps?:number;swapInfo?:{ammKey?:string;label?:string;inputMint?:string;outputMint?:string;inAmount?:string;outAmount?:string;feeAmount?:string;feeMint?:string}}[];contextSlot?:number}
 interface QuotePair {buy:JupiterQuote;sell:JupiterQuote;buyAsOf:string|null;sellAsOf:string|null}
 export interface ResearchQuote {
+ priceMark?:ResearchQuoteMark;
  quotedExitDragSol?:number|null; // Net quoted proceeds versus the dated mark, without any assumed fee floor.
  sizeSol:number;mode:'best'|'dlmm';status:'quoted'|'unknown'|'unavailable'|'rate-limited'|'stale'|'unsupported';
  roundTripCostSol:number|null;exitCostSol:number|null;asOf:string|null;note:string;
@@ -118,7 +127,7 @@ export interface ResearchQuote {
  economicEstimate?:ResearchEconomicQuote;
 }
 export interface ResearchEconomicQuote {costModelVersion?:3;status:'available'|'stale'|'unknown';roundTripCostSol:number|null;exitCostSol:number|null;asOf:string|null;dataAsOf:string|null;expiresAt:number|null;retainedUntil?:number|null;retained?:boolean;cached:boolean;markAsOf:string|null;markPriceSol:number|null;tokenDecimals:number|null;exitFeeFloorSol?:number|null;exitFeeSource?:'jupiter-route'|'pool-config'|'pump-config'|'assumed'|null;exitFeeAsOf?:string|null;note:string}
-export interface ResearchQuoteMark {priceSol:number;asOf:string;source:'active-bin'}
+export interface ResearchQuoteMark {priceSol:number;asOf:string;source:'active-bin'|'meteora-pool';poolAddress?:string;mint?:string}
 interface SavedEconomicQuote {pool:string;mint:string;quote:ResearchQuote;estimate:ResearchEconomicQuote}
 // v3 deliberately excludes saved estimates computed before the sell-fee floor.
 const economicName=(pool:Pool,mint:string,size:number,mode:string)=>`quote-estimate:v3:${pool.address}:${mint}:${size}:${mode}`;
@@ -215,7 +224,7 @@ function routeFeeFloor(pool:Pool,quote:JupiterQuote,token:{mint:string;priceSol:
  }
  return {sol:valid(total)?total:null,source:valid(total)?missing?source:'jupiter-route':null,asOf:feeAsOf};
 }
-function quoteResult(pool:Pool,sizeSol:number,mode:'best'|'dlmm',read:ResearchRead<QuotePair>,decimals:number|null,pumpFees=new Map<string,PumpFee>()):ResearchQuote{
+function quoteResult(pool:Pool,sizeSol:number,mode:'best'|'dlmm',read:ResearchRead<QuotePair>,decimals:number|null,pumpFees=new Map<string,PumpFee>(),priceMark?:ResearchQuoteMark|null):ResearchQuote{
  const p=researchToken(pool),data=read.data;
  const amount=String(Math.round(sizeSol*1e9));
  const coherent=!!p&&!!data&&data.buy.inputMint===RESEARCH_SOL&&data.buy.outputMint===p.mint&&data.buy.inAmount===amount&&raw(data.buy.outAmount)&&BigInt(data.buy.outAmount)>0n&&data.sell.inputMint===p.mint&&data.sell.outputMint===RESEARCH_SOL&&data.sell.inAmount===data.buy.outAmount&&raw(data.sell.outAmount);
@@ -226,7 +235,8 @@ function quoteResult(pool:Pool,sizeSol:number,mode:'best'|'dlmm',read:ResearchRe
  const routes=(q:JupiterQuote|undefined)=>[...new Set((q?.routePlan||[]).flatMap(r=>r.swapInfo?.ammKey?[r.swapInfo.ammKey]:[]))];
  const buyRoutePools=routes(data?.buy),sellRoutePools=routes(data?.sell);
  const returnedSol=coherent?Number(data!.sell.outAmount)/1e9:null;
- const sellValue=coherent&&p?.priceSol&&decimals!=null&&Number.isInteger(decimals)&&decimals>=0&&decimals<=18?Number(data!.buy.outAmount)/10**decimals*p.priceSol:null;
+ const markCurrent=!priceMark||Date.now()-Date.parse(priceMark.asOf)>=0&&Date.now()-Date.parse(priceMark.asOf)<=(priceMark.source==='meteora-pool'?RESEARCH_READ_LIMITS.quoteTtlMs:RESEARCH_READ_LIMITS.anchorTtlMs);
+ const sellValue=coherent&&markCurrent&&p?.priceSol&&decimals!=null&&Number.isInteger(decimals)&&decimals>=0&&decimals<=18?Number(data!.buy.outAmount)/10**decimals*p.priceSol:null;
  const sellFee=coherent?routeFeeFloor(pool,data!.sell,p,decimals,sellValue,pumpFees):{sol:null,source:null,asOf:null};
  const exitCost=quoted&&sellValue!=null&&returnedSol!=null?Math.max(sellFee.sol??0,sellValue-returnedSol):null;
  // Jupiter's returned amount already nets both swap fees. Adding a separate
@@ -234,7 +244,7 @@ function quoteResult(pool:Pool,sizeSol:number,mode:'best'|'dlmm',read:ResearchRe
  const roundTripCost=quoted&&returnedSol!=null?Math.max(0,sizeSol-returnedSol):null;
  const selectedPoolMatched=coherent?buyRoutePools.includes(pool.address)&&sellRoutePools.includes(pool.address):null;
  const scope=mode==='dlmm'?'Meteora DLMM routes; the selected pool is not guaranteed.':'Jupiter best route across supported venues.';
- return {sizeSol,mode,status,quotedExitDragSol:quoted&&sellValue!=null&&returnedSol!=null?Math.max(0,sellValue-returnedSol):null,roundTripCostSol:roundTripCost,exitCostSol:exitCost,exitFeeFloorSol:sellFee.sol,exitFeeSource:sellFee.source,exitFeeAsOf:sellFee.asOf??null,asOf:read.asOf,buyAsOf:data?.buyAsOf??null,sellAsOf:data?.sellAsOf??null,expiresAt:read.expiresAt??null,note:(quoted?scope+' Buy then sell the quoted returned tokens. Round-trip cost is the actual net SOL loss from both legs; exit cost never falls below the sell-route fee floor. '+(sellFee.source==='pump-config'?'Sell-fee floor uses dated verified PumpSwap flat or market-cap-tier fee configuration at '+sellFee.asOf+'. ':sellFee.source==='assumed'?'Sell-fee floor is an explicitly assumed 0.5% where the actual route fee could not be verified. ':sellFee.source==='pool-config'?'Missing sell-route fee metadata uses the dated matched selected-pool base/dynamic fee conservatively. ':'Sell-route raw fee amounts are valued once, without reweighting split percentages. ')+'Network fees, LP rent, deposit/withdrawal transfer fees and future price movement are excluded.':status==='stale'?'Both dated quote legs must be current within 45 seconds; conversion cost is unavailable after either leg expires.':read.status==='available'?'Quote identities, amounts or requested venue routes could not be verified.':read.note),selectedPoolMatched,buyRoutePools,sellRoutePools,buyPriceImpact:number(data?.buy.priceImpactPct),sellPriceImpact:number(data?.sell.priceImpactPct),slippageBps:50,inputRaw:coherent?data!.buy.inAmount:null,tokenRaw:coherent?data!.buy.outAmount:null,returnedSol:quoted?returnedSol:null};
+ return {sizeSol,mode,status,...(priceMark?{priceMark}:{}),quotedExitDragSol:quoted&&sellValue!=null&&returnedSol!=null?Math.max(0,sellValue-returnedSol):null,roundTripCostSol:roundTripCost,exitCostSol:exitCost,exitFeeFloorSol:sellFee.sol,exitFeeSource:sellFee.source,exitFeeAsOf:sellFee.asOf??null,asOf:read.asOf,buyAsOf:data?.buyAsOf??null,sellAsOf:data?.sellAsOf??null,expiresAt:read.expiresAt??null,note:(quoted?scope+' Buy then sell the quoted returned tokens. Round-trip cost is the actual net SOL loss from both legs; exit cost never falls below the sell-route fee floor. '+(sellFee.source==='pump-config'?'Sell-fee floor uses dated verified PumpSwap flat or market-cap-tier fee configuration at '+sellFee.asOf+'. ':sellFee.source==='assumed'?'Sell-fee floor is an explicitly assumed 0.5% where the actual route fee could not be verified. ':sellFee.source==='pool-config'?'Missing sell-route fee metadata uses the dated matched selected-pool base/dynamic fee conservatively. ':'Sell-route raw fee amounts are valued once, without reweighting split percentages. ')+'Network fees, LP rent, deposit/withdrawal transfer fees and future price movement are excluded.':status==='stale'?'Both dated quote legs must be current within 45 seconds; conversion cost is unavailable after either leg expires.':read.status==='available'?'Quote identities, amounts or requested venue routes could not be verified.':read.note),selectedPoolMatched,buyRoutePools,sellRoutePools,buyPriceImpact:number(data?.buy.priceImpactPct),sellPriceImpact:number(data?.sell.priceImpactPct),slippageBps:50,inputRaw:coherent?data!.buy.inAmount:null,tokenRaw:coherent?data!.buy.outAmount:null,returnedSol:quoted?returnedSol:null};
 }
 export async function cachedResearchQuotes(pool:Pool,env:Env,decimals:number|null=null):Promise<ResearchQuote[]>{
  const token=researchToken(pool);
@@ -242,9 +252,12 @@ export async function cachedResearchQuotes(pool:Pool,env:Env,decimals:number|nul
 }
 export async function readResearchQuotes(pool:Pool,context:ResearchReadContext,decimals:number|null=null,quoteMark?:ResearchQuoteMark|null,selection?:{sizes:number[];modes:('best'|'dlmm')[];freshOnly?:boolean}):Promise<ResearchQuote[]>{
  if(quoteMark!==undefined){
-  const token=researchToken(pool),markAt=Date.parse(quoteMark?.asOf||''),markGood=quoteMark?.source==='active-bin'&&positive(quoteMark.priceSol)&&Number.isFinite(markAt)&&markAt<=Date.now()&&Date.now()-markAt<=RESEARCH_READ_LIMITS.anchorTtlMs;
-  // Production explicitly passes a verified active-bin reference or null. A
-  // missing anchor may not silently fall back to the catalogue's older mark.
+  const token=researchToken(pool),markAt=Date.parse(quoteMark?.asOf||'');
+  const sourceGood=quoteMark?.source==='active-bin'||quoteMark?.source==='meteora-pool'&&quoteMark.poolAddress===pool.address&&quoteMark.mint===token?.mint&&quoteMark.asOf===pool.fetchedAt&&quoteMark.priceSol===token?.priceSol;
+  const markGood=sourceGood&&positive(quoteMark?.priceSol)&&Number.isFinite(markAt)&&markAt<=Date.now()&&Date.now()-markAt<=(quoteMark?.source==='meteora-pool'?RESEARCH_READ_LIMITS.quoteTtlMs:RESEARCH_READ_LIMITS.anchorTtlMs);
+  // An explicitly supplied exact-pool API price is valid comparison evidence,
+  // with its own source/time. Null never falls back to an old catalogue price.
+  if(!markGood)quoteMark=null;
   pool=markGood&&token?{...pool,priceQuote:token.solX?1/quoteMark!.priceSol:quoteMark!.priceSol,fetchedAt:quoteMark!.asOf}:{...pool,priceQuote:null,priceUsd:null,quotePriceUsd:null};
  }
  const token=researchToken(pool);
@@ -253,7 +266,7 @@ export async function readResearchQuotes(pool:Pool,context:ResearchReadContext,d
   const economic=await economicQuote(pool,context.env,size,mode);if(!selection?.freshOnly&&economic&&researchEconomicQuoteFresh(economic)){context.cacheHits++;return economic;}
   const retain=(output:ResearchQuote):ResearchQuote=>economic?{...economic,status:output.status,roundTripCostSol:null,exitCostSol:null,returnedSol:null,note:output.note+' Last good dated economic estimate retained.',economicEstimate:{...economic.economicEstimate!,status:'stale',retained:true,cached:true,note:'Last good dated economic estimate retained while refresh is unavailable. '+economic.economicEstimate!.note}}:output;
   const name=quoteName(token.mint,size,mode),cached=await cachedResearchRead<QuotePair>(context.env,name);
-  if(cached.status==='available'){const pumpFees=cached.data?.sell?await readPumpSellFees(pool,cached.data.sell,context):new Map<string,PumpFee>(),output=quoteResult(pool,size,mode,cached,decimals,pumpFees);if(output.status==='quoted')return rememberEconomicQuote(pool,context.env,output,decimals);}
+  if(cached.status==='available'){const pumpFees=cached.data?.sell?await readPumpSellFees(pool,cached.data.sell,context):new Map<string,PumpFee>(),output=quoteResult(pool,size,mode,cached,decimals,pumpFees,quoteMark);if(output.status==='quoted')return rememberEconomicQuote(pool,context.env,output,decimals);}
   const get=async(input:string,output:string,amount:string,leg:string)=>{
    const query=new URLSearchParams({inputMint:input,outputMint:output,amount,swapMode:'ExactIn',slippageBps:'50'});
    if(mode==='dlmm')query.set('dexes','Meteora DLMM');
@@ -265,7 +278,7 @@ export async function readResearchQuotes(pool:Pool,context:ResearchReadContext,d
   const sell=await get(token.mint,RESEARCH_SOL,buy.data.outAmount,'sell:'+buy.data.outAmount);
   const buyAt=buy.asOf?Date.parse(buy.asOf):NaN,sellAt=sell.asOf?Date.parse(sell.asOf):NaN,oldest=Math.min(buyAt,sellAt),expiresAt=Math.min(buy.expiresAt??NaN,sell.expiresAt??NaN);
   const result:ResearchRead<QuotePair>={...sell,asOf:Number.isFinite(oldest)?new Date(oldest).toISOString():null,expiresAt,data:sell.data?{buy:buy.data,sell:sell.data,buyAsOf:buy.asOf,sellAsOf:sell.asOf}:null};
-  const pumpFees=sell.status==='available'&&sell.data?await readPumpSellFees(pool,sell.data,context):new Map<string,PumpFee>(),output=quoteResult(pool,size,mode,result,decimals,pumpFees);
+  const pumpFees=sell.status==='available'&&sell.data?await readPumpSellFees(pool,sell.data,context):new Map<string,PumpFee>(),output=quoteResult(pool,size,mode,result,decimals,pumpFees,quoteMark);
   if(output.status==='quoted')await saveRead(context.env,name,{data:result.data,at:result.asOf!,expiresAt,status:'available',note:output.note},RESEARCH_READ_LIMITS.quoteTtlMs);
   if(output.status==='quoted'){const remembered=await rememberEconomicQuote(pool,context.env,output,decimals);return remembered.economicEstimate?remembered:retain(remembered);}
   return retain(output);

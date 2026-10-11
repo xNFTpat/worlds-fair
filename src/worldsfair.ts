@@ -3,7 +3,7 @@ import type {Env} from './env';
 import type {Pool, Snapshot} from './schema';
 import {selectPools} from './discovery';
 import {getSnapshot} from './refresh';
-import {BackgroundScanner as LegacyBackgroundScanner} from './background-scanner';
+import {StillBackgroundScanner} from './still-background';
 import {worldsfairPaperRoute} from './worldsfair-paper';
 import {stillDemoRoute} from './still-demo-routes';
 
@@ -37,7 +37,7 @@ export function paperEnvironment(env: Env, includeOther = false): Env {
 
 // This deployment never supplies an execution object. The scanner only reads
 // market data and updates this Worker's isolated paper journals and caches.
-export class BackgroundScanner extends LegacyBackgroundScanner {
+export class BackgroundScanner extends StillBackgroundScanner {
   constructor(state: DurableObjectState, env: Env) { super(state, paperEnvironment(env)); }
 }
 

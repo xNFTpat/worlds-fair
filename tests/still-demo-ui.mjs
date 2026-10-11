@@ -5,7 +5,7 @@ import {runInNewContext} from 'node:vm';
 const source = await readFile('public/still-demo.js', 'utf8');
 const lessons = await readFile('public/still-lessons.js', 'utf8');
 const walletClient = await readFile('public/still-wallet-client.js','utf8');
-const browserSource = walletClient.replace(/^export /gm,'') + lessons.replace(/^export /gm, '') + source.replace(/^import .*from '\.\/still-(lessons|wallet-client).js';$/gm, '').replace(/^export /gm, '');
+const browserSource = walletClient.replace(/^export /gm,'') + lessons.replace(/^export /gm, '') + source.replace(/let STILL_LESSONS=\[\];\nconst loadLessons=.*?;\n/, 'const loadLessons=()=>Promise.resolve();\n').replace(/^import .*from '\.\/still-(lessons|wallet-client).js';$/gm, '').replace(/^export /gm, '');
 const helpers = runInNewContext(browserSource + '\n({esc,number,sol,groupPositions,requestFingerprint,readOnboarding,sortForPreference})', {Intl});
 assert.equal(helpers.sol(null), 'Unavailable');
 assert.equal(helpers.sol(0), '0 SOL');
@@ -35,7 +35,7 @@ class Element {
   async dispatch(kind, event = {}) {for (const callback of this.listeners.get(kind) || []) await callback(event);}
 }
 const flush = async () => {for(let i=0;i<5;i++) await new Promise(resolve => setImmediate(resolve));};
-function fixture({initialHash="",walletPositions=[],walletStatus="available"}={}) {
+function fixture({initialHash="",walletPositions=[],walletStatus="available",poolFields={},additionalPools=[]}={}) {
   let clock = Date.parse('2026-10-09T12:00:00.000Z'), serial = 0;
   const address = 'A'.repeat(32), requests = [], stored = new Map(), steps = ['pools','preflight','positions','baskets'].map(go => Object.assign(new Element(),{dataset:{go}}));
   const ids = ['screen','confirmation','notice','home','journey','step-preflight','build-version','confirm-submit','confirm-cancel','confirm-error','confirm-content','paper-amount','wallet-address'];
@@ -45,14 +45,14 @@ function fixture({initialHash="",walletPositions=[],walletStatus="available"}={}
   const window = new Element(); window.scrollTo = () => {};
   const location = {hash:initialHash,pathname:'/',search:''}; const history = {pushState(_state,_unused,hash){location.hash=hash;},replaceState(_state,_unused,hash){location.hash=hash;}};
   const evidence = value => ({value,status:value === null?'unavailable':'available',asOf:new Date(clock).toISOString(),source:'Synthetic observed source',note:'Synthetic note'});
-  const pool = {address,id:'solana:'+address,name:'<img src=x onerror="run()">/SOL',binStep:evidence(100),risk:{label:'Busy',reason:'<script>not code</script>'},tvlUsd:evidence(50000),fees24hFraction:evidence(.01),feeTrend:evidence(.2),ageHours:evidence(100),priceSol:evidence(1)};
+  const pool = {address,id:'solana:'+address,name:'<img src=x onerror="run()">/SOL',binStep:evidence(100),risk:{label:'Busy',reason:'<script>not code</script>'},tvlUsd:evidence(50000),fees24hFraction:evidence(.01),feeTrend:evidence(.2),ageHours:evidence(100),priceSol:evidence(1),...poolFields};
   const account = {balanceSol:10,seededSol:10,seedNote:'Practice seed',settlementNote:'Gross model only',feeModelNote:'Modelled fees only',positions:[]};
   const preflight = () => ({poolAddress:address,name:pool.name,sizeSol:.5,fetchedAt:new Date(clock).toISOString(),canOpen:true,priceSol:evidence(1),range:{bins:[{sol:.5}],floorPriceSol:.6,topPriceSol:.95,depthFraction:.4,binCount:3,alignment:'estimated',source:'Synthetic model',asOf:new Date(clock).toISOString(),note:'No live execution'},expectedFeesPerDaySol:evidence(.001),transferFeeBps:evidence(null),entryCostSol:evidence(null),exitCostSol:evidence(null),entryConversionSol:evidence(0),exitConversionSol:evidence(null),networkCostSol:evidence(null),missingEvidence:['Costs'],verdict:{label:'Marginal',reason:'<script>unknown costs</script>'},scenarios:[.2,.5].map(dropFraction=>({dropFraction,grossValueSol:evidence(.4),grossPnlSol:evidence(-.1),netValueSol:evidence(null)}))});
   let failMode = null,accountReady=false;
   const fetch = async (path, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : undefined; requests.push({path,method:options.method,body});
     if(path === '/api/version')return new Response(JSON.stringify({gitSha:'abcdef0123'}));
-    if(path === '/api/still/pools')return new Response(JSON.stringify({pools:[pool],updatedAt:new Date(clock).toISOString()}));
+    if(path === '/api/still/pools')return new Response(JSON.stringify({pools:[pool,...additionalPools],updatedAt:new Date(clock).toISOString()}));
     if(path.startsWith('/api/still/preflight?'))return new Response(JSON.stringify(preflight()));
     if(path.startsWith('/api/still/wallet?'))return new Response(JSON.stringify({status:walletStatus,positions:walletPositions,source:'Synthetic public index',asOf:new Date(clock).toISOString()}));
     if(path.startsWith('/api/still/wallet-position?'))return new Response(JSON.stringify({status:'available',canPractise:true,checks:[],valueSol:1,feesSol:0,feeRateHourly:.001,feeAsOf:new Date(clock).toISOString(),floorPriceSol:.5,topPriceSol:1.5,distanceToFloorPct:50,inRange:true,source:'Synthetic confirmed bins',asOf:new Date(clock).toISOString(),exitQuote:{costSol:.01,asOf:new Date(clock).toISOString(),source:'Synthetic quote'}}));
@@ -77,7 +77,7 @@ function fixture({initialHash="",walletPositions=[],walletStatus="available"}={}
   runInNewContext(browserSource, {document,window,location,history,sessionStorage,localStorage:sessionStorage,fetch,Date:TestDate,URLSearchParams,AbortController,Intl,crypto:{randomUUID:()=>`request-${++serial}`},setTimeout:()=>1,clearTimeout:()=>{}});
   const click = async dataset => {await document.dispatch('click',{preventDefault(){},target:{closest:selector=>selector==='[data-lesson]'&&!dataset.lesson?null:({dataset,disabled:false})}}); await flush();};
   const confirm = async () => {await elements['#confirm-submit'].dispatch('click'); await flush();};
-  return {elements,requests,stored,click,confirm,address,window,location,async ready(){await flush();await click({go:'pools'});await click({pool:address});},advance(ms){clock+=ms;},fail(value){failMode=value;}};
+  return {elements,requests,stored,click,confirm,address,pool,window,location,setPool(patch){Object.assign(pool,patch);},async ready(){await flush();await click({go:'pools'});await click({pool:address});},advance(ms){clock+=ms;},fail(value){failMode=value;}};
 }
 const browser = fixture(); await browser.ready();
 assert.ok(browser.elements['#screen'].innerHTML.includes('&lt;img'), 'Source names are escaped in rendered pre-flight');
@@ -192,3 +192,50 @@ navigateAway.location.hash='#home';await navigateAway.window.dispatch('popstate'
 assert.equal(navigateAway.elements['#confirmation'].open,false,'Leaving the wallet dismisses an unsubmitted copy review');
 await navigateAway.confirm();assert.equal(navigateAway.requests.filter(r=>r.method==='POST').length,0,'A dismissed review cannot be submitted by a stale button event');
 console.log('Still wallet UI: direct-entry account bootstrap, explicit paper copy, recovery retention, unavailable states, navigation races and no signing passed.');
+
+
+const cardAt='2026-10-09T12:00:00.000Z';
+const observedReasons=[
+ {label:'Fee pace',result:'Observed fee pace is 0.5% of TVL per hour.',source:'Synthetic Meteora observation',asOf:cardAt},
+ {label:'Exit cost',result:'Observed paper exit estimate is 0.001 SOL.',source:'Synthetic quote + RPC base-fee model',asOf:cardAt},
+ {label:'Floor distance',result:'Observed floor is beyond the complete 24-hour swing.',source:'Synthetic exact-pool candles',asOf:cardAt},
+ {label:'Extra hidden reason',result:'This fourth reason must not appear.',source:'Synthetic fourth source',asOf:cardAt},
+];
+const cardSummary={verdict:{label:'Worth it',reason:'Observed checks pass <script>not markup</script>.'},reasons:observedReasons,sizeSol:.5,scope:'0.5 paper SOL · default range',asOf:cardAt};
+const poolCards=fixture({poolFields:{cardSummary}});await poolCards.click({go:'pools'});
+const cardHtml=poolCards.elements['#screen'].innerHTML;
+const verdictStart=cardHtml.indexOf('class="pool-verdict pass"'),reasonStart=cardHtml.indexOf('class="pool-reasons"'),reasonEnd=cardHtml.indexOf('</ul>',reasonStart),actionStart=cardHtml.indexOf('data-pool=',reasonEnd),detailsStart=cardHtml.indexOf('class="pool-details"'),metricsStart=cardHtml.indexOf('class="metrics pool-metrics"');
+assert.ok(verdictStart>=0&&verdictStart<reasonStart&&reasonEnd<actionStart&&actionStart<detailsStart&&detailsStart<metricsStart,'Pool cards lead with verdict, three reasons and one action, ahead of secondary metrics');
+assert.match(cardHtml.slice(verdictStart,reasonStart),/<h4><img[^>]+alt="Worth a look"/,'The public overall verdict wording stays intact');
+assert.equal((cardHtml.slice(reasonStart,reasonEnd).match(/<li>/g)||[]).length,3,'Only three observed reasons appear on the card');
+for(const reason of observedReasons.slice(0,3)){assert.ok(cardHtml.includes(reason.result));assert.ok(cardHtml.includes(reason.source));}
+assert.ok(!cardHtml.includes('Extra hidden reason'));
+assert.ok(!cardHtml.includes('<script>not markup</script>'));assert.ok(cardHtml.includes('&lt;script&gt;not markup&lt;/script&gt;'),'Verdict copy cannot introduce markup');
+assert.equal((cardHtml.match(/data-pool=/g)||[]).length,1,'One primary Pre-flight action per pool');
+assert.ok(!cardHtml.includes('pool-table'),'The list does not duplicate the cards with a dense table');
+assert.ok(cardHtml.includes('data-still-number="50000"'),'Motion receives the actual numeric evidence, never a manufactured animation start');
+
+poolCards.setPool({cardSummary:{...cardSummary,verdict:{label:'Marginal',reason:'Current costs are unavailable.'},reasons:[{label:'Exit cost',result:'Unavailable. The previous quote has expired.',source:'Synthetic quote read',asOf:null},{label:'Token settings',result:'Unavailable. This mint has not been verified.',source:'Synthetic RPC read',asOf:null},{label:'Floor distance',result:'Unavailable. The complete swing is missing.',source:'Synthetic candle read',asOf:null}]}});
+await poolCards.click({go:'pools'});
+const refreshedCard=poolCards.elements['#screen'].innerHTML;
+assert.ok(!refreshedCard.includes('alt="Worth a look"'),'A new unavailable response cannot retain an earlier passing verdict');
+assert.match(refreshedCard,/<h4><img[^>]+alt="Marginal"/);assert.ok(refreshedCard.includes('The previous quote has expired.'));
+assert.ok(!refreshedCard.includes('Observed paper exit estimate is 0.001 SOL.'),'Earlier numeric cost evidence is replaced rather than carried forward');
+
+const noSummary=fixture({poolFields:{cardSummary:null,tvlUsd:{value:null,source:'Synthetic market read',asOf:null}}});await noSummary.click({go:'pools'});
+const missingCard=noSummary.elements['#screen'].innerHTML;
+assert.match(missingCard,/<h4>Unavailable<\/h4>/);assert.ok(missingCard.includes('Costs, token settings and downside are unavailable until checked.'));
+assert.ok(!missingCard.includes('data-still-number="null"'));assert.ok(!missingCard.includes('data-still-number="undefined"'));assert.ok(!missingCard.includes('data-still-number="NaN"'),'Missing metrics never become animated values');
+assert.ok(!missingCard.includes('alt="Worth a look"'),'No summary cannot invent a passing verdict');
+console.log('Still pool-card UI: dated observed reasons, verdict/action hierarchy, three-reason cap, source escaping, refreshed unknown evidence and finite-only motion values passed.');
+
+const samePairPools=[];const poolIdentity=fixture({poolFields:{name:'SAME/SOL',cardSummary},additionalPools:samePairPools});
+samePairPools.push({...poolIdentity.pool,address:'B'.repeat(32),id:'solana:'+'B'.repeat(32),cardSummary:{...cardSummary,verdict:{label:'Skip',reason:'A different pool has different costs.'}}});
+await poolIdentity.click({go:'pools'});
+const identityHtml=poolIdentity.elements['#screen'].innerHTML;
+assert.equal((identityHtml.match(/class="pool-card"/g)||[]).length,2,'Pools sharing a pair name keep separate cards');
+assert.ok(identityHtml.includes('data-pool="'+'A'.repeat(32)+'"'));assert.ok(identityHtml.includes('data-pool="'+'B'.repeat(32)+'"'));
+assert.match(identityHtml,/<h4><img[^>]+alt="Worth a look"/);assert.match(identityHtml,/<h4><img[^>]+alt="Skip for now"/,'Each pool keeps its own observed summary');
+await poolIdentity.click({pool:'B'.repeat(32)});
+const identityRead=poolIdentity.requests.find(request=>request.path.startsWith('/api/still/preflight?'));
+assert.equal(new URL('https://still.example'+identityRead.path).searchParams.get('poolAddress'),'B'.repeat(32),'Pre-flight navigation uses the selected pool address, never its shared display name');

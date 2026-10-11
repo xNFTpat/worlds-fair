@@ -8,7 +8,7 @@ import {pathToFileURL} from 'node:url';
 const dir = await mkdtemp(join(tmpdir(), 'still-preflight-'));
 try {
   await build({entryPoints: ['src/still-preflight.ts'], bundle: true, platform: 'node', format: 'esm', outfile: join(dir, 'preflight.mjs')});
-  const {listStillPools, buildStillBaskets, buildStillPreflight, combineStillBasketPreflight, getStillPreflight, getStillPoolMark, getStillBasketPreflight, STILL_MAX_PRICE_AGE_MS} = await import(pathToFileURL(join(dir, 'preflight.mjs')));
+  const {listStillPools, listStillPoolsWithSummaries, buildStillBaskets, buildStillPreflight, combineStillBasketPreflight, getStillPreflight, getStillPoolMark, getStillBasketPreflight, STILL_MAX_PRICE_AGE_MS} = await import(pathToFileURL(join(dir, 'preflight.mjs')));
   const now = Date.UTC(2026, 9, 9, 10), at = new Date(now).toISOString(), SOL = 'So11111111111111111111111111111111111111112';
   const iso = ms => new Date(ms).toISOString();
   function pool(id, changes = {}) {
@@ -157,13 +157,24 @@ try {
   assert.equal(buildStillPreflight(healthyInput, .5, now, {...longHold, holdMinutes: 1}).checks.find(c => c.id === 'cost').status, 'fail', 'cost exceeding planned-hold fees fails even below 1%');
   const frozen = buildStillPreflight({...healthyInput, safety: {rpc: {...healthyRpc, freezeAuthority: 'active'}}}, .5, now);
   assert.equal(frozen.verdict.label, 'Skip'); assert.match(frozen.verdict.reason, /freeze authority/);
-  for (const invalidNetwork of [null, {...network, asOf: iso(now - 60001)}, {...network, asOf: iso(now + 1)}, {...network, asOf: 'invalid'},
+  for (const invalidNetwork of [null, {...network, asOf: iso(now - 600001)}, {...network, asOf: iso(now + 1)}, {...network, asOf: 'invalid'},
     {...network, singleLamports: -1}, {...network, doubleLamports: 1.5}, {...network, singleLamports: Number.MAX_SAFE_INTEGER + 1}]) {
     const result = buildStillPreflight({...healthyInput, network: invalidNetwork}, .5, now);
     for (const field of ['entryCostSol', 'exitCostSol', 'roundTripCostSol', 'networkCostSol']) assert.equal(result[field].value, null, field + ' rejects invalid network evidence');
     assert.equal(result.paperCostModel.netAfterHoldSol.value, null); assert.equal(result.verdict.label, 'Marginal');
     assert.equal(result.exitConversionSol.value, .001, 'an unavailable network read does not erase valid swap evidence');
   }
+  const olderNetwork = buildStillPreflight({...healthyInput, network: {...network, asOf: iso(now - 9 * 60000)}}, .5, now);
+  assert.equal(olderNetwork.networkCostSol.value, modeled.networkCostSol.value);
+  assert.equal(olderNetwork.networkCostSol.asOf, iso(now - 9 * 60000), 'base-fee reuse never renews its observed timestamp');
+  assert.match(olderNetwork.networkCostSol.note, /at most ten minutes/);
+  const apiMarkedQuote = {...assumedFloorQuote, priceMark: {source: 'meteora-pool', asOf: iso(now - 1000), priceSol: .01, poolAddress: healthyPool.address, mint: healthyRpc.mint}};
+  const apiMarked = buildStillPreflight({...healthyInput, quotes: [apiMarkedQuote]}, .5, now);
+  assert.equal(apiMarked.exitConversionSol.value, .0002);
+  assert.match(apiMarked.exitConversionSol.source, /Meteora DLMM Data API exact-pool price/);
+  assert.match(apiMarked.exitCostSol.source, /Meteora DLMM Data API/);
+  assert.equal(apiMarked.exitConversionSol.asOf, iso(now - 1000));
+  assert.doesNotMatch(apiMarked.range.note, /Native bin alignment is verified/);
   const entryWithoutExit = buildStillPreflight({...healthyInput, quotes: []}, .5, now);
   closeTo(entryWithoutExit.entryCostSol.value, .00001, 'entry estimate does not depend on exit quote availability');
   assert.equal(entryWithoutExit.entryCostSol.asOf, at); assert.equal(entryWithoutExit.exitCostSol.value, null);
@@ -220,6 +231,76 @@ try {
     const mark = await getStillPoolMark(env, 'steady-a'); assert.equal(mark.priceSol, .01); assert.equal(mark.feeRateAsOf, at);
     const combinedFast = await getStillBasketPreflight(env, 'steady', .5); assert.equal(combinedFast.canOpen, true);
     assert.equal(fetches, 0);
+    // Pool cards reuse only exact default-size evidence, with bounded KV reads.
+    const cardKeys = [], firstAddress = cards[0].address;
+    const cardInput = {...healthyInput, pool: {...healthyPool, id: cards[0].id, address: firstAddress}};
+    const cardEnv = {LP_CACHE: {async get(key) {
+      cardKeys.push(key);
+      return key === 'still:preflight-input:v2:' + firstAddress + ':500000000:null' ? {at, input: cardInput} : null;
+    }}};
+    const summaries = await listStillPoolsWithSummaries(snapshot, cardEnv, now);
+    assert.equal(summaries.length, 8); assert.equal(cardKeys.length, 8);
+    assert.equal(new Set(cardKeys).size, 8);
+    assert.deepEqual(cardKeys, cards.map(card => 'still:preflight-input:v2:' + card.address + ':500000000:null'));
+    assert.equal(summaries[0].cardSummary.verdict.label, 'Worth it', 'fresh default evidence may produce a real passing card');
+    for (const card of summaries) {
+      assert.equal(card.cardSummary.sizeSol, .5); assert.equal(card.cardSummary.scope, '0.5 paper SOL · default range');
+      assert.equal(card.cardSummary.reasons.length, 3);
+      assert(card.cardSummary.reasons.every(reason => !['half', 'drop20'].includes(reason.id) && reason.source && typeof reason.result === 'string'));
+      assert(card.cardSummary.reasons.every(reason => reason.asOf === null || reason.asOf === at));
+    }
+    const missingSummary = summaries[1].cardSummary;
+    assert.equal(missingSummary.verdict.label, 'Skip', 'a real low-fee failure survives missing provider data');
+    assert.equal(missingSummary.reasons[0].id, 'fees'); assert.equal(missingSummary.reasons[0].status, 'fail');
+    assert(missingSummary.reasons.some(reason => reason.id === 'cost' && reason.status === 'unavailable'));
+    assert.match(missingSummary.note, /Pool observations only/);
+
+    const singleSnapshot = {...snapshot, pools: [healthyPool]};
+    async function oneSummary(saved) {
+      let reads = 0;
+      const result = await listStillPoolsWithSummaries(singleSnapshot, {LP_CACHE: {async get(key) {
+        reads++; assert.equal(key, 'still:preflight-input:v2:steady-a:500000000:null');
+        if (saved instanceof Error) throw saved;
+        return saved;
+      }}}, now);
+      assert.equal(reads, 1);
+      return result[0].cardSummary;
+    }
+    const fallback = await oneSummary(null);
+    assert.equal(fallback.verdict.label, 'Marginal', 'a good fee observation cannot promote missing costs to Pass');
+    assert(fallback.reasons.every(reason => reason.status === 'unavailable'));
+    for (const invalid of [{at: iso(now - 45001), input: healthyInput}, {at: iso(now + 1), input: healthyInput},
+      {at: 'invalid', input: healthyInput}, {at, input: {...healthyInput, pool: {...healthyPool, address: 'different-pool'}}},
+      {at, input: {...healthyInput, pool: {...healthyPool, base: {address: 'different-mint'}}}},
+      {at, input: {...healthyInput, pool: {...healthyPool, base: healthyPool.quote, quote: healthyPool.base, priceQuote: 100}}},
+      {at, input: {...healthyInput, pool: {...healthyPool, poolConfig: {...healthyPool.poolConfig, binStep: 200}}}},
+      {at, input: {...healthyInput, pool: {...healthyPool, fetchedAt: iso(now - STILL_MAX_PRICE_AGE_MS - 1)}}},
+      {at, input: {...healthyInput, quotes: {bad: true}}}, {at, input: null}, new Error('KV unavailable')]) {
+      assert.deepEqual(await oneSummary(invalid), fallback, 'expired, future, malformed or mismatched cached evidence falls back to real pool observations');
+    }
+    const boundary = await oneSummary({at: iso(now - 45000), input: healthyInput});
+    assert.equal(boundary.verdict.label, 'Worth it', '45-second wrapper boundary is inclusive; evidence still validates independently');
+    for (const expiredInput of [
+      {...healthyInput, quotes: [{...quote, expiresAt: now - 1}]},
+      {...healthyInput, network: {...network, asOf: iso(now - 600001)}},
+      {...healthyInput, quotes: [{...quote, sizeSol: .37}]},
+      {...healthyInput, safety: {rpc: {...healthyRpc, asOf: iso(now - 300001)}}},
+    ]) {
+      const expired = await oneSummary({at, input: expiredInput});
+      assert.equal(expired.verdict.label, 'Marginal', 'a fresh cache wrapper cannot retain a verdict after underlying evidence expires or size changes');
+      assert(expired.reasons.some(reason => reason.id === 'cost' && reason.status === 'unavailable'));
+    }
+    const frozenSummary = await oneSummary({at, input: {...healthyInput, safety: {rpc: {...healthyRpc, freezeAuthority: 'active'}}}});
+    assert.equal(frozenSummary.verdict.label, 'Skip');
+    assert.equal(frozenSummary.reasons[0].id, 'freeze'); assert.equal(frozenSummary.reasons[0].status, 'fail');
+    assert.match(frozenSummary.reasons[0].result, /freeze authority/);
+    assert.equal(frozenSummary.reasons[0].asOf, at);
+    const rangeSummary = await oneSummary({at, input: {...healthyInput, rangeAnchor: {...anchor, minNativeBinId: 100}}});
+    assert.equal(rangeSummary.verdict.label, 'Skip'); assert.equal(rangeSummary.reasons[0].id, 'range');
+    let emptyReads = 0;
+    assert.deepEqual(await listStillPoolsWithSummaries({...snapshot, pools: []}, {LP_CACHE: {async get() {emptyReads++;}}}, now), []);
+    assert.equal(emptyReads, 0);
+    assert.equal(fetches, 0, 'card summaries make no provider calls, even on cache misses or corrupt evidence');
     // A live pre-flight's exact evidence survives the cached-only paper-open path.
     const cachedRange = twoSidedRange, cachedSize = .37, cachedInput = fundedInput(cachedSize);
     const cacheKey = 'still:preflight-input:v2:steady-a:370000000:' + JSON.stringify(cachedRange);
@@ -242,5 +323,39 @@ try {
     assert.equal(fetches, 0, 'matching cached costs and safe misses never trigger external provider requests');
     const thinMark = await getStillPoolMark(env, 'tiny'); assert.equal(thinMark.priceSol, .01, 'already-open positions can still be marked when liquidity falls below entry shortlist threshold');
   } finally { Date.now = originalNow; globalThis.fetch = originalFetch; }
-  console.log('Still guided pre-flight: bounded current shortlist, exact basket splits, sourced fee windows, monotonic downside, native orientation, observed cost plans, funding quotes, hard rejections, exact cached inputs, freshness and no provider fanout passed');
+  // End-to-end live orchestration: an unavailable native anchor does not erase
+  // a genuine fresh API mark, while mint policy and network fees stay required.
+  const liveAt = new Date().toISOString(), liveAddress = '11111111111111111111111111111111', liveMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  const livePool = pool(liveAddress, {base: {address: liveMint, symbol: 'USDC'}, priceQuote: .5, fetchedAt: liveAt, ageHours: 48});
+  const stored = new Map([
+    ['snapshot:v1', {updatedAt: liveAt, pools: [livePool], errors: {}}],
+    ['research:v1:mint:' + liveMint, {at: liveAt, expiresAt: Date.now() + 300000, status: 'available', note: 'Observed mint fixture', data: [
+      {id: 1, result: {value: {owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data: {parsed: {type: 'mint', info: {decimals: 6, supply: '1000000000', mintAuthority: null, freezeAuthority: null}}}}}}, {id: 2, result: {epoch: 100}}
+    ]}],
+    ['research:v1:active-bin:' + liveAddress, {at: liveAt, expiresAt: Date.now() + 30000, status: 'rate-limited', note: 'Provider cooldown', data: null}],
+    ['still:network-fees:v1', {asOf: liveAt, singleLamports: 5000, doubleLamports: 10000, source: 'Observed RPC fixture'}],
+  ]);
+  const liveEnv = {SOLANA_RPC: 'https://rpc.test', LP_CACHE: {async get(key) {return stored.get(key) ?? null;}, async put(key, value) {stored.set(key, JSON.parse(value));}},
+    RANGE_ALERTS: {idFromName: n => n, get: () => ({fetch: async () => Response.json({allowed: true, reason: 'allowed', retryAt: null})})}};
+  let rpcRequests = 0, quoteRequests = 0;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.hostname === 'rpc.test') {rpcRequests++; throw Error('The native anchor cooldown must not be retried');}
+    if (url.hostname === 'dlmm.datapi.meteora.ag' && url.pathname === '/pools') return Response.json({data: [{address: liveAddress, name: 'USDC/SOL', is_blacklisted: false, tvl: 200000, current_price: .5, created_at: Date.now() - 48 * 3600000,
+      token_x: {address: liveMint, symbol: 'USDC', price: 50}, token_y: {address: SOL, symbol: 'SOL', price: 100}, pool_config: {bin_step: 100, base_fee_pct: .3}, fees: {'1h': 1200, '24h': 4800}, volume: {'24h': 100000}, fee_tvl_ratio: {'1h': .6, '24h': 2.4}, tags: []}]});
+    if (url.hostname === 'api.jup.ag') {quoteRequests++;const buy = url.searchParams.get('inputMint') === SOL;return Response.json({inputMint: buy ? SOL : liveMint, outputMint: buy ? liveMint : SOL, inAmount: url.searchParams.get('amount'), outAmount: buy ? '1000000' : '490000000', routePlan: [{swapInfo: {ammKey: liveAddress, label: 'Meteora DLMM'}}]});}
+    return new Response('{}', {status: 503});
+  };
+  try {
+    const live = await getStillPreflight(liveEnv, liveAddress, .5, undefined, true);
+    closeTo(live.exitCostSol.value, .01001, 'fresh exact-pool API mark sustains genuine exit cost during native-anchor cooldown');
+    assert(live.paperCostModel.netAfterHoldSol.value !== null);
+    assert.match(live.exitConversionSol.source, /Meteora DLMM Data API exact-pool price/);
+    assert.match(live.range.note, /native bin alignment is unverified/i);
+    assert.equal(rpcRequests, 0);assert.equal(quoteRequests, 2);
+    const reopened = await getStillPreflight(liveEnv, liveAddress, .5);
+    assert.equal(reopened.exitCostSol.value, live.exitCostSol.value, 'paper-open rebuild preserves this exact dated API-marked quote');
+    assert.equal(quoteRequests, 2);
+  } finally {globalThis.fetch = originalFetch;}
+  console.log('Still guided pre-flight: bounded current shortlist, exact basket splits, sourced fee windows, monotonic downside, native orientation, observed cost plans, funding quotes, hard rejections, exact cached inputs, card-summary identity/expiry and no provider fanout passed');
 } finally { await rm(dir, {recursive: true, force: true}); }

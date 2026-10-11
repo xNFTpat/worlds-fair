@@ -43,7 +43,9 @@ interface WalletDeps {
 }
 async function readJson(url:string,deadline:number){
   if(Date.now()>=deadline)throw Error('The wallet read timed out.');
-  const response=await fetch(url,{headers:{accept:'application/json'},signal:AbortSignal.timeout(Math.max(1,Math.min(6500,deadline-Date.now()))),redirect:'error'});
+  // Workers support manual/follow, not redirect:'error'. Reject 3xx below so
+  // public wallet reads are never forwarded to a different destination.
+  const response=await fetch(url,{headers:{accept:'application/json'},signal:AbortSignal.timeout(Math.max(1,Math.min(6500,deadline-Date.now()))),redirect:'manual'});
   if(!response.ok)throw Error('Meteora is temporarily unavailable.');
   return await response.json() as any;
 }
@@ -101,7 +103,7 @@ export async function readWalletExitQuote(env:Env,read:WalletBinRead):Promise<St
   if(!permission.allowed)return blankExit('The shared quote service is busy. Try Run Pre-flight again shortly.',input,mint);
   try{
     const query=new URLSearchParams({inputMint:mint,outputMint:RESEARCH_SOL,amount:input,swapMode:'ExactIn',slippageBps:'50'});
-    const r=await fetch('https://api.jup.ag/swap/v1/quote?'+query,{headers:{accept:'application/json',...(env.JUPITER_API_KEY?{'x-api-key':env.JUPITER_API_KEY}:{})},signal:AbortSignal.timeout(6500),redirect:'error'});
+    const r=await fetch('https://api.jup.ag/swap/v1/quote?'+query,{headers:{accept:'application/json',...(env.JUPITER_API_KEY?{'x-api-key':env.JUPITER_API_KEY}:{})},signal:AbortSignal.timeout(6500),redirect:'manual'});
     if(r.status===429)await noteResearchJupiterRateLimit(env,r.headers);
     if(!r.ok)throw Error();
     const q=await r.json() as any;

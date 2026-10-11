@@ -2,7 +2,7 @@ import {stillParkData} from './still-park';
 import {parseStillRangeOptions} from './still-preflight-config';
 import type {Env} from './env';
 import {getSnapshot} from './refresh';
-import {listStillPools, buildStillBaskets, getStillPreflight, getStillBasketPreflight} from './still-preflight';
+import {listStillPoolsWithSummaries, buildStillBaskets, getStillPreflight, getStillBasketPreflight} from './still-preflight';
 const paths = new Set(['/api/still/wallet','/api/still/wallet-position','/api/still/park', '/api/still/pools', '/api/still/preflight', '/api/baskets', '/api/still/basket-preflight']);
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {status, headers: {'content-type': 'application/json', 'cache-control': 'no-store'}});
 export async function stillDemoRoute(req: Request, env: Env): Promise<Response | null> {
@@ -20,7 +20,7 @@ export async function stillDemoRoute(req: Request, env: Env): Promise<Response |
     if (url.pathname === '/api/still/pools' || url.pathname === '/api/baskets') {
       const snapshot = await getSnapshot(env);
       return json({paper: true, updatedAt: snapshot.updatedAt, ...(url.pathname === '/api/baskets'
-        ? {baskets: buildStillBaskets(snapshot)} : {pools: listStillPools(snapshot),baskets:buildStillBaskets(snapshot)})});
+        ? {baskets: buildStillBaskets(snapshot)} : {pools: await listStillPoolsWithSummaries(snapshot,env),baskets:buildStillBaskets(snapshot)})});
     }
     const raw = url.searchParams.get('amountSol') ?? '0.5';
     if (!/^(?:0|[1-9]\d*)(?:\.\d{1,9})?$/.test(raw) || Number(raw) < 0.001 || Number(raw) > 10)

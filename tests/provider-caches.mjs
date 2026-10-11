@@ -91,6 +91,19 @@ try {
  // A missing verified active-bin mark does not create a new catalogue-marked
  // estimate. Amount-based round-trip quotes can still be returned separately.
  clock=start;globalThis.fetch=jupiter;const unanchored=await readResearchQuotes(pool({priceQuote:999}),researchReadContext({LP_CACHE:new KV(),JUPITER_API_KEY:'fixture-key',RANGE_ALERTS:sharedBudget()}),6,null);assert.ok(unanchored.every(q=>q.status==='quoted'&&q.exitCostSol===null&&!q.economicEstimate));
+ // A fresh exact-pool Meteora price is a labelled comparison mark, independent
+ // of native-bin alignment. It must match this pool/mint/value/time and expire.
+ const apiPool=pool({priceQuote:.5}),apiMark={source:'meteora-pool',poolAddress:apiPool.address,mint:'mint',priceSol:.5,asOf:at(start)};
+ const apiEnv=()=>({LP_CACHE:new KV(),JUPITER_API_KEY:'fixture-key',RANGE_ALERTS:sharedBudget()});
+ const apiQuotes=await readResearchQuotes(apiPool,researchReadContext(apiEnv()),6,apiMark,{sizes:[.5],modes:['best']});
+ assert.equal(apiQuotes.length,1);assert.ok(Math.abs(apiQuotes[0].quotedExitDragSol-.01)<1e-12);
+ assert.deepEqual(apiQuotes[0].priceMark,apiMark);assert.equal(apiQuotes[0].economicEstimate.markAsOf,at(start));
+ for(const changed of [{poolAddress:'another-pool'},{mint:'another-mint'},{priceSol:1},{source:'unverified-feed'},{asOf:at(start+1)}]){
+  const rejected=await readResearchQuotes(apiPool,researchReadContext(apiEnv()),6,{...apiMark,...changed},{sizes:[.5],modes:['best']});
+  assert.equal(rejected[0].quotedExitDragSol,null,'wrong or future API mark cannot produce measured exit drag');
+ }
+ clock=start+45001;const oldApiMark=await readResearchQuotes(apiPool,researchReadContext(apiEnv()),6,apiMark,{sizes:[.5],modes:['best']});assert.equal(oldApiMark[0].quotedExitDragSol,null,'API marks expire independently of fresh quote legs');clock=start;
+ globalThis.fetch=async(...args)=>{clock=start+45001;return jupiter(...args);};const expiredDuringRead=await readResearchQuotes(apiPool,researchReadContext(apiEnv()),6,apiMark,{sizes:[.5],modes:['best']});assert.equal(expiredDuringRead[0].quotedExitDragSol,null,'a mark that expires while quotes are in flight is not redated');
  // Parallel reservations preserve the per-detail request ceiling before the
  // asynchronous shared budget answers; denied reservations spend zero HTTP.
  clock=start;let boundedCalls=0;globalThis.fetch=async()=>{boundedCalls++;return new Response('',{status:503});};const bounded=researchReadContext({LP_CACHE:new KV(),JUPITER_API_KEY:'fixture-key',RANGE_ALERTS:sharedBudget()});bounded.maxRequests=1;await readResearchQuotes(pool(),bounded,6);assert.equal(boundedCalls,1);assert.equal(bounded.requests,1);assert.equal(bounded.pendingRequests,0);

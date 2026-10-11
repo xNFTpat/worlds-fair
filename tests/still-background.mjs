@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {mkdtemp} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const path=join(await mkdtemp(join(tmpdir(),'still-background-')),'test.mjs');
+await build({entryPoints:['src/still-background.ts'],bundle:true,platform:'node',format:'esm',outfile:path,plugins:[{name:'only-observation-providers',setup(b){
+ b.onResolve({filter:/^\.\/(refresh|lp-research|sources\/geckoterminal)$/},args=>({path:args.path,namespace:'fixture'}));
+ b.onLoad({filter:/.*/,namespace:'fixture'},args=>({loader:'js',contents:args.path==='./refresh'?`export const SNAPSHOT_KEY='snapshot:v1'; export const refreshPoolsImpl=env=>env.refresh();`:args.path==='./lp-research'?`export const recordResearchObservation=(snapshot,env)=>env.record(snapshot);`:`export function setGeckoKey(){}`}));
+ b.onResolve({filter:/paper-(fleet-runner|runner|lab-runner)|execution/},()=>{throw new Error('Archived execution experiments must never enter the Still scanner bundle.');});
+}}]});
+const {runStillBackground}=await import(pathToFileURL(path));
+const saved={updatedAt:'2026-10-11T12:00:00.000Z',pools:[{fetchedAt:'2026-10-11T11:59:00.000Z'}]},calls=[],stages=[];
+const env={LP_CACHE:{get:async key=>{calls.push(['get',key]);return structuredClone(saved);}},refresh:async()=>{calls.push(['refresh']);return structuredClone(saved);},record:async snapshot=>calls.push(['record',snapshot])};
+let r=await runStillBackground(env,'heart',async stage=>stages.push(stage));
+assert.deepEqual(calls,[['get','snapshot:v1']]);assert.deepEqual(r.fleet,{status:'unchanged',at:null,revision:0});
+calls.length=0;r=await runStillBackground(env,'full',async stage=>stages.push(stage));
+assert.deepEqual(calls,[['refresh'],['record',saved]],'Keep exact market timestamps; only catalogue refresh and observation recording run');
+assert.equal(r.fleet.at,null,'Archived positions are never advertised as newly marked');
+calls.length=0;env.refresh=async()=>{throw Error('provider unavailable');};
+r=await runStillBackground(env,'full',async()=>{});assert.deepEqual(calls,[['get','snapshot:v1'],['record',saved]]);assert.equal(r.warnings.length,1);
+env.LP_CACHE.get=async()=>null;await assert.rejects(()=>runStillBackground(env,'heart',async()=>{}),/unavailable/);
+console.log('Still scanner: catalogue-only scope, no archived SDK loops, retained evidence dates and honest missing data passed.');
