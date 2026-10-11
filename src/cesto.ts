@@ -2,7 +2,8 @@
 const API='https://backend.cesto.co';
 type Cache={data:any;readAt:number};
 async function cached(kv:KVNamespace,path:string,refresh=false){
- const key='cesto:v1:'+path, saved=await kv.get<Cache>(key,'json');
+ const key='cesto:v1:'+path, candidate=await kv.get<Cache>(key,'json');
+ const saved=candidate&&Number.isFinite(candidate.readAt)&&candidate.readAt>0&&candidate.readAt<=Date.now()?candidate:null;
  if(saved&&Date.now()-saved.readAt<300000&&!refresh)return {...saved,stale:false};
  try{
   const response=await fetch(API+path,{headers:{accept:'application/json'},signal:AbortSignal.timeout(15000)});
@@ -37,4 +38,17 @@ export async function cestoData(kv:KVNamespace,slug:string|null,refresh=false){
  const graph=await cached(kv,'/products/'+encodeURIComponent(d.id)+'/graph?timeRange=1y',refresh).catch(()=>null);
  const allocation=allocations(d,tokens?.data||[]);
  return {readAt:detail.readAt,stale:detail.stale||tokens?.stale,graphReadAt:graph?.readAt||null,graphStale:graph?.stale||false,name:d.name,slug:d.slug,image:basketArtwork(d.logoUrl),description:d.description,categories:d.categories||[],...performance(d),minimum:Number(d.minimumInvestment)/10**Number(d.inputTokenDecimals),inputToken:d.inputTokenMint,inputSymbol:tokens?.data?.find((t:any)=>t.mint===d.inputTokenMint)?.symbol||null,allocation,graph:graph?.data||null};
+}
+
+/** A bounded preview of real public allocations; never fetch charts for cards. */
+export async function cestoPreviews(kv:KVNamespace,catalogue:{slug:string;name:string}[]){
+ const selected=catalogue.slice(0,2);
+ if(!selected.length)return [];
+ const tokens=await cached(kv,'/tokens').catch(()=>null);
+ return Promise.all(selected.map(async basket=>{
+  const detail=await cached(kv,'/products/'+basket.slug).catch(()=>null);
+  const fresh=!!detail&&!detail.stale&&!!tokens&&!tokens.stale&&Array.isArray(tokens.data)&&detail.data?.slug===basket.slug&&detail.data?.geoStatus?.canView!==false;
+  return {name:basket.name,slug:basket.slug,asOf:fresh?new Date(Math.min(detail!.readAt,tokens!.readAt)).toISOString():null,
+   allocation:fresh?allocations(detail!.data,tokens!.data):{rows:[],complete:false}};
+ }));
 }

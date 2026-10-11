@@ -41,3 +41,9 @@ Validation before deployment: 66 automated test scripts, both TypeScript checks 
 
 - `82e1000` — Remove the deferred vault tab, promotional copy and deposit entrypoints from Advanced; preserve historical paper records and archived backend accounting. Malformed snapshots now have explicit 503 boundary coverage.
 - 2026-10-09 11:19 BST · Verified public release `f0ca91dc29bae4d43805a029958e8012712876a6`, Worker `8650a82f-b576-4737-ba79-44a510d57d0d`, source hash `18bffdcd3658558af0d759989f8af9b574df0d9778f698ccff81a5314203e886`. The complete fresh practice-account click path through a single pool and a two-pool basket completed in **41.546 seconds**, produced three separate position addresses and debited exactly 1 of the initial 10 practice SOL. All three `/api/baskets` presets were available. Browser error log was empty. No wallet connection, signature, real-fund action or personal Worker deployment occurred.
+
+## 11 October final MVP pass
+
+- 2026-10-11 14:44 BST · Phase 1 · `7d64516eac95b413a79e86c63270fca8cdd6bfa5` · Exact core copy, supplied logo/head tags and visible verdict chips, paper labelling, default Home-to-pool path, and dated Jupiter/RPC cost model. Deployed; production RPC rate limits remained under investigation.
+- 2026-10-11 15:05 BST · Phase 2 · `e8020ebc03d724975e6aeb267feacd5a8bdff012` · Public-key-only Phantom/paste flow, individually identified live Meteora positions and exact-bin paper copies; all signing routes excluded. Deployed; production redirect compatibility issue diagnosed and fixed in Phase 3.
+- 2026-10-11 15:23 BST · Phase 3 · `6c8dcf785dd0960048f9868b4f79ade0f0625883` · Verdict-first pool cards, phone-first cost card, local Instrument fonts, supplied verdict SVGs, restrained reduced-motion-aware effects, wallet runtime repair, bounded RPC fee reuse, and paused archived background scans. Deployed; live Home Lighthouse mobile performance 99/accessibility 100; live empty-wallet response verified.

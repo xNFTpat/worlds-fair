@@ -34,6 +34,7 @@ export interface StillPaperMark {
   distanceToFloorPct: number | null; unavailableReasons: string[];
 }
 export interface StillPaperPosition {
+  pairedMint?:string;
   examplePark?:boolean;
   costModel?:{asOf:string|null;note:string;source:string};
   runId?:string; strategyName?:string; review?:string;
@@ -203,6 +204,14 @@ export class StillPaperLedger {
       });
       if (!['still-open', 'still-clone', 'still-basket', 'still-close', 'still-refresh'].includes(action)) throw new StillPaperError('Unknown paper action.', 404);
       const id = requestId(input);
+      // Reload recovery carries no wallet or live-position identity. This exact
+      // request is a receipt lookup only: it must never prepare a new copy.
+      if (action === 'still-clone' && Object.keys(input).length === 1) return await this.lock(async () => {
+        const receipt = await this.ctx.storage.get<Receipt>(receiptKey(account, id));
+        if (!receipt) throw new StillPaperError('This paper copy has no confirmed receipt yet. Keep the saved request and check again. No new copy was opened.', 409, 'still_clone_pending');
+        if (receipt.action !== 'still-clone') throw new StillPaperError('That request belongs to another paper action.', 409, 'still_request_conflict');
+        return this.result(await this.read(account), receipt);
+      });
       let normalized: Record<string, unknown>;
       if (action === 'still-refresh') {
         inputFields(input, ['requestId']); normalized = {};
@@ -328,7 +337,7 @@ export class StillPaperLedger {
       if (Math.abs(funded - size / LAMPORTS_PER_SOL) > 1e-8) throw new StillPaperError('Range funding does not match this paper amount.', 409, 'still_open_unavailable');
       const floor = Math.min(...bins.map(bin => bin.priceSol)), top = Math.max(...bins.map(bin => bin.priceSol));
       const positionId = 'paper:' + this.deps.id();
-      const position: StillPaperPosition = {id: positionId, positionAddress: positionId, poolAddress: leg.poolAddress, name: result.name, basketId, basketName,
+      const position: StillPaperPosition = {id: positionId, positionAddress: positionId, poolAddress: leg.poolAddress, name: result.name, pairedMint:result.pool?.pairedMint, basketId, basketName,
         status: 'open', openedAt: at, closedAt: null, amountLamports: size, amountSol: size / LAMPORTS_PER_SOL,
         entryPriceSol: ledger.priceSol, entryAsOf: result.fetchedAt!, entryCostsSol: nonnegative(ledger.entryCostsSol) ? ledger.entryCostsSol : null,
         costModel:result.paperCostModel?{asOf:result.paperCostModel.asOf,note:result.paperCostModel.note,source:result.roundTripCostSol.source}:undefined,

@@ -30,7 +30,7 @@ Wallet reading: **Positions → View a live wallet · read-only → Connect Phan
 
 ### Recording caveats
 
-- A **Worth a look** verdict is not guaranteed. The cost panel now computes a dated **paper estimate** from Jupiter's actual net token-sale proceeds versus the observed native pool mark and Solana RPC `getFeeForMessage` base fees. This is not a complete LP transaction simulation. A better route can offset fees; zero quote drag does not mean zero fees. No assumed swap fee is substituted.
+- A **Worth a look** verdict is not guaranteed. The cost panel now computes a dated **paper estimate** from Jupiter's actual net token-sale proceeds versus a verified native pool mark (or a fresh, explicitly labelled exact-pool Meteora mark) and Solana RPC `getFeeForMessage` base fees. This is not a complete LP transaction simulation. A better route can offset fees; zero quote drag does not mean zero fees. No assumed swap fee is substituted.
 - Holder concentration can remain unavailable because a largest-account sample cannot prove the complete owner distribution. Missing or stale readings are never zero.
 - Strategy results say **Too early to judge** until five closed paper trades. Entries wait for their conditions, and stale evidence can delay a planned close. Five trades do not make missing costs known.
 - Park currently demonstrates the separate **1 SOL example allowance**. Earned-profit routing cannot be shown until complete net profit is measurable. No profitable trade is fabricated to fund it.
@@ -59,7 +59,7 @@ Static HTML, CSS and JavaScript call a Cloudflare Worker. Durable Objects serial
 
 - **Meteora DLMM Data API:** pools, liquidity, fees, timestamps, bin configuration and exact-pool hourly candles. Existing bounded candle fallback can use GeckoTerminal when its pair identity verifies.
 - **Jupiter:** size-matched quote-only token conversions and dated marks, under the shared allowance. No swaps are submitted.
-- **Solana read RPC:** mint extensions, native active-bin evidence, largest accounts and owners. Existing RugCheck evidence supplies verified exclusion addresses; incomplete coverage stays unavailable.
+- **Solana read RPC:** mint extensions, native active-bin evidence, largest accounts and owners. Observed network base fees are reused for at most ten minutes with their original timestamp. Provider cooldowns are respected; incomplete coverage stays unavailable. Existing RugCheck evidence supplies verified exclusion addresses.
 - **Cesto:** public basket catalogue and allocation weights. Paper units require verified Solana mints and fresh Jupiter quotes.
 - **Backyard:** public vault directory, asset metadata and rate quotes. **DefiLlama** indexes the JitoSOL, mSOL and JupSOL rates used by the inherited staking reader. These are provider quotes, not live accrued balances.
 - **LP Army / creator public posts:** strategy inspiration and attribution, never a source of Still performance.
@@ -157,3 +157,11 @@ Wallet positions are read separately by position address, even within one pool. 
 Paper copies are independently funded from the browser's practice balance and retain the observed absolute bin range and relative SOL/token allocation. They do not move or manage the live position. Copies wider than the 69-bin demo limit, stale data, foreign ownership or unsupported token behaviour are rejected. The backend re-reads before confirming; a failed read spends nothing. Historical devnet code remains in the repository for provenance, but its public routes and signing bundle are blocked for this release.
 
 The public Still scheduler refreshes the pool catalogue and dated observations. Archived research trial loops are paused to reserve read capacity for Pre-flight and wallet checks; their stored journals remain accessible under Research. Guided Follow strategies keep their independent durable alarms.
+
+## Final visual pass
+
+The supplied Still logo, favicons, social preview and verdict artwork are used unchanged. Instrument fonts are served locally. The first screen stays static and usable while lessons, visual metadata and the small motion module load only when needed. Reduced-motion settings disable the cursor, ripples and settling effects.
+
+Creator pictures are cached from the public X image CDN; matching profile metadata came through FxTwitter because direct X pages were unavailable. Attribution and removal links remain beside every picture. Partner logos come from the official Meteora brand kit, Cesto site and Backyard site; token icons are keyed by verified mint addresses. Unknown or unreadable images use a neutral circle or initials. Source URLs, dates and file hashes are in `public/creators/provenance.json` and `public/partners/asset-provenance.json`. The application never hotlinks these images.
+
+Grow previews at most two real Cesto allocations from its public API, with source times. Missing or stale allocations remain unavailable. Logos belong to their owners. Still is not affiliated.

@@ -1,8 +1,9 @@
 import type {Env} from './env';
-import {cestoData} from './cesto';
+import type {Snapshot} from './schema';
+import {cestoData,cestoPreviews} from './cesto';
 import {longGameData} from './long-game';
-import {getStillPreflight,listStillPools} from './still-preflight';
-import {getSnapshot} from './refresh';
+import {listStillPoolsWithSummaries} from './still-preflight';
+import {SNAPSHOT_KEY} from './refresh';
 import {preparePaperBasketPurchase,markPaperBaskets,type PaperBasketHolding} from './worldsfair-paper-baskets';
 import {preparePaperVaultDeposit,accruePaperVault,type PaperVaultHolding} from './worldsfair-paper-vaults';
 export const EXAMPLE_PARK_LAMPORTS=1_000_000_000;
@@ -19,11 +20,15 @@ export function parkSplit(total:number,split:readonly number[]):[number,number,n
  const amounts=split.map(p=>Math.floor(total*p/100)),last=split[2]>0?2:split[1]>0?1:0;amounts[last]+=total-amounts.reduce((a,n)=>a+n,0);return amounts as [number,number,number];
 }
 export async function stillParkData(env:Env){
- const [market,baskets,vaults]=await Promise.allSettled([getSnapshot(env),cestoData(env.LP_CACHE,null),longGameData(env.LP_CACHE)]);
- const pools=market.status==='fulfilled'?listStillPools(market.value):[];
- const checked=await Promise.all(pools.slice(0,8).map(p=>getStillPreflight(env,p.address,.4).catch(()=>null)));
- return {paper:true,checkedAt:new Date().toISOString(),pools:checked.filter(p=>p?.verdict.label==='Worth it').slice(0,3).map(p=>({address:p!.poolAddress,name:p!.name,asOf:p!.fetchedAt,source:p!.priceSol.source})),
-  poolNote:'Only pools with a complete “Worth a look” pre-flight are shown. If none qualify, set Pools to 0% or try a pool separately.',
+ // A preview never starts RPC/quote work, even when the market cache is empty.
+ // Confirmation separately performs live checks at the actual split amount.
+ const [market,baskets,vaults]=await Promise.allSettled([env.LP_CACHE.get<Snapshot>(SNAPSHOT_KEY,'json'),cestoData(env.LP_CACHE,null),longGameData(env.LP_CACHE)]);
+ const [pools,basketPreviews]=await Promise.all([
+  market.status==='fulfilled'&&market.value&&Array.isArray(market.value.pools)?listStillPoolsWithSummaries(market.value,env).catch(()=>[]):Promise.resolve([]),
+  baskets.status==='fulfilled'&&!baskets.value.stale?cestoPreviews(env.LP_CACHE,baskets.value.baskets||[]).catch(()=>[]):Promise.resolve([]),
+ ]);
+ return {paper:true,basketPreviews,checkedAt:new Date().toISOString(),pools:pools.filter(p=>p.cardSummary.verdict.label==='Worth it').slice(0,3).map(p=>({address:p.address,name:p.name,asOf:p.cardSummary.asOf,source:'Saved Still Pre-flight',sizeSol:p.cardSummary.sizeSol,scope:p.cardSummary.scope})),
+  poolNote:'Pools shown passed a saved Pre-flight for 0.5 paper SOL and the default range. Confirming rechecks fresh evidence at your actual pool allocation. If none qualify, set Pools to 0% or try a pool separately.',
   baskets:baskets.status==='fulfilled'&&!baskets.value.stale?baskets.value.baskets:[],basketAsOf:baskets.status==='fulfilled'?new Date(baskets.value.readAt).toISOString():null,
   vaults:vaults.status==='fulfilled'?vaults.value.items.filter((v:any)=>v.chain==='Solana'&&!v.stale&&!v.disabled&&v.depositEnabled===true&&Number.isFinite(v.rate)&&v.rate>=0&&v.inputTokenMint&&Number.isInteger(v.inputTokenDecimals)).slice(0,40):[],
   errors:[...(baskets.status==='rejected'||baskets.value.stale?['Cesto catalogue unavailable.']:[]),...(vaults.status==='rejected'?['Backyard rates unavailable.']:vaults.value.errors)]};

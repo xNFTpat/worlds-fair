@@ -5,7 +5,7 @@ import {runInNewContext} from 'node:vm';
 const source = await readFile('public/still-demo.js', 'utf8');
 const lessons = await readFile('public/still-lessons.js', 'utf8');
 const walletClient = await readFile('public/still-wallet-client.js','utf8');
-const browserSource = walletClient.replace(/^export /gm,'') + lessons.replace(/^export /gm, '') + source.replace(/let STILL_LESSONS=\[\];\nconst loadLessons=.*?;\n/, 'const loadLessons=()=>Promise.resolve();\n').replace(/^import .*from '\.\/still-(lessons|wallet-client).js';$/gm, '').replace(/^export /gm, '');
+const browserSource = walletClient.replace(/^export /gm,'') + lessons.replace(/^export /gm, '') + source.replace(/let STILL_LESSONS=\[\];\nconst loadLessons=.*?;\n/, 'const loadLessons=()=>Promise.resolve();\n').replace(/let visualAssets=null,creatorAssets=null,visualLoading=null;\nconst loadVisualAssets=.*?;\n/, 'let visualAssets=null,creatorAssets=null;const loadVisualAssets=()=>Promise.resolve();\n').replace(/^import .*from '\.\/still-(lessons|wallet-client).js';$/gm, '').replace(/^export /gm, '');
 const helpers = runInNewContext(browserSource + '\n({esc,number,sol,groupPositions,requestFingerprint,readOnboarding,sortForPreference})', {Intl});
 assert.equal(helpers.sol(null), 'Unavailable');
 assert.equal(helpers.sol(0), '0 SOL');
@@ -35,9 +35,9 @@ class Element {
   async dispatch(kind, event = {}) {for (const callback of this.listeners.get(kind) || []) await callback(event);}
 }
 const flush = async () => {for(let i=0;i<5;i++) await new Promise(resolve => setImmediate(resolve));};
-function fixture({initialHash="",walletPositions=[],walletStatus="available",poolFields={},additionalPools=[]}={}) {
+function fixture({initialHash="",walletPositions=[],walletStatus="available",poolFields={},additionalPools=[],initialStorage=[]}={}) {
   let clock = Date.parse('2026-10-09T12:00:00.000Z'), serial = 0;
-  const address = 'A'.repeat(32), requests = [], stored = new Map(), steps = ['pools','preflight','positions','baskets'].map(go => Object.assign(new Element(),{dataset:{go}}));
+  const address = 'A'.repeat(32), requests = [], stored = new Map(initialStorage), steps = ['pools','preflight','positions','baskets'].map(go => Object.assign(new Element(),{dataset:{go}}));
   const ids = ['screen','confirmation','notice','home','journey','step-preflight','build-version','confirm-submit','confirm-cancel','confirm-error','confirm-content','paper-amount','wallet-address'];
   const elements = Object.fromEntries(ids.map(id => ['#'+id,new Element()]));
   elements['#confirmation'].form = new Element(); elements['#screen'].deposit = new Element();
@@ -63,6 +63,7 @@ function fixture({initialHash="",walletPositions=[],walletStatus="available",poo
     if(path === '/api/paper/still-clone'){
       if(!accountReady)return new Response(JSON.stringify({error:'Paper account cookie missing'}),{status:401});
       if(failMode==='network')throw new Error('Synthetic interrupted response');
+      if(failMode==='clone-pending')return new Response(JSON.stringify({error:'No confirmed receipt yet. Keep the same request.',code:'still_clone_pending'}),{status:409});
       return new Response(JSON.stringify({paper:true,account,receipt:{requestId:body.requestId,action:'still-clone',positionIds:['paper:clone-1'],amountSol:.5}}));
     }
     if(path === '/api/paper/still-open'){
@@ -160,19 +161,52 @@ assert.equal(directWallet.elements['#confirmation'].open,false);
 assert.equal(directWallet.location.hash,'#positions');
 assert.deepEqual([...directWallet.stored.keys()],['still:wallet-address:v1'],'Wallet results and balances never persist locally; only the public address remains after the paper receipt');
 
+const interruptedClone=fixture({initialHash:'#wallet',walletPositions:[livePosition]});await flush();await pasteWallet(interruptedClone);
+await interruptedClone.click({walletPractise:livePosition.positionAddress});interruptedClone.fail('network');await interruptedClone.confirm();
+const sentClone=interruptedClone.requests.find(r=>r.path==='/api/paper/still-clone').body;
+const pendingClone=JSON.parse(interruptedClone.stored.get('still:guided:pending:v1'));
+assert.deepEqual(pendingClone,{action:'still-clone',body:{requestId:sentClone.requestId},description:'Check the saved paper copy.'});
+for(const identity of [walletAddress,livePosition.positionAddress])assert.ok(!JSON.stringify(pendingClone).includes(identity),'An interrupted clone never persists its source identities');
+interruptedClone.fail(null);await interruptedClone.confirm();
+assert.deepEqual(interruptedClone.requests.filter(r=>r.path==='/api/paper/still-clone')[1].body,sentClone,'Same-session retry may use the confirmed source request held only in memory');
+
+const reloadedClone=fixture({initialHash:'#wallet',initialStorage:[['still:guided:pending:v1',JSON.stringify(pendingClone)]]});await flush();
+await reloadedClone.click({action:'resume'});reloadedClone.fail('clone-pending');await reloadedClone.confirm();
+assert.deepEqual(reloadedClone.requests.find(r=>r.path==='/api/paper/still-clone').body,{requestId:sentClone.requestId},'Reload asks only for the account-scoped receipt, without reconstructing a deposit');
+assert.deepEqual(JSON.parse(reloadedClone.stored.get('still:guided:pending:v1')),pendingClone,'A 409 pending lookup retains the unknown request rather than losing its recovery ID');
+reloadedClone.fail(null);await reloadedClone.confirm();
+assert.deepEqual(reloadedClone.requests.filter(r=>r.path==='/api/paper/still-clone')[1].body,{requestId:sentClone.requestId});
+assert.equal(reloadedClone.stored.has('still:guided:pending:v1'),false,'Only a verified receipt clears reload recovery');
+
+const forgottenClone=fixture({initialHash:'#wallet',walletPositions:[livePosition]});await flush();await pasteWallet(forgottenClone);
+await forgottenClone.click({walletPractise:livePosition.positionAddress});forgottenClone.fail('network');await forgottenClone.confirm();
+const forgottenId=forgottenClone.requests.find(r=>r.path==='/api/paper/still-clone').body.requestId;
+await forgottenClone.click({action:'wallet-forget'});
+assert.equal(forgottenClone.stored.has('still:wallet-address:v1'),false);
+assert.ok(!forgottenClone.elements['#screen'].innerHTML.includes(livePosition.positionAddress),'Forget clears the displayed position data');
+await forgottenClone.click({action:'resume'});forgottenClone.fail(null);await forgottenClone.confirm();
+assert.deepEqual(forgottenClone.requests.filter(r=>r.path==='/api/paper/still-clone')[1].body,{requestId:forgottenId},'Forget also discards the in-memory source payload while retaining receipt recovery');
+
 const recoveredWallet=fixture({initialHash:'#wallet'});await flush();
 const recovery={action:'still-clone',body:{requestId:'saved-clone-request',walletAddress,poolAddress:walletAddress,positionAddress:livePosition.positionAddress,amountSol:'0.5',confirmed:true},description:'Recover the confirmed paper copy.'};
+const legacyHome=fixture({initialStorage:[['still:guided:pending:v1',JSON.stringify(recovery)]]});await flush();
+assert.deepEqual(JSON.parse(legacyHome.stored.get('still:guided:pending:v1')).body,{requestId:recovery.body.requestId},'Opening Home immediately strips legacy wallet identities too');
 recoveredWallet.stored.set('still:guided:pending:v1',JSON.stringify(recovery));await recoveredWallet.click({go:'wallet'});
+const sanitizedRecovery={action:'still-clone',body:{requestId:recovery.body.requestId},description:'Check the saved paper copy.'};
+assert.deepEqual(JSON.parse(recoveredWallet.stored.get('still:guided:pending:v1')),sanitizedRecovery,'Legacy persisted clone sources are stripped when read');
 assert.match(recoveredWallet.elements['#screen'].innerHTML,/Check saved action/,'Recovery stays visible on the direct wallet route');
 await recoveredWallet.click({action:'resume'});recoveredWallet.fail('account');await recoveredWallet.confirm();
-assert.deepEqual(JSON.parse(recoveredWallet.stored.get('still:guided:pending:v1')),recovery,'A failed account bootstrap cannot erase the previously confirmed recovery request');
+assert.deepEqual(JSON.parse(recoveredWallet.stored.get('still:guided:pending:v1')),sanitizedRecovery,'A failed account bootstrap cannot erase the previously confirmed recovery ID');
 assert.equal(recoveredWallet.requests.filter(r=>r.method==='POST').length,0,'Failed account bootstrap cannot attempt a clone');
 recoveredWallet.fail(null);await recoveredWallet.confirm();
-assert.deepEqual(recoveredWallet.requests.find(r=>r.method==='POST').body,recovery.body,'Recovery after bootstrap reuses the same exact request');
+assert.deepEqual(recoveredWallet.requests.find(r=>r.method==='POST').body,sanitizedRecovery.body,'Legacy recovery after bootstrap sends only the exact original request ID');
 
 const unavailableWallet=fixture({initialHash:'#wallet',walletStatus:'unavailable'});await flush();await pasteWallet(unavailableWallet);
 assert.match(unavailableWallet.elements['#screen'].innerHTML,/Positions are unavailable right now/);
 assert.ok(!unavailableWallet.elements['#screen'].innerHTML.includes('No open Meteora positions found'),'Failed reads cannot claim that a wallet is empty');
+const partialWallet=fixture({initialHash:'#wallet',walletStatus:'partial'});await flush();await pasteWallet(partialWallet);
+assert.match(partialWallet.elements['#screen'].innerHTML,/Positions are unavailable right now/);
+assert.ok(!partialWallet.elements['#screen'].innerHTML.includes('No open Meteora positions found'),'An incomplete index cannot prove an empty wallet');
 await unavailableWallet.click({action:'wallet-retry'});
 assert.equal(unavailableWallet.requests.filter(r=>r.path.startsWith('/api/still/wallet?')).length,2);
 

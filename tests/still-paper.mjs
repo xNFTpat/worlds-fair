@@ -234,6 +234,16 @@ assert.ok(!JSON.stringify(savedClone).includes(livePositionA), 'the live positio
 ledger = new StillPaperLedger(ctx, {}, deps);
 assert.deepEqual((await call('still-clone', cloneRequest, cloneAccount)).body.receipt, cloneResult.receipt, 'clone receipt survives durable-object reconstruction');
 assert.equal(walletReads.length, 1, 'committed retry does not repeat wallet provider work');
+const beforeReceiptRecovery=storage.writes.length;
+assert.deepEqual((await call('still-clone',{requestId:cloneRequest.requestId},cloneAccount)).body.receipt,cloneResult.receipt,'Request-ID-only recovery returns the existing same-account clone receipt');
+assert.equal(storage.writes.length,beforeReceiptRecovery,'Receipt recovery is read-only');
+assert.equal(walletReads.length,1,'Receipt recovery never reads the live wallet');
+const otherAccountRecovery=await call('still-clone',{requestId:cloneRequest.requestId},accountB);
+assert.equal(otherAccountRecovery.status,409);assert.equal(otherAccountRecovery.body.code,'still_clone_pending','Another account cannot recover this clone');
+const absentRecovery=await call('still-clone',{requestId:'unknown-clone-001'},cloneAccount);
+assert.equal(absentRecovery.status,409);assert.equal(absentRecovery.body.code,'still_clone_pending');
+assert.equal((await call('still-clone',{requestId:firstRequest.requestId},accountA)).status,409,'The clone lookup cannot return another action’s receipt');
+assert.equal(storage.writes.length,beforeReceiptRecovery);assert.equal(walletReads.length,1,'Unknown recovery cannot create a copy or spend provider quota');
 for (const changed of [{walletAddress: walletB}, {positionAddress: livePositionB}, {poolAddress: poolB}, {amountSol: '0.5'}]) {
   assert.equal((await call('still-clone', {...cloneRequest, ...changed}, cloneAccount)).status, 409, 'same request ID cannot retarget a different observed setup');
 }
@@ -257,6 +267,24 @@ const recoveredClone = (await call('still-account', undefined, cloneAccount)).bo
 assert.equal(recoveredClone.balanceLamports, 8999999990); assert.equal(recoveredClone.positions.length, 3);
 assert.equal(new Set(recoveredClone.positions.map(p => p.positionAddress)).size, 3, 'repeating one source position intentionally still creates a new independent paper address');
 assert.equal((await call('still-clone', recoveryClone, cloneAccount)).body.account.positions.length, 3, 'retry never creates an extra copy');
+
+// A lookup while the original provider read is in flight must keep the same
+// ID recoverable. It cannot start a second copy or erase the later receipt.
+let releaseClone,startedClone;
+const cloneGate=new Promise(resolve=>{releaseClone=resolve;}),cloneStarted=new Promise(resolve=>{startedClone=resolve;});
+const inflightLedger=new StillPaperLedger(ctx,{}, {...deps,walletPreflight:async(...args)=>{startedClone();await cloneGate;return walletPreflight(...args);}});
+const inflightAccount='f'.repeat(64),inflightRequest={...cloneRequest,requestId:'wallet-inflight-001'};
+const originalClone=inflightLedger.handle(inflightAccount,'still-clone',inflightRequest);
+await cloneStarted;
+const readsBeforeLookup=walletReads.length,writesBeforeLookup=storage.writes.length;
+let inflightLookup=await inflightLedger.handle(inflightAccount,'still-clone',{requestId:inflightRequest.requestId});
+assert.equal(inflightLookup.status,409);assert.equal((await inflightLookup.json()).code,'still_clone_pending');
+assert.equal(walletReads.length,readsBeforeLookup);assert.equal(storage.writes.length,writesBeforeLookup);
+releaseClone();assert.equal((await originalClone).status,200);
+inflightLookup=await inflightLedger.handle(inflightAccount,'still-clone',{requestId:inflightRequest.requestId});
+assert.equal(inflightLookup.status,200);
+const inflightRecovered=await inflightLookup.json();assert.equal(inflightRecovered.account.positions.length,1);assert.equal(inflightRecovered.receipt.requestId,inflightRequest.requestId);
+assert.equal(walletReads.length,readsBeforeLookup+1,'An in-flight lookup never duplicates the authoritative copy read');
 
 // Public route keeps existing HttpOnly session and strict same-origin mutation checks.
 let forwarded;

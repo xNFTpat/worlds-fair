@@ -1,0 +1,72 @@
+[
+  {
+    "handle": "molusol",
+    "displayName": "molu",
+    "initials": "M",
+    "profileUrl": "https://x.com/molusol",
+    "image": "/creators/molusol.jpg",
+    "imageSource": "https://pbs.twimg.com/profile_images/2101444078495735809/TXewFnMF_normal.jpg",
+    "metadataSource": "https://api.fxtwitter.com/molusol",
+    "retrievedAt": "2026-10-11T14:28:01.076763Z",
+    "metadataStatus": "public-proxy",
+    "imageStatus": "cached-x-cdn",
+    "sha256": "ffded633a2d6e569a13f698feedf0c95ce847a8ec41b622a89f1306976fc4726",
+    "bytes": 2339
+  },
+  {
+    "handle": "razzaer",
+    "displayName": "Razzaer",
+    "initials": "R",
+    "profileUrl": "https://x.com/razzaer",
+    "image": "/creators/razzaer.jpg",
+    "imageSource": "https://pbs.twimg.com/profile_images/1613184389080285185/WanwFEn4_normal.jpg",
+    "metadataSource": "https://api.fxtwitter.com/razzaer",
+    "retrievedAt": "2026-10-11T14:28:01.096833Z",
+    "metadataStatus": "public-proxy",
+    "imageStatus": "cached-x-cdn",
+    "sha256": "a517c7f4443cb0bd3a1ccf7d978b47955bfc3f8f9045b19d94d1e0ca14d73cbb",
+    "bytes": 1959
+  },
+  {
+    "handle": "Eyyyys",
+    "displayName": "Eys",
+    "initials": "E",
+    "profileUrl": "https://x.com/Eyyyys",
+    "image": "/creators/eyyyys.jpg",
+    "imageSource": "https://pbs.twimg.com/profile_images/2099817649014460416/HVY0V_Oe_normal.jpg",
+    "metadataSource": "https://api.fxtwitter.com/Eyyyys",
+    "retrievedAt": "2026-10-11T14:28:01.120585Z",
+    "metadataStatus": "public-proxy",
+    "imageStatus": "cached-x-cdn",
+    "sha256": "d2349d74e006abcf5cad6ad815707501db03b4b6ac7047ca1b32e0a23e1ea900",
+    "bytes": 2035
+  },
+  {
+    "handle": "Jaypee_Sol",
+    "displayName": "Jaypee",
+    "initials": "J",
+    "profileUrl": "https://x.com/Jaypee_Sol",
+    "image": "/creators/jaypee_sol.jpg",
+    "imageSource": "https://pbs.twimg.com/profile_images/1780923378582360064/80rc4meE_normal.jpg",
+    "metadataSource": "https://api.fxtwitter.com/Jaypee_Sol",
+    "retrievedAt": "2026-10-11T14:28:01.104394Z",
+    "metadataStatus": "public-proxy",
+    "imageStatus": "cached-x-cdn",
+    "sha256": "33b6ff49e39296a2977680a47185bf3a7065d7d84f482816dbe111326c3cd38d",
+    "bytes": 2263
+  },
+  {
+    "handle": "VladimirKovacs",
+    "displayName": "vladimir",
+    "initials": "V",
+    "profileUrl": "https://x.com/VladimirKovacs",
+    "image": "/creators/vladimirkovacs.jpg",
+    "imageSource": "https://pbs.twimg.com/profile_images/2012477117217263618/Zx31FK56_normal.jpg",
+    "metadataSource": "https://api.fxtwitter.com/VladimirKovacs",
+    "retrievedAt": "2026-10-11T14:28:01.080323Z",
+    "metadataStatus": "public-proxy",
+    "imageStatus": "cached-x-cdn",
+    "sha256": "9fb29218686a5ff197cd79d601f93c86ce3fa340e19aa408f32a688ab4a374d9",
+    "bytes": 2035
+  }
+]
