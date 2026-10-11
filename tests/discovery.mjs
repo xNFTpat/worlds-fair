@@ -62,6 +62,14 @@ try {
   assert.equal(result.pools.length,1);assert.equal(result.partial,false);
   assert.equal(result.pools[0].tvlUsd,1200);assert.equal(result.pools[0].priceUsd,2,'quote price must not masquerade as USD');
   assert.equal(result.pools[0].activity.fees1h,100);
+  assert.equal(result.pools[0].activity.volume5m,null,'Missing five-minute volume is never inferred from larger windows');
+  assert.equal(result.pools[0].activity.cumulativeVolumeUsd,null,'Missing cumulative volume stays unavailable');
+  for(const [value,expected] of [[1000000,1000000],[0,0],[-1,null],['invalid',null]]){
+    globalThis.fetch=async()=>respond({data:[{...raw,volume:{...raw.volume,'5m':value},cumulative_metrics:{volume:value}}]});
+    const normalized=(await fetchMeteora()).pools[0];
+    assert.equal(normalized.activity.volume5m,expected);assert.equal(normalized.activity.cumulativeVolumeUsd,expected);
+  }
+  globalThis.fetch=async url=>{urls.push(new URL(url));return respond({data:[raw]});};
   assert.ok(urls.some(u=>u.searchParams.get('filter_by').includes('tvl<25000')));
   assert.ok(urls.every(u=>!u.searchParams.get('filter_by').includes('tvl>=5000')));
   globalThis.fetch=async url=>new URL(url).searchParams.get('sort_by')==='volume_24h:desc'?respond({},400):respond({data:[raw]});

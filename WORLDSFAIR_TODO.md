@@ -86,3 +86,11 @@ Keep user-dependent checks and remaining product decisions here while implementa
 ## Park example (11 October 2026)
 
 Park supports an atomic, confirmed split into qualified pools, quoted Cesto token units and Backyard estimates. Because complete net LP costs remain unavailable, earned profits cannot honestly be established. The demonstration therefore uses a separately labelled, one-time 1 SOL example allowance, never the user's practice balance or invented trading profit. Only complete Worth-a-look pools qualify; unavailable destinations must have a zero split. Backyard only provides a working path when no pool qualifies. Rates are saved at entry and accrued linearly on the underlying deposit asset; no vault shares, LST tokens or real yield are acquired. Cesto values require fresh Jupiter marks. Retries are idempotent and any failed destination leaves the entire allowance unchanged.
+
+## Final MVP pass — phase 1
+
+- [x] Apply supplied Still lockup, favicon set, absolute OG/Twitter share tags and robots.txt.
+- [x] Direct Home → Pick a pool; exact launch wording; visible check chips and Paper labels; missing range data does not draw zero.
+- [x] Replace unconditional cost gaps with dated quote drag plus an explicit unsigned RPC-priced paper fee plan; preserve hard safety verdicts and cost evidence on positions. This does not complete actual LP transaction simulation or make future stressed net proceeds known.
+- [x] Update all seven Follow strategies and public source links; use only observed five-minute volume or bounded cumulative deltas.
+- [ ] Read-only Phantom/paste wallet, visual pass, then real faces and logos.

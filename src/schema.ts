@@ -30,7 +30,7 @@ export interface Pool {
   feeTvl: { h1: number | null; mid: number | null; midHours: number; h24: number | null } | null;
   txns24h: number | null;
   quotePriceUsd?: number | null;  // USD price of the quote token, when the source gives it
-  activity?: { fees30m: number | null; fees1h: number | null; fees4h: number | null; fees12h?:number|null; volume1h: number | null; volume30m?:number|null; volume4h?:number|null; volume12h?:number|null };
+  activity?: { fees30m: number | null; fees1h: number | null; fees4h: number | null; fees12h?:number|null; volume1h: number | null; volume5m?:number|null; cumulativeVolumeUsd?:number|null; volume30m?:number|null; volume4h?:number|null; volume12h?:number|null };
   volumeSignal?: import('./volume').VolumeSignal;
   poolConfig?: { concentrated:boolean|null; feeSchedulerActive:boolean|null; compoundingFeePct:number|null; launchpad:string|null; binStep?:number|null; baseFee?:number|null; dynamicFee?:number|null };
 }

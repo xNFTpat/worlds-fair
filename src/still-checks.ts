@@ -10,11 +10,11 @@ export function stillChecks(p:StillPreflight,d:StillPreflightInput,now:number):S
  const hold=(p.options?.holdMinutes||T.defaultHoldMinutes)/60,holdText=hold<1?`${n(hold*60)} minutes`:`${n(hold)} hours`,checks:StillCheck[]=[];
  const add=(id:string,label:string,status:StillCheckStatus,result:string,source:string,asOf:string|null,tooltip:string,lesson:number)=>checks.push({id,label,status,result,source,asOf,tooltip,lesson});
  const unknown=(id:string,label:string,source:string,tooltip:string,lesson:number)=>add(id,label,'unavailable',`Unavailable. Couldn't read ${source} at ${new Date(now).toISOString()}. Treat this as unknown.`,source,null,tooltip,lesson);
- const fee=p.feeRateHourly.value,cost=p.exitConversionSol.value,day=p.expectedFeesPerDaySol.value;
+ const fee=p.feeRateHourly.value,cost=p.exitCostSol.value??p.exitConversionSol.value,day=p.expectedFeesPerDaySol.value;
  if(finite(fee)){
   const status=fee>=T.feePace.pass?'pass':fee>=T.feePace.caution?'caution':'fail';
   const t=finite(p.roundTripCostSol.value)&&fee>0?`${n(p.roundTripCostSol.value/(fee*p.sizeSol))} hours`:'unavailable';
-  add('fees','Fee pace',status,t==='unavailable'?`Fees are ${pct(fee)}% of TVL an hour. Cost recovery is unavailable.`:status==='pass'?`Fees are running at ${pct(fee)}% of TVL an hour. Costs earned back in about ${t}.`:status==='caution'?`Fees are ${pct(fee)}% of TVL an hour. Costs take about ${t} to earn back.`:`Fees are ${pct(fee)}% of TVL an hour. ${finite(p.roundTripCostSol.value)?`At this pace, costs aren't earned back within your ${holdText} hold.`:'Cost recovery is unavailable.'}`,p.feeRateHourly.source,p.feeRateHourly.asOf,`Fees in the last hour as a share of TVL, applied to your size. ${finite(day)?'Daily pace: '+sol(day)+'. ':''}Pool-average model, not position earnings. Example threshold bands; costs and future fees may be unavailable.`,7);
+  add('fees','Fee pace',status,t==='unavailable'?`Fees are ${pct(fee)}% of TVL an hour. Cost recovery is unavailable.`:status==='pass'?`Fees are running at ${pct(fee)}% of TVL an hour. Costs earned back in about ${t}.`:status==='caution'?`Fees are ${pct(fee)}% of TVL an hour. Costs take about ${t} to earn back.`:`Fees are ${pct(fee)}% of TVL an hour. ${finite(p.roundTripCostSol.value)?`Cost recovery at this pace: ${t}. Planned hold: ${holdText}.`:'Cost recovery is unavailable.'}`,p.feeRateHourly.source,p.feeRateHourly.asOf,`Fees in the last hour as a share of TVL, applied to your size. ${finite(day)?'Daily pace: '+sol(day)+'. ':''}Pool-average model, not position earnings. Example threshold bands; costs and future fees may be unavailable.`,7);
  }else unknown('fees','Fee pace',p.feeRateHourly.source,'Fees in the last hour as a share of TVL, applied to your size.',7);
  for(const scenario of p.scenarios){
   const half=scenario.dropFraction===.5,id=half?'half':'drop20',label=half?'If price halves':'If price falls 20%',value=scenario.grossValueSol.value,change=scenario.grossPnlSol.value;
@@ -28,7 +28,8 @@ export function stillChecks(p:StillPreflight,d:StillPreflightInput,now:number):S
  if(finite(cost)){
   const fraction=cost/p.sizeSol,expected=finite(fee)?fee*p.sizeSol*hold:null,status=fraction>T.exitCost.caution||finite(expected)&&cost>expected?'fail':fraction<=T.exitCost.pass?'pass':'caution';
   // A full-size token sale is a reference, not the unknown future LP withdrawal.
-  add('cost','Entry and exit cost',status==='fail'?'fail':'unavailable',`Exit swap reference: ${pct(fraction)}% (${sol(cost)}). All-in entry and exit costs: unavailable.`,p.exitConversionSol.source,p.exitConversionSol.asOf,'Swap cost to get in and out at your size, from a live Jupiter quote. This SOL-only model has no entry token conversion. Network, rent and LP withdrawal tax are excluded. The quoted sale is a full-size token reference, not a future exit guarantee.',3);
+  const modeled=finite(p.roundTripCostSol.value);
+  add('cost','Entry and exit cost',modeled?status:status==='fail'?'fail':'unavailable',modeled?`Paper exit estimate: ${pct(fraction)}% (${sol(cost)}). Paper entry + exit: ${sol(p.roundTripCostSol.value!)}.`:`Exit swap reference: ${pct(fraction)}% (${sol(cost)}). Paper entry and exit estimate: unavailable.`,modeled?p.exitCostSol.source:p.exitConversionSol.source,modeled?p.exitCostSol.asOf:p.exitConversionSol.asOf,p.paperCostModel?.note||'Current full-size token-to-SOL reference. It is not an LP withdrawal simulation or a future exit guarantee.',3);
  }else unknown('cost','Entry and exit cost','Jupiter size-matched quote','Swap cost to get in and out at your size, from a live Jupiter quote. Network and LP withdrawal costs are separate.',3);
  const tax=p.transferFeeBps.value,mutable=p.transferFeeChangeable?.value;
  if(finite(tax)){

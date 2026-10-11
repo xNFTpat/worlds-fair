@@ -14,10 +14,10 @@ Small Solana LPs often lose money to costs, not bad calls: the exit swap on a th
 
 ## Demo path — the clicks that work today
 
-1. **Start on paper → Next → Got it → Balanced → Show me pools.** Returning visitors go straight to pools. Settings lets you change pace.
-2. **Run pre-flight** on a pool. Read the eight rows (the two downside cases are separate), the dated sources and verdict. **Change range** opens size, shape, floor, ceiling and planned hold; **Run pre-flight** checks the chosen settings again.
+1. **Home → Pick a pool.** The primary button goes directly to live pools. Optional **How it works** explains the paper model; Settings lets you change pace.
+2. **Run Pre-flight** on a pool. Read the eight rows (the two downside cases are separate), the dated sources and verdict. **Change range** opens size, shape, floor, ceiling and planned hold; **Run Pre-flight** checks the chosen settings again.
 3. **Open on paper → Open on paper** in the confirmation. If the verdict is Skip for now, use **Open on paper anyway** only to demonstrate that risk on paper. A fresh price is required. The new position's pool expands in **Positions**; every position keeps its own address and history.
-4. **Follow → Narrow and quick → See rules → Follow on paper → Follow on paper** in the confirmation. The run starts now and waits for fresh qualifying data. It does not invent an immediate trade.
+4. **Follow → Narrow Spot → See rules → Follow on paper → Follow on paper** in the confirmation. The run starts now and waits for fresh qualifying data. It does not invent an immediate trade.
 5. In **Make your own paper bot**, change the controls and name, then **Start paper bot → Start paper bot** in the confirmation. The server runs the saved rules against the same practice balance.
 6. **Grow → Try a 1 SOL example → Backyard only → Park on paper → Park on paper** in the confirmation. Keep a current SOL staking option, such as JitoSOL, when available. This separately labelled example is not earned trading profit. A saved summary appears in Grow and Positions. Cesto splits require every mint and quote to verify; unavailable destinations must have 0%.
 7. **Home → Learn → Read** a lesson, then **Next lesson** or **Try it**. Pre-flight's **Learn more** links open the matching lesson. All eight lessons are included.
@@ -30,7 +30,7 @@ Optional devnet proof: after opening a starter mix, **Positions → Record baske
 
 ### Recording caveats
 
-- A **Worth a look** verdict is not guaranteed. Complete entry/exit transaction costs are currently missing, so do not script a passing all-in cost check or known net profit. Jupiter's conversion quote is a separate reference, not a complete LP exit quote.
+- A **Worth a look** verdict is not guaranteed. The cost panel now computes a dated **paper estimate** from Jupiter's actual net token-sale proceeds versus the observed native pool mark and Solana RPC `getFeeForMessage` base fees. This is not a complete LP transaction simulation. A better route can offset fees; zero quote drag does not mean zero fees. No assumed swap fee is substituted.
 - Holder concentration can remain unavailable because a largest-account sample cannot prove the complete owner distribution. Missing or stale readings are never zero.
 - Strategy results say **Too early to judge** until five closed paper trades. Entries wait for their conditions, and stale evidence can delay a planned close. Five trades do not make missing costs known.
 - Park currently demonstrates the separate **1 SOL example allowance**. Earned-profit routing cannot be shown until complete net profit is measurable. No profitable trade is fabricated to fund it.
@@ -87,7 +87,7 @@ npm run check
 npm run verify
 ```
 
-`verify` runs 69 test scripts, TypeScript checks and four local Worker runtime suites, including independent same-pool positions, recovery/idempotency, strategy parsing/scheduling, unavailable evidence and atomic Park rounding/quote failures. Runtime tests bind localhost; signing/provider fixtures are synthetic and submit no transactions. [Accessibility checks](docs/ACCESSIBILITY.md) record Home's Lighthouse 100/100 result and responsive/keyboard coverage.
+`verify` runs 70 test scripts, TypeScript checks and four local Worker runtime suites, including independent same-pool positions, recovery/idempotency, strategy parsing/scheduling, unavailable evidence and atomic Park rounding/quote failures. Runtime tests bind localhost; signing/provider fixtures are synthetic and submit no transactions. [Accessibility checks](docs/ACCESSIBILITY.md) record Home's Lighthouse 100/100 result and responsive/keyboard coverage.
 
 To deploy after tests, commit and push the reviewed work, then run `npm run deploy`. The guard requires a clean worldsfair branch and the exact public origin, runs the publication audit, uses `wrangler.worldsfair.toml`, stamps the real Git SHA and writes a receipt to the isolated demo KV. Verify `/api/version` matches the commit. Never use an unqualified deployment command or touch `lp-agg` / the personal terminal.
 
@@ -101,7 +101,7 @@ Cutoff requested for disclosure: **14 September 2026, 14:00 UK**. This public re
 | Inherited later source | Exact before/after-cutoff endpoints **unavailable** | Research screens, market integrations, range mathematics and strategy/fleet foundations are inherited. They are not newly authored merely because imported on 5 October. |
 | Initial public snapshot | `1916c029ba9cfad87ccf64aa02af1d2756006dbc` → same, 5 October | Sanitised export excluding personal records, private archives/history, credentials and original deployment configuration. |
 | Public 5 October changes | `d2ed57d2e64b291c071c8378a79d7cdc2286c2bb` → `bd097a52ee97ecfe3233a1787c9d55f3b89e4a58` | Public provenance, simpler paper flows, data-read and contrast fixes. |
-| Guided 9 October demo | `f4d92de06f2e950943f26a0f72f795d749206fec` → `1333a58c0f5c2cf0da57ad10d76bc32ea24880f0` | Guided pools/pre-flight, address-keyed groups, isolated ledger and retained devnet choice receipt. |
+| Guided 9 October demo | `f4d92de06f2e950943f26a0f72f795d749206fec` → `1333a58c0f5c2cf0da57ad10d76bc32ea24880f0` | Guided pools/Pre-flight, address-keyed groups, isolated ledger and retained devnet choice receipt. |
 | Claude UI/copy implementation, 11 October | `1b144077eab693d12d59eab29cfe83a1086dd167` → `8f2935378782fa2a9dc5df4558722d3cd9457c16` | Home/onboarding, live checks and editable ranges, seven strategies and custom bots, atomic Park examples, eight lessons and accessibility fixes. Subsequent documentation/release commits are visible in Git. |
 
 The public **`worldsfair-baseline`** tag identifies the **5 October public snapshot**, not the September cutoff. Its annotation records that limitation. It is deliberately not a claim that unavailable private history is public or verified. The private tag with the same name is described in the technical guide and points to the older private baseline; these are different repositories. [WORLDSFAIR_CHANGELOG.md](WORLDSFAIR_CHANGELOG.md) retains earlier task records, whose private SHAs must not be confused with this fresh public history.
@@ -109,17 +109,17 @@ The public **`worldsfair-baseline`** tag identifies the **5 October public snaps
 ## Strategy attribution and permission to-dos
 
 
-Seven new paper strategies are declared in `src/still-strategies.ts`. They use the same isolated guided paper ledger and range model as manual positions, with a Durable Object alarm, not the old research fleet’s history. Following explicitly authorises future paper entries and planned closes from the same 10-SOL practice balance. Each run has its own start time; no historical trades are copied or backfilled. Custom bots run on the same engine. Each run has at most one open position; the demo retains at most 40 positions and ten runs per browser. The shared runner processes eight active journals per minute, with a 128-journal capacity; checks can be delayed. A planned hold is checked against observations, not guaranteed execution time. Missing fee intervals and all-in costs remain unavailable.
+Seven new paper strategies are declared in `src/still-strategies.ts`. They use the same isolated guided paper ledger and range model as manual positions, with a Durable Object alarm, not the old research fleet’s history. Following explicitly authorises future paper entries and planned closes from the same 10-SOL practice balance. Each run has its own start time; no historical trades are copied or backfilled. Custom bots run on the same engine. Each run has at most one open position; the demo retains at most 40 positions and ten runs per browser. The shared runner processes eight active journals per minute, with a 128-journal capacity; checks can be delayed. A planned hold is checked against observations, not guaranteed execution time. Missing fee intervals remain unavailable. Paper net uses the saved entry-time cost model, not a freshly executed exit.
 
 Source posts were located through the [LP Army strategy library](https://www.lparmy.com/strategies) on 11 October 2026. Exact thresholds and hold settings are Still examples supplied for this build, not a claim to reproduce the creators’ current trading. No creator return is a Still result.
 
-- TODO(permission): [@molusol — Heart attack inspiration](https://x.com/molusol/status/1966094407045886009).
-- TODO(permission): [@razzaer — Spot-range inspiration](https://x.com/razzaer/status/1974613647704887505).
+- TODO(permission): [@molusol — Heart attack inspiration](https://x.com/molusol/status/2107563392084873543).
+- TODO(permission): [@razzaer — Spot-range inspiration](https://x.com/razzaer/status/2107576780391387512).
 - TODO(permission): [@Eyyyys — public DLMM article](https://x.com/Eyyyys/status/2099817371372560521). Article title and source indexed by LP Army; full X article retrieval was unavailable.
-- TODO(permission): [@Jaypee_Sol — Bid-Ask explainer](https://x.com/Jaypee_Sol/status/1987773963619999966).
-- TODO(permission): [@VladimirKovacs — beginner LP checklist](https://x.com/VladimirKovacs/status/2104497731939033572).
+- TODO(permission): [@Jaypee_Sol — Bid-Ask explainer](https://x.com/Jaypee_Sol/status/2107017949215383786).
+- TODO(permission): [@VladimirKovacs — beginner LP checklist](https://x.com/VladimirKovacs/status/2099778321298890892).
 
-Every creator card discloses the inspiration and non-affiliation, and links a removal-request issue. Pat’s Overnight patience and Still’s Steady drip are house examples. No permission request has been sent on the user’s behalf.
+Every creator card discloses the inspiration and non-affiliation, and links a removal-request issue. Pat’s Overnight and Steady Drip are house examples. No permission request has been sent on the user’s behalf.
 
 
 ## Third-party code and licences
@@ -141,3 +141,11 @@ Next: measured transaction costs and complete holder coverage; earned-profit rou
 The separate two-minute founder pitch, three-minute product demo, chosen X profile, logo export, licence/attribution review and final Colosseum submission are still human tasks in [WORLDSFAIR_TODO.md](WORLDSFAIR_TODO.md). This build did not publish videos, claim handles or submit the entry.
 
 **Not financial advice.** Paper models do not establish achievable returns, and real LP positions can lose capital.
+
+## Paper cost model (11 October final pass)
+
+The declared plan prices one unsigned two-signature open, one close and one exit swap, plus an entry funding swap for a two-sided range. Base fees are observed through [Solana getFeeForMessage](https://solana.com/docs/rpc/http/getfeeformessage); the priority bid is explicitly zero by choice. Refundable rent, extra setup transactions and execution changes are excluded. No message is signed or submitted. Nonzero or unreadable transfer taxes keep this model unavailable until exact transfer amounts are supported.
+
+The planned-hold net figure is pool-average fee pace × size × hold, minus that dated plan, conditional on staying in range and unchanged pace. A SOL-only range above current trading earns nothing until price enters. Positions retain the source, time and scope of their entry-time cost model; their paper net does not claim a current executable exit. Future stressed withdrawals are not priced using today's quote.
+
+Heart Attack accepts measured five-minute volume or an observed cumulative-volume increase of at least $1M within five minutes. It starts collecting after following, never scales a longer window or backfills a signal, and resets on counter regressions or stale observations.

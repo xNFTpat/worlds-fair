@@ -34,6 +34,7 @@ export interface StillPaperMark {
 }
 export interface StillPaperPosition {
   examplePark?:boolean;
+  costModel?:{asOf:string|null;note:string;source:string};
   runId?:string; strategyName?:string; review?:string;
   id: string; positionAddress: string; poolAddress: string; name: string; basketId: string | null; basketName: string | null;
   status: 'open' | 'closed'; openedAt: string; closedAt: string | null;
@@ -118,7 +119,7 @@ export function markStillPosition(position: StillPaperPosition, observation: Obs
   return next;
 }
 function costGaps(position: Pick<StillPaperPosition, 'entryCostsSol' | 'exitCostsSol'>) {
-  return [...(position.entryCostsSol === null ? ['All-in entry costs are unavailable.'] : []), ...(position.exitCostsSol === null ? ['All-in exit costs are unavailable.'] : [])];
+  return [...(position.entryCostsSol === null ? ['Paper entry cost evidence is unavailable.'] : []), ...(position.exitCostsSol === null ? ['Paper exit cost evidence is unavailable.'] : [])];
 }
 export function stillAccountView(account: StillPaperAccount, now = Date.now()) {
   const {activityWindow: _activity, actionCount: _actions, ...view} = account;
@@ -306,7 +307,7 @@ export class StillPaperLedger {
     const total = input.amountLamports as number; let remaining = total;
     const sizes = legs.map((leg, index) => {const size = index === legs.length - 1 ? remaining : Math.floor(total * leg.weightBps / 10000); remaining -= size; return size;});
     if (sizes.some(size => size < 1)) throw new StillPaperError('The paper amount is too small for this split.');
-    const results = await Promise.all(legs.map((leg, index) => this.deps.preflight(this.env, leg.poolAddress, sizes[index] / LAMPORTS_PER_SOL,(input.range as StillRangeOptions|undefined)||mixRange)));
+    const results = await Promise.all(legs.map((leg, index) => this.deps.preflight(this.env, leg.poolAddress, sizes[index] / LAMPORTS_PER_SOL,(input.range as StillRangeOptions|undefined)||mixRange,true)));
     const now = this.deps.now(), at = new Date(now).toISOString();
     return results.map((result, index) => {
       const leg = legs[index], size = sizes[index], ledger = result?.ledger;
@@ -322,6 +323,7 @@ export class StillPaperLedger {
       const position: StillPaperPosition = {id: positionId, positionAddress: positionId, poolAddress: leg.poolAddress, name: result.name, basketId, basketName,
         status: 'open', openedAt: at, closedAt: null, amountLamports: size, amountSol: size / LAMPORTS_PER_SOL,
         entryPriceSol: ledger.priceSol, entryAsOf: result.fetchedAt!, entryCostsSol: nonnegative(ledger.entryCostsSol) ? ledger.entryCostsSol : null,
+        costModel:result.paperCostModel?{asOf:result.paperCostModel.asOf,note:result.paperCostModel.note,source:result.roundTripCostSol.source}:undefined,
         exitCostsSol: nonnegative(ledger.exitCostsSol) ? ledger.exitCostsSol : null, transferFeeBps: nonnegative(ledger.transferFeeBps) ? ledger.transferFeeBps : null,
         range: {shape: result.range.shape, floorPriceSol: floor, topPriceSol: top, bins, note: result.range.note},
         lastObservationAt: at, lastFeeRateHourly: nonnegative(ledger.feeRateHourly) ? ledger.feeRateHourly : null, lastFeeRateAsOf: result.feeRateHourly.asOf,

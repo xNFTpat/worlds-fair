@@ -106,7 +106,7 @@ await intro.click({onboard:'next'}); assert.ok(intro.elements['#screen'].innerHT
 await intro.click({onboard:'next'}); await intro.click({pace:'calm'}); await intro.click({onboard:'finish'});
 assert.equal(JSON.parse(intro.stored.get('still:onboarding:v1')).preference,'calm');
 await intro.click({go:'home'});await intro.click({action:'start'});
-assert.ok(intro.elements['#screen'].innerHTML.includes('Run pre-flight'),'Returning visitors go directly to pools');
+assert.ok(intro.elements['#screen'].innerHTML.includes('Run Pre-flight'),'Returning visitors go directly to pools');
 
 const reading = fixture(); await reading.click({go:'learn'}); await reading.click({lesson:'3'});
 assert.ok(reading.elements['#screen'].innerHTML.includes('Why exit cost matters on thin tokens'));

@@ -106,6 +106,98 @@ try {
   assert.equal(buildStillPreflight({...input, quotes: [{...quote, exitCostSol: .02}]}, .5, now).verdict.label, 'Skip');
   assert.equal(buildStillPreflight({pool: pool('zero', {activity: {fees1h: 0}})}, .5, now).verdict.label, 'Skip');
 
+  // Costs must become usable from real, dated inputs without weakening screening.
+  const network = {asOf: at, singleLamports: 5000, doubleLamports: 10000, source: 'Fixture RPC fee observations'};
+  const healthyPool = pool('steady-a', {activity: {...steady[0].activity, fees1h: 1200}});
+  const healthyRpc = {...rpc, decimals: 6, holderSample: {status: 'available', asOf: at, mint: rpc.mint, supplyRaw: '1000', complete: true,
+    accounts: Array.from({length: 40}, (_, i) => ({address: 'account-' + i, owner: 'owner-' + i, amountRaw: '25'}))}};
+  const candles = {status: 'available', asOf: at, note: 'Meteora exact-pool fixture', candles: Array.from({length: 24}, (_, i) =>
+    ({t: now / 1000 - (24 - i) * 3600, o: .01, c: .01, h: .0105, l: .0095, v: 100}))};
+  const healthyInput = {pool: healthyPool, safety: {rpc: healthyRpc}, network, quotes: [quote], candles,
+    rug: {mint: rpc.mint, status: 'available', asOf: at, holderExclusions: {mint: rpc.mint, status: 'available', asOf: at, addresses: []}}};
+  const modeled = buildStillPreflight(healthyInput, .5, now);
+  const closeTo = (actual, expected, message) => assert(Math.abs(actual - expected) < 1e-12, message + ': ' + actual + ' vs ' + expected);
+  assert.equal(modeled.verdict.label, 'Worth it', 'complete healthy evidence can pass; missing cost must not be the default');
+  assert.equal(modeled.checks.find(c => c.id === 'cost').status, 'pass');
+  assert.doesNotMatch(modeled.checks.find(c => c.id === 'cost').result, /unavailable/i);
+  closeTo(modeled.entryCostSol.value, .00001, 'SOL-only entry has the observed two-signature base fee');
+  closeTo(modeled.exitCostSol.value, .00101, 'reference exit plus observed close and swap base fees');
+  closeTo(modeled.roundTripCostSol.value, .00102, 'costs include each declared fee once');
+  closeTo(modeled.paperCostModel.netAfterHoldSol.value, .01098, 'four-hour paper fee projection subtracts modeled costs');
+  assert.equal(modeled.ledger.entryCostsSol, modeled.entryCostSol.value);
+  assert.equal(modeled.ledger.exitCostsSol, modeled.exitCostSol.value);
+  assert.match(modeled.paperCostModel.note, /not an LP transaction simulation/);
+  assert.match(modeled.paperCostModel.netAfterHoldSol.note, /eligible in-range liquidity/);
+  for (const field of ['entryCostSol', 'exitCostSol', 'roundTripCostSol', 'networkCostSol']) assert.equal(modeled[field].asOf, at);
+  assert.equal(modeled.scenarios[0].netValueSol.value, null, 'a current reference cannot quote future stressed inventory');
+  assert.match(modeled.scenarios[0].netValueSol.note, /future stressed withdrawal/);
+  // A directly observed quote drag must not inherit Research's assumed fee floor.
+  const assumedFloorQuote = {...quote, exitFeeSource: 'assumed', exitCostSol: .05, quotedExitDragSol: .0002};
+  const actualDrag = buildStillPreflight({...healthyInput, quotes: [assumedFloorQuote]}, .5, now);
+  closeTo(actualDrag.exitConversionSol.value, .0002, 'measured net-proceeds drag is independent of the assumed route-fee floor');
+  closeTo(actualDrag.exitCostSol.value, .00021, 'RPC base fees are added once to measured drag');
+  assert.equal(actualDrag.checks.find(c => c.id === 'cost').status, 'pass');
+  assert.match(actualDrag.exitConversionSol.note, /zero drag does not mean zero swap fees/);
+  const favorableRoute = buildStillPreflight({...healthyInput, quotes: [{...assumedFloorQuote, quotedExitDragSol: 0}]}, .5, now);
+  assert.equal(favorableRoute.exitConversionSol.value, 0, 'observed nonnegative drag may be zero when better route pricing offsets fees');
+  closeTo(favorableRoute.exitCostSol.value, .00001, 'zero conversion drag does not erase the network fee plan');
+  for (const drag of [undefined, null, -1, NaN, Infinity]) {
+    const result = buildStillPreflight({...healthyInput, quotes: [{...assumedFloorQuote, quotedExitDragSol: drag}]}, .5, now);
+    assert.equal(result.exitConversionSol.value, null, 'absent/invalid measured drag cannot promote an assumed fee floor');
+    assert.equal(result.roundTripCostSol.value, null);
+  }
+  for (const change of [{sizeSol: 1}, {status: 'stale'}, {expiresAt: now - 1}, {asOf: iso(now + 1), buyAsOf: iso(now + 1), sellAsOf: iso(now + 1)}]) {
+    assert.equal(buildStillPreflight({...healthyInput, quotes: [{...assumedFloorQuote, ...change}]}, .5, now).exitConversionSol.value, null, 'measured drag still requires fresh, exact-size quotes');
+  }
+  const longHold = {shape: 'BidAsk', floorPct: 47.5, ceilingPct: 0, holdMinutes: 2880};
+  for (const [totalExit, status] of [[.005, 'pass'], [.00500001, 'caution'], [.015, 'caution'], [.01500001, 'fail']]) {
+    const result = buildStillPreflight({...healthyInput, quotes: [{...quote, exitCostSol: totalExit - .00001}]}, .5, now, longHold);
+    assert.equal(result.checks.find(c => c.id === 'cost').status, status, 'exit threshold includes the RPC base-fee plan at ' + totalExit);
+  }
+  assert.equal(buildStillPreflight(healthyInput, .5, now, {...longHold, holdMinutes: 1}).checks.find(c => c.id === 'cost').status, 'fail', 'cost exceeding planned-hold fees fails even below 1%');
+  const frozen = buildStillPreflight({...healthyInput, safety: {rpc: {...healthyRpc, freezeAuthority: 'active'}}}, .5, now);
+  assert.equal(frozen.verdict.label, 'Skip'); assert.match(frozen.verdict.reason, /freeze authority/);
+  for (const invalidNetwork of [null, {...network, asOf: iso(now - 60001)}, {...network, asOf: iso(now + 1)}, {...network, asOf: 'invalid'},
+    {...network, singleLamports: -1}, {...network, doubleLamports: 1.5}, {...network, singleLamports: Number.MAX_SAFE_INTEGER + 1}]) {
+    const result = buildStillPreflight({...healthyInput, network: invalidNetwork}, .5, now);
+    for (const field of ['entryCostSol', 'exitCostSol', 'roundTripCostSol', 'networkCostSol']) assert.equal(result[field].value, null, field + ' rejects invalid network evidence');
+    assert.equal(result.paperCostModel.netAfterHoldSol.value, null); assert.equal(result.verdict.label, 'Marginal');
+    assert.equal(result.exitConversionSol.value, .001, 'an unavailable network read does not erase valid swap evidence');
+  }
+  const entryWithoutExit = buildStillPreflight({...healthyInput, quotes: []}, .5, now);
+  closeTo(entryWithoutExit.entryCostSol.value, .00001, 'entry estimate does not depend on exit quote availability');
+  assert.equal(entryWithoutExit.entryCostSol.asOf, at); assert.equal(entryWithoutExit.exitCostSol.value, null);
+  assert.equal(entryWithoutExit.paperCostModel.netAfterHoldSol.value, null);
+  const dated = buildStillPreflight({...healthyInput, network: {...network, asOf: iso(now - 1000)}, safety: {rpc: {...healthyRpc, asOf: iso(now - 2000)}},
+    quotes: [{...quote, asOf: iso(now - 3000), buyAsOf: iso(now - 3000), sellAsOf: iso(now - 3000), expiresAt: now + 42000}]}, .5, now);
+  assert.equal(dated.entryCostSol.asOf, iso(now - 2000)); assert.equal(dated.exitCostSol.asOf, iso(now - 3000)); assert.equal(dated.paperCostModel.asOf, iso(now - 3000));
+  for (const [bps, authority, expectedTax] of [[0, null, 'pass'], [0, 'active', 'fail'], [150, null, 'caution'], [201, null, 'fail']]) {
+    const result = buildStillPreflight({...healthyInput, safety: {rpc: {...healthyRpc, transferFeeStatus: 'known', transferFee: {bps, maximumRaw: '10000', configAuthority: authority}}}}, .5, now);
+    assert.equal(result.checks.find(c => c.id === 'tax').status, expectedTax);
+    if (authority) {assert.equal(result.verdict.label, 'Skip'); assert.match(result.verdict.reason, /authority/);}
+    if (bps > 0) {assert.equal(result.roundTripCostSol.value, null, 'nonzero tax needs exact transfer amounts; no uncapped percentage guess'); assert.equal(result.paperCostModel.netAfterHoldSol.value, null);}
+    else assert(result.roundTripCostSol.value > 0, 'observed zero-tax costs remain visible even when mutable policy separately fails');
+  }
+  const twoSidedRange = {shape: 'Spot', floorPct: 10, ceilingPct: 10, holdMinutes: 30};
+  function fundedInput(size) {
+    const detail = {...healthyInput, quotes: [{...quote, sizeSol: size}]}, preliminary = buildStillPreflight(detail, size, now, twoSidedRange);
+    const funding = Math.round(preliminary.range.bins.reduce((sum, b) => sum + b.token * .01, 0) * 1e9) / 1e9;
+    assert(funding > .001 && funding < size, 'two-sided range needs a genuine partial token purchase');
+    const fundingQuote = {...quote, sizeSol: funding, inputRaw: String(Math.round(funding * 1e9)), tokenRaw: String(Math.floor((funding - .001) / .01 * 1e6))};
+    return {...detail, entryQuotes: [fundingQuote]};
+  }
+  const fundedDetail = fundedInput(.5), funded = buildStillPreflight(fundedDetail, .5, now, twoSidedRange), fundingQuote = fundedDetail.entryQuotes[0];
+  const quotedEntryLoss = Number(fundingQuote.inputRaw) / 1e9 - Number(fundingQuote.tokenRaw) / 1e6 * .01;
+  closeTo(funded.entryConversionSol.value, quotedEntryLoss, 'two-sided conversion uses exact funding quote amounts');
+  closeTo(funded.entryCostSol.value, quotedEntryLoss + .000015, 'two-sided entry includes one funding-swap base fee');
+  closeTo(funded.networkCostSol.value, .000025, 'declared open, entry swap, close and exit swap base fees');
+  assert.equal(funded.entryConversionSol.asOf, at); assert(funded.paperCostModel.netAfterHoldSol.value !== null);
+  for (const change of [{sizeSol: fundingQuote.sizeSol + .001}, {status: 'stale'}, {expiresAt: now - 1}, {tokenRaw: 'NaN'}, {inputRaw: '-1'}]) {
+    const result = buildStillPreflight({...fundedDetail, entryQuotes: [{...fundingQuote, ...change}]}, .5, now, twoSidedRange);
+    assert.equal(result.entryCostSol.value, null, 'invalid or mismatched funding quotes never imply free entry');
+    assert.equal(result.paperCostModel.netAfterHoldSol.value, null);
+  }
+
   const basket = baskets[0], memberPools = basket.legs.map(leg => snapshot.pools.find(item => item.address === leg.poolAddress));
   const legs = memberPools.map(pool => buildStillPreflight({pool}, .25, now));
   const combined = combineStillBasketPreflight(basket, legs, .5);
@@ -128,7 +220,27 @@ try {
     const mark = await getStillPoolMark(env, 'steady-a'); assert.equal(mark.priceSol, .01); assert.equal(mark.feeRateAsOf, at);
     const combinedFast = await getStillBasketPreflight(env, 'steady', .5); assert.equal(combinedFast.canOpen, true);
     assert.equal(fetches, 0);
+    // A live pre-flight's exact evidence survives the cached-only paper-open path.
+    const cachedRange = twoSidedRange, cachedSize = .37, cachedInput = fundedInput(cachedSize);
+    const cacheKey = 'still:preflight-input:v2:steady-a:370000000:' + JSON.stringify(cachedRange);
+    let savedInput = {at, input: cachedInput};
+    const cachedEnv = {LP_CACHE: {async get(key) {return key === 'snapshot:v1' ? snapshot : key === cacheKey ? savedInput : null;}}};
+    const cached = await getStillPreflight(cachedEnv, 'steady-a', cachedSize, cachedRange);
+    assert(cached.entryCostSol.value > 0 && cached.exitCostSol.value > 0, 'non-default size and two-sided funding retain their exact quoted costs');
+    assert.equal(cached.sizeSol, cachedSize); assert.equal(cached.range.shape, 'Spot');
+    assert.equal(cached.ledger.entryCostsSol, cached.entryCostSol.value);
+    assert.equal(cached.paperCostModel.asOf, at);
+    for (const [address, size, range] of [['steady-b', cachedSize, cachedRange], ['steady-a', .38, cachedRange], ['steady-a', cachedSize, {...cachedRange, ceilingPct: 11}]]) {
+      assert.equal((await getStillPreflight(cachedEnv, address, size, range)).roundTripCostSol.value, null, 'saved costs are bound to exact pool, lamport size and range');
+    }
+    for (const invalid of [{...savedInput, at: iso(now - 45001)}, {...savedInput, at: iso(now + 1)},
+      {...savedInput, input: {...cachedInput, pool: {...cachedInput.pool, address: 'different-pool'}}},
+      {...savedInput, input: {...cachedInput, pool: {...cachedInput.pool, base: {address: 'different-mint', symbol: 'OTHER'}}}}]) {
+      savedInput = invalid;
+      assert.equal((await getStillPreflight(cachedEnv, 'steady-a', cachedSize, cachedRange)).roundTripCostSol.value, null, 'invalid saved evidence never passes as fresh matching input');
+    }
+    assert.equal(fetches, 0, 'matching cached costs and safe misses never trigger external provider requests');
     const thinMark = await getStillPoolMark(env, 'tiny'); assert.equal(thinMark.priceSol, .01, 'already-open positions can still be marked when liquidity falls below entry shortlist threshold');
   } finally { Date.now = originalNow; globalThis.fetch = originalFetch; }
-  console.log('Still guided pre-flight: bounded current shortlist, exact basket splits, sourced fee windows, monotonic downside, native orientation, missing costs, quote freshness and no provider fanout passed');
+  console.log('Still guided pre-flight: bounded current shortlist, exact basket splits, sourced fee windows, monotonic downside, native orientation, observed cost plans, funding quotes, hard rejections, exact cached inputs, freshness and no provider fanout passed');
 } finally { await rm(dir, {recursive: true, force: true}); }

@@ -1,3 +1,4 @@
+import {readStillNetwork,type StillNetworkRead} from './still-costs';
 import {fetchMeteoraPool} from './sources/meteora';
 import {stillChecks, type StillCheck} from './still-checks';
 import {parseStillRangeOptions, type StillRangeOptions} from './still-preflight-config';
@@ -141,6 +142,7 @@ export interface StillScenario {
   grossPnlSol: StillEvidence<number>; netValueSol: StillEvidence<number>; pnlSol: StillEvidence<number>; vsHoldingSol: StillEvidence<number>;
 }
 export interface StillPreflight {
+  paperCostModel?:{label:string;note:string;asOf:string|null;netAfterHoldSol:StillEvidence<number>};
   checks?: StillCheck[]; options?: StillRangeOptions; transferFeeChangeable?: StillEvidence<boolean>;
   pool: StillPoolCard; poolAddress: string; name: string; sizeSol: number; fetchedAt: string;
   priceSol: StillEvidence<number>; range: StillRange | null;
@@ -152,7 +154,7 @@ export interface StillPreflight {
   ledger: {priceSol: number | null; feeRateHourly: number | null; entryCostsSol: number | null; exitCostsSol: number | null; transferFeeBps: number | null; bins: ResearchRangeBin[] | null};
 }
 export interface StillPreflightInput {
-  pool: Pool; rug?: RugSafety; candles?: ResearchCandles; quotes?: ResearchQuote[]; safety?: {rpc: MintSafety}; rangeAnchor?: ResearchRangeAnchor;
+  network?:StillNetworkRead|null; entryQuotes?:ResearchQuote[]; pool: Pool; rug?: RugSafety; candles?: ResearchCandles; quotes?: ResearchQuote[]; safety?: {rpc: MintSafety}; rangeAnchor?: ResearchRangeAnchor;
 }
 /** Build only what observed inputs support. The inherited model's network default
  * is explicitly overridden for gross inventory arithmetic, and never presented as
@@ -207,33 +209,48 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   const bps = policyCurrent && rpc!.transferFeeStatus === 'none' ? 0 : policyCurrent && rpc!.transferFeeStatus === 'known' && Number.isInteger(rpc!.transferFee?.bps) && nonnegative(rpc!.transferFee?.bps) && rpc!.transferFee!.bps <= 10_000 ? rpc!.transferFee!.bps : null;
   const transferFeeBps = evidence(bps, 'Confirmed Solana RPC token mint policy', rpc?.asOf ?? null,
     bps === null ? 'A fresh, mint-matched policy read is unavailable.' : bps === 0 ? 'The observed mint policy charges no transfer fee.' : `Observed Token-2022 transfer fee, capped at ${rpc!.transferFee!.maximumRaw} raw token units per transfer.${rpc!.transferFee!.configAuthority ? ' The fee-setting authority can change this rate.' : ''}`);
-  const quote = (detail.quotes || []).find(q => q.mode === 'best' && q.sizeSol === sizeSol && ['jupiter-route', 'pool-config', 'pump-config'].includes(q.exitFeeSource || '') &&
-    (!q.economicEstimate || q.economicEstimate.costModelVersion === 3 && q.economicEstimate.exitFeeSource !== 'assumed') &&
-    ((q.status === 'quoted' && researchQuoteFresh(q, now)) || (researchEconomicQuoteFresh(q, now) && q.economicEstimate?.retained !== true)));
+  const quote = (detail.quotes || []).find(q => q.mode === 'best' && q.sizeSol === sizeSol &&
+    ((q.status === 'quoted' && researchQuoteFresh(q, now)) || (researchEconomicQuoteFresh(q, now) && q.economicEstimate?.retained !== true)) &&
+    (nonnegative(q.quotedExitDragSol) || ['jupiter-route', 'pool-config', 'pump-config'].includes(q.exitFeeSource || '') && (!q.economicEstimate || q.economicEstimate.costModelVersion === 3 && q.economicEstimate.exitFeeSource !== 'assumed')));
   const quoteData = quote?.economicEstimate && researchEconomicQuoteFresh(quote, now) ? quote.economicEstimate : quote;
-  const exitValue = nonnegative(quoteData?.exitCostSol) ? quoteData!.exitCostSol! : null;
+  const exitValue = nonnegative(quote?.quotedExitDragSol) ? quote!.quotedExitDragSol! : nonnegative(quoteData?.exitCostSol) ? quoteData!.exitCostSol! : null;
   const quoteAt = quoteData?.asOf ?? null;
   const entryConversionSol = evidence(range && range.bins.every(b=>b.token===0) ? 0 : null, 'Still paper range allocation', range?.asOf ?? null, range && range.bins.every(b=>b.token===0) ? 'A SOL-only paper allocation buys no paired token at entry. This excludes unmeasured network fees and refundable account rent.' : 'This range needs paired-token inventory. Its entry conversion has not been quoted; network and account setup costs are also unavailable.');
   const exitConversionSol = evidence(exitValue, 'Jupiter dated token-to-SOL quote', quoteAt,
-    'Full-size reference conversion cost only. This is not an actual LP withdrawal quote, does not include network fees or additional withdrawal tax, and is not a future exit guarantee.');
-  const networkCostSol = evidence<number>(null, 'Solana transaction fee simulation', null, 'No actual unsigned LP transaction has been simulated. Network and account setup costs are unavailable.');
-  const entryCostSol = evidence<number>(null, 'LP transaction simulation', null, 'All-in entry costs are unavailable because network/account setup evidence is missing. No zero-cost assumption.');
-  const exitCostSol = evidence<number>(null, 'LP withdrawal + Jupiter quote + Solana fee simulation', quoteAt, 'All-in exit costs are unavailable; a reference swap quote alone does not price an LP withdrawal and network fees.');
-  const roundTripCostSol = evidence<number>(null, 'LP entry and exit simulation', null, 'Complete entry and exit cost evidence is unavailable.');
+    (nonnegative(quote?.quotedExitDragSol)?'':'Includes a verified route or matched-pool fee floor. ')+'Full-size token-to-SOL reference: quoted net proceeds compared with the dated pool mark, floored at zero. Route fees are already embedded in proceeds; better route pricing can offset them, so zero drag does not mean zero swap fees. Excludes network fees and additional withdrawal tax. Not a future LP exit guarantee.');
+  const netRead=detail.network,netFresh=netRead&&recent(netRead.asOf,60000,now)&&Number.isSafeInteger(netRead.singleLamports)&&netRead.singleLamports>=0&&Number.isSafeInteger(netRead.doubleLamports)&&netRead.doubleLamports>=0;
+  const oneSided=!!range&&range.bins.every(b=>b.token===0),tokenFunding=range&&mark?Math.round(range.bins.reduce((n,b)=>n+b.token*mark,0)*1e9)/1e9:null;
+  const entryQuote=(detail.entryQuotes||[]).find(q=>q.sizeSol===tokenFunding&&q.status==='quoted'&&researchQuoteFresh(q,now)&&q.tokenRaw&&q.inputRaw&&rpc?.decimals!=null);
+  const entrySwap=oneSided?0:entryQuote&&policyCurrent&&Number.isInteger(rpc?.decimals)&&rpc!.decimals!>=0&&rpc!.decimals!<=18&&/^\d{1,78}$/.test(entryQuote.inputRaw||'')&&/^\d{1,78}$/.test(entryQuote.tokenRaw||'')&&mark?Math.max(0,Number(entryQuote.inputRaw)/1e9-Number(entryQuote.tokenRaw)/10**rpc!.decimals!*mark):null;
+  const oldest=(...dates:(string|null|undefined)[])=>dates.every(d=>d&&Number.isFinite(Date.parse(d)))?(dates as string[]).sort()[0]:null;
+  const entryAt=oneSided?oldest(netRead?.asOf,rpc?.asOf,range?.asOf):oldest(netRead?.asOf,rpc?.asOf,entryQuote?.asOf,priceSol.asOf);
+  const exitAt=oldest(netRead?.asOf,quoteAt,rpc?.asOf);
+  const costAt=oldest(entryAt,exitAt);
+  // Paper-plan scope is explicit: one 2-signature open, one close, one exit swap,
+  // plus an entry swap for two-sided funding; zero priority bid by choice.
+  // Refundable rent is excluded, not reported as an observed zero. Transfer-tax
+  // tokens remain unavailable until exact deposit/withdrawal amounts are quoted.
+  const taxKnownZero=bps===0,entryNetwork=netFresh?(netRead!.doubleLamports+(oneSided?0:netRead!.singleLamports))/1e9:null,exitNetwork=netFresh?2*netRead!.singleLamports/1e9:null;
+  const scope='Paper estimate: 2-signature open + one close + one exit swap; an extra entry swap for two-sided funding. RPC-priced base fees, zero priority bid by choice. Refundable account rent, extra setup transactions and execution changes are excluded. This is not an LP transaction simulation.';
+  const networkCostSol=evidence(netFresh?(entryNetwork!+exitNetwork!):null,netRead?.source||'Solana RPC getFeeForMessage',netRead?.asOf||null,scope);
+  if(entrySwap!==null&&Number.isFinite(entrySwap)){entryConversionSol.value=entrySwap;entryConversionSol.status='available';entryConversionSol.source=oneSided?'Still paper range allocation':'Jupiter exact-size funding quote + observed pool mark';entryConversionSol.asOf=oneSided?range?.asOf||null:entryQuote?.asOf||null;entryConversionSol.note=oneSided?'No token purchase for this SOL-only paper allocation.':'Quoted SOL input minus token output valued at the dated pool mark, floored at zero. Network fees are separate.';}
+  const entryCostSol=evidence(taxKnownZero&&entryNetwork!==null&&entrySwap!==null?entryNetwork+entrySwap:null,'Paper cost model · RPC fee templates + exact-size Jupiter funding quote',entryAt,scope);
+  const exitCostSol=evidence(taxKnownZero&&exitNetwork!==null&&exitValue!==null?exitNetwork+exitValue:null,'Paper cost model · Jupiter exit conversion + RPC fee templates',exitAt,scope+' Uses the full-size token conversion reference, not an actual future withdrawal.');
+  const roundTripCostSol=evidence(entryCostSol.value!==null&&exitCostSol.value!==null?entryCostSol.value+exitCostSol.value:null,'Paper entry + exit cost model',costAt,scope);
   const scenarios = [0.2, 0.5].map(dropFraction => {
     const stress = mark === null ? null : mark * (1 - dropFraction);
     const gross = range && positive(stress) ? inventoryAtPrice(range.bins, stress).valueSol : null;
     const note = 'Ideal monotonic downward bin-fill scenario, before fees, transfer taxes, slippage, network costs and liquidity limits. This is not a loss limit or a live quote.';
     return {dropFraction, priceSol: evidence(stress, MODEL_SOURCE, markAt, 'Observed SOL/token price multiplied by the stated stress fraction.'),
       grossValueSol: evidence(gross, MODEL_SOURCE, range?.asOf ?? null, note), grossPnlSol: evidence(gross === null ? null : gross - sizeSol, MODEL_SOURCE, range?.asOf ?? null, note),
-      netValueSol: evidence<number>(null, 'LP entry and exit simulation', null, 'Complete costs are unavailable; gross value must not be read as net proceeds.'),
-      pnlSol: evidence<number>(null, 'LP entry and exit simulation', null, 'Net P&L is unavailable while costs are missing.'),
-      vsHoldingSol: evidence<number>(null, 'LP entry and exit simulation', null, 'Net performance versus holding SOL is unavailable while costs are missing.')};
+      netValueSol: evidence<number>(null, 'LP entry and exit simulation', null, 'A current quote cannot price a future stressed withdrawal. Gross scenario value is before costs.'),
+      pnlSol: evidence<number>(null, 'LP entry and exit simulation', null, 'Future stressed exit cost is unavailable; today’s reference quote is not applied to a different future inventory.'),
+      vsHoldingSol: evidence<number>(null, 'LP entry and exit simulation', null, 'Future stressed exit costs are unavailable. This is a gross inventory scenario, not a net forecast.')};
   });
   const canOpen = marketCurrent && !!range && positive(mark);
   const missingEvidence = [!positive(mark) ? 'Current pool price' : null, !range ? 'Valid paper range' : null,
     hourly === null ? 'Complete one-hour fee observation' : null, bps === null ? 'Current token transfer-fee policy' : null,
-    exitValue === null ? 'Size-matched token-to-SOL reference quote' : null, 'LP entry and exit network/account costs'].filter((item): item is string => !!item);
+    exitValue === null ? 'Size-matched token-to-SOL reference quote' : null, roundTripCostSol.value===null?'Paper cost-plan evidence':null].filter((item): item is string => !!item);
   let verdict: StillPreflight['verdict'] = {label: 'Marginal', reason: 'Complete costs are unavailable, so fees cannot yet be compared with the real cost of entering and leaving. You can still practise on paper.'};
   if (!canOpen) verdict = {label: 'Skip', reason: 'A current price and a valid range are needed before this paper position can be modelled.'};
   else if (policyCurrent && rpc?.freezeAuthority) verdict = {label: 'Skip', reason: 'The token has an active freeze authority. Practice is available, but this screen does not support a real deposit.'};
@@ -243,14 +260,17 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   const result: StillPreflight = {pool: card, poolAddress: pool.address, name: pool.pair, sizeSol, fetchedAt: markAt, priceSol, range, feeRateHourly, expectedFeesPerDaySol,
     transferFeeBps, entryCostSol, exitCostSol, entryConversionSol, exitConversionSol, networkCostSol, roundTripCostSol, scenarios, verdict, canOpen, missingEvidence,
     model: {kind: 'paper-monotonic-bin-model', note: 'Paper practice only. Fixed-price bins model a monotonic move; real partial fills, liquidity share and transaction execution are not reproduced. Missing costs keep net results unavailable.'},
-    ledger: {priceSol: mark, feeRateHourly: hourly, entryCostsSol: null, exitCostsSol: null, transferFeeBps: bps, bins: range?.bins ?? null}};
+    ledger: {priceSol: mark, feeRateHourly: hourly, entryCostsSol: entryCostSol.value, exitCostsSol: exitCostSol.value, transferFeeBps: bps, bins: range?.bins ?? null}};
+  result.paperCostModel={label:'Paper estimate, not an execution quote',note:scope,asOf:costAt,netAfterHoldSol:evidence(roundTripCostSol.value!==null&&hourly!==null?sizeSol*hourly*(options?.holdMinutes||240)/60-roundTripCostSol.value:null,'Paper pool-pace projection minus dated cost model',costAt,'Assumes unchanged pool fee pace and eligible in-range liquidity throughout the planned hold. Not actual earnings or a prediction.')};
   result.options=options;
   result.transferFeeChangeable=evidence(policyCurrent ? !!rpc!.transferFee?.configAuthority : null,'Solana RPC mint transfer-fee authority',rpc?.asOf||null,'Whether the observed fee-setting authority remains active.');
   result.checks=stillChecks(result,detail,now);
   // Stress scenarios describe consequences, not entry signals: a 50% fall is
   // not itself a reason to reject every pool. Observed screening failures are.
   const failed=result.checks.find(c=>!['half','drop20'].includes(c.id)&&c.status==='fail');
-  if(failed)result.verdict={label:'Skip',reason:failed.result};
+  if(!canOpen||policyCurrent&&!!rpc?.freezeAuthority||policyCurrent&&!!rpc?.transferFee?.configAuthority){ /* Preserve explicit hard rejections above. */ }
+  else if(failed)result.verdict={label:'Skip',reason:failed.result};
+  else if(roundTripCostSol.value!==null){const complete=result.checks.filter(c=>!['half','drop20'].includes(c.id)).every(c=>c.status==='pass');result.verdict={label:complete?'Worth it':'Marginal',reason:complete?'Observed checks pass the example thresholds and the paper cost model is covered at the current fee pace.':'Paper costs are estimated; review the caution or unavailable checks before practising.'};}
   result.missingEvidence=[...new Set([...result.missingEvidence,...result.checks.filter(c=>c.status==='unavailable').map(c=>c.label)])];
   return result;
 }
@@ -260,19 +280,26 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
 export async function getStillPreflight(env: Env, poolAddress: string, sizeSol = 0.5, options?: StillRangeOptions, live = false): Promise<StillPreflight | null> {
   const snapshot = await getSnapshot(env), pool = snapshot.pools.find(item => item.address === poolAddress || item.id === poolAddress);
   if (!pool || pool.venue !== 'meteora-dlmm' || !researchToken(pool)) return null;
+  const savedKey='still:preflight-input:v2:'+pool.address+':'+Math.round(sizeSol*1e9)+':'+JSON.stringify(options||null);
+  if(!live){try{const saved=await env.LP_CACHE.get<{at:string;input:StillPreflightInput}>(savedKey,'json');if(saved&&recent(saved.at,45000,Date.now())&&saved.input.pool.address===pool.address&&researchToken(saved.input.pool)?.mint===researchToken(pool)?.mint)return buildStillPreflight(saved.input,sizeSol,Date.now(),options);}catch{}}
   if(live){
     const context=researchReadContext(env),token=researchToken(pool)!;
-    const [freshPool,rpc,rug,candles]=await Promise.all([fetchMeteoraPool(pool.address).catch(()=>null),readMintSafety(token.mint,context),readRugSafety(token.mint,context),readResearchCandles(pool,context)]);
+    const [freshPool,rpc,rug,candles,network]=await Promise.all([fetchMeteoraPool(pool.address).catch(()=>null),readMintSafety(token.mint,context),readRugSafety(token.mint,context),readResearchCandles(pool,context),readStillNetwork(env,true)]);
     const current=freshPool&&researchToken(freshPool)?.mint===token.mint?freshPool:pool;
     const anchor=await readResearchRangeAnchor(current,context,rpc,true);
     const mark=anchor.status==='available'&&positive(anchor.activeBinPriceSol)&&anchor.asOf?{priceSol:anchor.activeBinPriceSol,asOf:anchor.asOf,source:'active-bin' as const}:null;
-    const quotes=await readResearchQuotes(current,context,rpc.decimals,mark,{sizes:[sizeSol],modes:['best'],freshOnly:true});
-    return buildStillPreflight({pool:current,quotes,safety:{rpc},rug,candles,rangeAnchor:anchor},sizeSol,Date.now(),options);
+    const quotes=await readResearchQuotes(current,context,rpc.decimals,mark,{sizes:[sizeSol],modes:['best'],freshOnly:false});
+    const initial=buildStillPreflight({pool:current,quotes,safety:{rpc},rug,candles,rangeAnchor:anchor,network},sizeSol,Date.now(),options);
+    const funding=initial.range&&initial.priceSol.value?Math.round(initial.range.bins.reduce((n,b)=>n+b.token*initial.priceSol.value!,0)*1e9)/1e9:0;
+    const entryQuotes=funding>0?await readResearchQuotes(current,context,rpc.decimals,mark,{sizes:[funding],modes:['best'],freshOnly:true}):[];
+    const input={pool:current,quotes,entryQuotes,safety:{rpc},rug,candles,rangeAnchor:anchor,network};
+    try{await env.LP_CACHE.put(savedKey,JSON.stringify({at:new Date().toISOString(),input}),{expirationTtl:60});}catch{}
+    return buildStillPreflight(input,sizeSol,Date.now(),options);
   }
   const mint = researchToken(pool)!.mint;
   const rpc = await cachedMintSafety(mint, env);
   const quotes = await cachedResearchQuotes(pool, env, rpc.decimals);
-  return buildStillPreflight({pool, quotes, safety: {rpc}}, sizeSol,Date.now(),options);
+  return buildStillPreflight({pool, quotes, safety: {rpc},network:await readStillNetwork(env)}, sizeSol,Date.now(),options);
 }
 export async function loadStillPreflight(pool: Pool, env: Env, sizeSol = 0.5, now = Date.now()): Promise<StillPreflight> {
   const detail: ResearchPoolDetail = await researchPool(pool, env);

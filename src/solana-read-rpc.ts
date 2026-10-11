@@ -3,7 +3,7 @@
 export const PUBLIC_SOLANA_READ_RPC = 'https://solana-rpc.publicnode.com';
 export const SOLANA_MAINNET_GENESIS = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
 const LABS = new Set(['https://api.mainnet-beta.solana.com/', 'https://api.mainnet.solana.com/']);
-const READ_METHODS = new Set(['getAccountInfo','getMultipleAccounts','getEpochInfo','getTokenLargestAccounts','getBlockTime','getSlot','getBlockHeight','getGenesisHash','getProgramAccounts','getMinimumBalanceForRentExemption','getBalance','getTokenSupply']);
+const READ_METHODS = new Set(['getAccountInfo','getMultipleAccounts','getEpochInfo','getTokenLargestAccounts','getBlockTime','getSlot','getBlockHeight','getGenesisHash','getProgramAccounts','getMinimumBalanceForRentExemption','getBalance','getTokenSupply','getLatestBlockhash','getFeeForMessage']);
 interface RpcRead {jsonrpc: '2.0'; id: number | string; method: string; params?: unknown[]}
 interface Options {deadline?: number; onRequest?: () => void}
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {status, headers: {'content-type':'application/json'}});

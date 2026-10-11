@@ -7,7 +7,7 @@ import {volumeSignal} from "../volume";
 // The old dlmm-api.meteora.ag/pair/all is gone (404).
 const BASE = "https://dlmm.datapi.meteora.ag";
 
-interface TW { "30m": number; "1h": number; "2h": number; "4h": number; "12h": number; "24h": number }
+interface TW { "5m"?: number; "30m": number; "1h": number; "2h": number; "4h": number; "12h": number; "24h": number }
 interface RawToken { address: string; symbol: string; name: string; price: number; is_verified: boolean }
 interface RawPool {
   address: string;
@@ -18,6 +18,7 @@ interface RawPool {
   current_price: number;
   created_at: number;          // unix seconds
   volume: TW;
+  cumulative_metrics?: {volume?:number};
   fees: TW;
   fee_tvl_ratio: TW;           // percent
   apr: number;                 // percent, 24h
@@ -29,6 +30,7 @@ interface RawPool {
 }
 interface RawResponse { data: RawPool[]; total: number; pages: number; current_page: number; page_size: number }
 
+const nonnegative = (v: unknown) => {const n = num(v); return n != null && n >= 0 ? n : null;};
 const pct = (v: unknown) => { const n = num(v); return n == null ? null : n / 100; };
 
 export async function fetchMeteora(venue:"meteora-dlmm"|"meteora-damm-v2"="meteora-dlmm"): Promise<{ pools: Pool[]; partial: boolean }> {
@@ -121,7 +123,7 @@ function normaliseMeteoraPool(p:RawPool,venue:'meteora-dlmm'|'meteora-damm-v2',n
       },
       txns24h: null,
       poolConfig: {concentrated:typeof p.pool_config?.concentrated_liquidity==="boolean"?p.pool_config.concentrated_liquidity:null,feeSchedulerActive:typeof p.pool_config?.is_fee_scheduler_active==="boolean"?p.pool_config.is_fee_scheduler_active:null,compoundingFeePct:num(p.pool_config?.compounding_fee_pct),launchpad:p.launchpad||null,binStep:num(p.pool_config?.bin_step),baseFee:pct(p.pool_config?.base_fee_pct),dynamicFee:pct(p.dynamic_fee_pct)},
-      activity: { volume30m:num(p.volume?.["30m"]), volume4h:num(p.volume?.["4h"]), volume12h:num(p.volume?.["12h"]), fees30m: num(p.fees?.["30m"]), fees1h: num(p.fees?.["1h"]), fees4h: num(p.fees?.["4h"]), fees12h:num(p.fees?.["12h"]), volume1h: num(p.volume?.["1h"]) },
+      activity: { volume5m: nonnegative(p.volume?.["5m"]), cumulativeVolumeUsd: nonnegative(p.cumulative_metrics?.volume), volume30m:num(p.volume?.["30m"]), volume4h:num(p.volume?.["4h"]), volume12h:num(p.volume?.["12h"]), fees30m: num(p.fees?.["30m"]), fees1h: num(p.fees?.["1h"]), fees4h: num(p.fees?.["4h"]), fees12h:num(p.fees?.["12h"]), volume1h: num(p.volume?.["1h"]) },
     };
 
 }
