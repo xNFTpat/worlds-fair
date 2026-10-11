@@ -23,6 +23,8 @@ try {
  assert.equal(requests.length,1,'Direct exit needs one quote, no funding swap');
  assert.equal(requests[0].searchParams.get('amount'),'25000000','0.25 SOL worth of tokens at mid');
  assert.equal(stillQuoteConversion(quote,'exit',6,Date.now()),-.001,'Signed mid-value minus returned SOL');
+ assert.equal(stillQuoteConversion({...quote,priceMark:{source:'active-bin',priceSol:.01,asOf:new Date(now-50000).toISOString()}},'exit',6,Date.now()),-.001,'Active-bin cache keeps its existing sixty-second lifetime');
+ assert.equal(stillQuoteConversion({...quote,priceMark:{source:'active-bin',priceSol:.01,asOf:new Date(now-61000).toISOString()}},'exit',6,Date.now()),null,'Expired mid-price remains unavailable');
  const entry=await read('entry');assert.equal(requests[1].searchParams.get('amount'),'250000000');
  assert.equal(stillQuoteConversion(entry,'entry',6,Date.now()),0,'Entry is SOL input minus returned token mid-value');
  assert.equal(stillProjectedFeeRate(pool),.01);

@@ -36,7 +36,7 @@ function stillQuoteFresh(q:ResearchQuote,now:number){
 }
 /** Signed execution difference: never add optional hop fees a second time. */
 export function stillQuoteConversion(q:ResearchQuote|undefined,direction:'entry'|'exit',decimals:number|null|undefined,now:number):number|null {
-  if(!q||q.status!=='quoted'||!stillQuoteFresh(q,now)||q.direction&&q.direction!==direction||!positive(q.priceMark?.priceSol)||!recent(q.priceMark?.asOf,45000,now))return null;
+  if(!q||q.status!=='quoted'||!stillQuoteFresh(q,now)||q.direction&&q.direction!==direction||!positive(q.priceMark?.priceSol)||!recent(q.priceMark?.asOf,q.priceMark?.source==='active-bin'?60000:45000,now))return null;
   const d=q.tokenDecimals??decimals;
   if(!Number.isInteger(d)||d!<0||d!>18||!/^\d{1,78}$/.test(q.tokenRaw||''))return null;
   const midValue=Number(q.tokenRaw)/10**d!*q.priceMark!.priceSol;

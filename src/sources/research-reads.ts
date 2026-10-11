@@ -348,7 +348,7 @@ export async function readStillSwapQuote(pool:Pool,context:ResearchReadContext,d
  const result:ResearchQuote={direction,sizeSol,mode:'best',status:'unavailable',roundTripCostSol:null,exitCostSol:null,asOf:null,note:'',selectedPoolMatched:null,buyRoutePools:[],sellRoutePools:[],buyPriceImpact:null,sellPriceImpact:null,slippageBps:50,inputRaw:null,tokenRaw:null,returnedSol:null};
  const fail=(reason:string)=>{result.note=reason;console.warn(JSON.stringify({event:'still_quote_unavailable',poolAddress:pool.address,direction,reason}));return result;};
  const markMatches=mark?.source==='active-bin'||mark?.source==='meteora-pool'&&mark.poolAddress===pool.address&&mark.mint===token?.mint;
- if(!token||!markMatches||!positive(mark?.priceSol)||!Number.isFinite(markAt)||markAt>now||now-markAt>45000)return fail('Fresh exact-pool mid-price unavailable.');
+ if(!token||!markMatches||!positive(mark?.priceSol)||!Number.isFinite(markAt)||markAt>now||now-markAt>(mark?.source==='active-bin'?RESEARCH_READ_LIMITS.anchorTtlMs:RESEARCH_READ_LIMITS.quoteTtlMs))return fail('Fresh exact-pool mid-price unavailable.');
  if(!Number.isInteger(decimals)||decimals!<0||decimals!>18)return fail('Token decimals unavailable from the mint read.');
  const amount=direction==='exit'?Math.floor(sizeSol/mark.priceSol*10**decimals!):Math.round(sizeSol*1e9);
  if(!Number.isSafeInteger(amount)||amount<=0)return fail('Swap size cannot be represented in raw token units.');
