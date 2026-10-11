@@ -202,7 +202,7 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   const rates = researchFeeRates(pool), hourly = marketCurrent && nonnegative(pool.ageHours) && pool.ageHours >= 1 && nonnegative(rates.h1) ? rates.h1 : null;
   const feeRateHourly = evidence(hourly, MARKET_SOURCE, pool.fetchedAt, 'Reported last-hour fees / current pool TVL. Pool-average fee density, not measured position earnings.');
   const expectedFeesPerDaySol = evidence(hourly === null ? null : sizeSol * hourly * 24, MODEL_SOURCE, pool.fetchedAt,
-    'At the current pool pace: paper amount × last-hour pool fees/TVL × 24. A comparison model, not a forecast or earned fees; the suggested range starts below the active price and earns nothing until price enters it.');
+    'At the current pool pace: paper amount × last-hour pool fees/TVL × 24. A comparison model, not a forecast or earned fees; a range earns nothing until price enters it and stops earning when price leaves it.');
   const policyCurrent = !!rpc && rpc.status === 'available' && rpc.mint === token?.mint && recent(rpc.asOf, MINT_MAX_AGE_MS, now);
   const bps = policyCurrent && rpc!.transferFeeStatus === 'none' ? 0 : policyCurrent && rpc!.transferFeeStatus === 'known' && Number.isInteger(rpc!.transferFee?.bps) && nonnegative(rpc!.transferFee?.bps) && rpc!.transferFee!.bps <= 10_000 ? rpc!.transferFee!.bps : null;
   const transferFeeBps = evidence(bps, 'Confirmed Solana RPC token mint policy', rpc?.asOf ?? null,
@@ -213,7 +213,7 @@ export function buildStillPreflight(detail: StillPreflightInput, sizeSol = 0.5, 
   const quoteData = quote?.economicEstimate && researchEconomicQuoteFresh(quote, now) ? quote.economicEstimate : quote;
   const exitValue = nonnegative(quoteData?.exitCostSol) ? quoteData!.exitCostSol! : null;
   const quoteAt = quoteData?.asOf ?? null;
-  const entryConversionSol = evidence(range && range.bins.every(b=>b.token===0) ? 0 : null, 'Still SOL-only range allocation', range?.asOf ?? null, 'A SOL-only paper allocation buys no paired token at entry. This excludes unmeasured network fees and refundable account rent.');
+  const entryConversionSol = evidence(range && range.bins.every(b=>b.token===0) ? 0 : null, 'Still paper range allocation', range?.asOf ?? null, range && range.bins.every(b=>b.token===0) ? 'A SOL-only paper allocation buys no paired token at entry. This excludes unmeasured network fees and refundable account rent.' : 'This range needs paired-token inventory. Its entry conversion has not been quoted; network and account setup costs are also unavailable.');
   const exitConversionSol = evidence(exitValue, 'Jupiter dated token-to-SOL quote', quoteAt,
     'Full-size reference conversion cost only. This is not an actual LP withdrawal quote, does not include network fees or additional withdrawal tax, and is not a future exit guarantee.');
   const networkCostSol = evidence<number>(null, 'Solana transaction fee simulation', null, 'No actual unsigned LP transaction has been simulated. Network and account setup costs are unavailable.');
