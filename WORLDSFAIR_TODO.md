@@ -1,5 +1,12 @@
 # Still · remaining work
 
+## 12 October — issuer, entry and full cursor checkpoint
+
+- [x] Deployed `c82998748ffec0236b557a5e757017cd1d0ff143` to Still only, preserving the exact-mint Coinbase caution and strict two-sided funding quotes from `fd1d040`.
+- [x] One fixed top-layer cursor/ripple overlay, full circles, one 350 ms ring per click, reduced-motion suppression and no coarse-pointer custom cursor. Live inside-card and edge clicks verified; real 2.8-second screen capture saved locally.
+- [x] 86 tests, both type checks and five Worker runtime suites passed. Fresh 12 default + 12 two-sided Spot rows have all cost/net figures after one bounded cbBTC retry. No Worth a look. All protected rules unchanged.
+- [x] [Full fresh tables and deciding reasons](docs/CURSOR_ENTRY_CHECKPOINT.md). Stopped at the requested checkpoint.
+
 ## 11 October — Coinbase issuer and exact entry funding, 23:55 BST
 
 - [x] Deployed `fd1d040bf5533b056bad730a7de3fc69e227780a` to Still only. Exact Coinbase cbBTC mint receives Known issuer / Caution for freeze authority; other screening checks remain intact.
