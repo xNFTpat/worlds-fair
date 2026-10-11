@@ -26,20 +26,21 @@
 <link rel="preload" href="/fonts/instrument-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/instrument-serif-regular-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/fonts/still-fonts.css">
+<link rel="stylesheet" href="/motion/still-motion.css">
 <link rel="stylesheet" href="/still-demo.css">
 <script type="module" src="/still-demo.js"></script>
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to demo</a>
-<header class="site-header wrap">
-<a class="brand" href="#home" aria-label="Still home"><img src="/brand/svg/still-lockup-light.svg" width="144" height="56" alt="Still"></a>
+<header class="site-header wrap still-header still-glass still-glass--header">
+<a class="brand" href="#home" aria-label="Still home"><img class="still-header__logo" src="/motion/svg/still-header-lockup.svg" width="74" height="26" alt="Still"></a>
 <nav class="primary-nav" aria-label="Main navigation"><button data-go="home">Home</button><button data-go="pools">Pools</button><button data-go="positions">Positions</button><button data-go="follow">Follow</button><button data-go="park">Grow</button></nav>
 <div class="mode"><i aria-hidden="true"></i>Paper demo <span>· Solana</span></div>
 </header>
 <main id="main" class="wrap" tabindex="-1">
-<section id="home" class="hero" aria-labelledby="hero-title">
+<section id="home" class="hero still-glow" aria-labelledby="hero-title">
 <p class="eyebrow">A clearer way to provide liquidity</p>
-<h1 id="hero-title">Clarity before<br><em>capital.</em></h1>
+<h1 id="hero-title" class="still-intro">Clarity before<br><em>capital.</em></h1>
 <p class="hero-copy">The calm way to LP on Solana: see the fees, costs and downside before you deposit, practise on paper, then put your profits somewhere sensible.</p>
 <button class="primary hero-cta" data-go="pools" data-ripple>Pick a pool <span aria-hidden="true">↗</span></button><a class="hero-secondary" href="#onboarding">How it works</a>
 <p class="quiet">Paper only. No real funds move. Not financial advice.</p>
@@ -60,9 +61,16 @@
 </main>
 <nav class="mobile-nav" aria-label="Mobile navigation"><button data-go="home">Home</button><button data-go="pools">Pools</button><button data-go="positions">Positions</button><button data-go="follow">Follow</button><button data-go="park">Grow</button></nav>
 <footer class="wrap"><p>Paper only. No real funds move. Not financial advice.<br>Still is a paper tool for Meteora liquidity providers.<br>Logos belong to their owners. Still is not affiliated.<br>Data from Meteora, Jupiter and Solana RPC. Every number shows its source and time.</p><p><a href="https://github.com/xNFTpat/worlds-fair">Open source on GitHub</a> · <a href="/advanced#alpha">Research</a> · Built by <a href="https://x.com/patdotxyz">@patdotxyz</a> for the Colosseum Crypto World's Fair<br><button class="text-button" data-action="preferences">Settings</button> <span id="build-version"></span></p></footer>
-<dialog id="confirmation" aria-labelledby="confirm-title"><form method="dialog"><button class="dialog-close" value="cancel" aria-label="Cancel">×</button></form><div id="confirm-content"></div><p id="confirm-error" role="alert" hidden></p><div class="dialog-actions"><button id="confirm-cancel" class="secondary">Keep reviewing</button><button id="confirm-submit" class="primary">Confirm paper deposit</button></div></dialog>
+<dialog class="still-sheet" id="confirmation" aria-labelledby="confirm-title"><form method="dialog"><button class="dialog-close" value="cancel" aria-label="Cancel">×</button></form><div class="still-sheet__grab" aria-hidden="true"></div><div id="confirm-content"></div><p id="confirm-error" role="alert" hidden></p><div class="dialog-actions still-sheet__actions"><button id="confirm-cancel" class="secondary">Keep reviewing</button><button id="confirm-submit" class="primary">Confirm paper deposit</button></div></dialog>
 <dialog id="range-dialog" aria-labelledby="range-title"><form id="range-form"><div id="range-content"></div></form></dialog>
 <div id="notice" class="toast" role="status" hidden></div>
 <noscript><p class="wrap">Enable JavaScript to compare live pools and open a paper position. <a href="https://github.com/xNFTpat/worlds-fair">Read about Still on GitHub.</a></p></noscript>
+<script src="/motion/still-loader.js" defer></script>
+<script src="/motion/still-reveal.js" defer></script>
+<script src="/motion/still-splash.js" defer></script>
+<script src="/motion/still-sheet.js" defer></script>
+<script src="/motion/still-range-gauge.js" defer></script>
+<script src="/motion/still-empty.js" defer></script>
+<script src="/motion/still-shell.js" defer></script>
 </body>
 </html>

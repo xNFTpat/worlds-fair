@@ -2,6 +2,13 @@
 
 Product: **Still — Clarity before capital.** Public repository: [xNFTpat/worlds-fair](https://github.com/xNFTpat/worlds-fair). The original LP Terminal repository remains private.
 
+## 11 October — motion and cost checkpoint
+
+- [x] Integrate the supplied app motion components, exact real-data ticket sentence, range gauge, paper sheet, empty states and accessible status chips.
+- [x] Separate live position rent from costs; include verified sunk setup costs and Token-2022 withdrawal fees; expose net percentage and cost-recovery hours without filling missing values.
+- [x] Pin an exact-address, exact-mint SKR/SOL thin-pool example while keeping eligibility and verdicts live.
+- [ ] Verify the deployed six-pool cost table and mobile Lighthouse score, then stop for Pat's checkpoint.
+
 ## 11 October — final MVP pass (current scope)
 
 Deadline: **Monday 12 October 2026 at 13:00 UK**. This supersedes the dates in the historical release notes below. Branch `worldsfair`; Worker `lp-terminal-worldsfair` only. Paper actions and public wallet reads only; all signing is excluded, including the earlier optional devnet stamp.

@@ -6,7 +6,7 @@ const source = await readFile('public/still-demo.js', 'utf8');
 const lessons = await readFile('public/still-lessons.js', 'utf8');
 const walletClient = await readFile('public/still-wallet-client.js','utf8');
 const browserSource = walletClient.replace(/^export /gm,'') + lessons.replace(/^export /gm, '') + source.replace(/let STILL_LESSONS=\[\];\nconst loadLessons=.*?;\n/, 'const loadLessons=()=>Promise.resolve();\n').replace(/let visualAssets=null,creatorAssets=null,visualLoading=null;\nconst loadVisualAssets=.*?;\n/, 'let visualAssets=null,creatorAssets=null;const loadVisualAssets=()=>Promise.resolve();\n').replace(/^import .*from '\.\/still-(lessons|wallet-client).js';$/gm, '').replace(/^export /gm, '');
-const helpers = runInNewContext(browserSource + '\n({esc,number,sol,groupPositions,requestFingerprint,readOnboarding,sortForPreference})', {Intl});
+const helpers = runInNewContext(browserSource + '\n({esc,number,sol,money,netSummary,ticketSentence,groupPositions,requestFingerprint,readOnboarding,sortForPreference})', {Intl});
 assert.equal(helpers.sol(null), 'Unavailable');
 assert.equal(helpers.sol(0), '0 SOL');
 assert.equal(helpers.sol(Infinity), 'Unavailable');
@@ -35,7 +35,7 @@ class Element {
   async dispatch(kind, event = {}) {for (const callback of this.listeners.get(kind) || []) await callback(event);}
 }
 const flush = async () => {for(let i=0;i<5;i++) await new Promise(resolve => setImmediate(resolve));};
-function fixture({initialHash="",walletPositions=[],walletStatus="available",poolFields={},additionalPools=[],initialStorage=[]}={}) {
+function fixture({initialHash="",walletPositions=[],walletStatus="available",poolFields={},additionalPools=[],initialStorage=[],preflightFields={}}={}) {
   let clock = Date.parse('2026-10-09T12:00:00.000Z'), serial = 0;
   const address = 'A'.repeat(32), requests = [], stored = new Map(initialStorage), steps = ['pools','preflight','positions','baskets'].map(go => Object.assign(new Element(),{dataset:{go}}));
   const ids = ['screen','confirmation','notice','home','journey','step-preflight','build-version','confirm-submit','confirm-cancel','confirm-error','confirm-content','paper-amount','wallet-address'];
@@ -47,7 +47,7 @@ function fixture({initialHash="",walletPositions=[],walletStatus="available",poo
   const evidence = value => ({value,status:value === null?'unavailable':'available',asOf:new Date(clock).toISOString(),source:'Synthetic observed source',note:'Synthetic note'});
   const pool = {address,id:'solana:'+address,name:'<img src=x onerror="run()">/SOL',binStep:evidence(100),risk:{label:'Busy',reason:'<script>not code</script>'},tvlUsd:evidence(50000),fees24hFraction:evidence(.01),feeTrend:evidence(.2),ageHours:evidence(100),priceSol:evidence(1),...poolFields};
   const account = {balanceSol:10,seededSol:10,seedNote:'Practice seed',settlementNote:'Gross model only',feeModelNote:'Modelled fees only',positions:[]};
-  const preflight = () => ({poolAddress:address,name:pool.name,sizeSol:.5,fetchedAt:new Date(clock).toISOString(),canOpen:true,priceSol:evidence(1),range:{bins:[{sol:.5}],floorPriceSol:.6,topPriceSol:.95,depthFraction:.4,binCount:3,alignment:'estimated',source:'Synthetic model',asOf:new Date(clock).toISOString(),note:'No live execution'},expectedFeesPerDaySol:evidence(.001),transferFeeBps:evidence(null),entryCostSol:evidence(null),exitCostSol:evidence(null),entryConversionSol:evidence(0),exitConversionSol:evidence(null),networkCostSol:evidence(null),missingEvidence:['Costs'],verdict:{label:'Marginal',reason:'<script>unknown costs</script>'},scenarios:[.2,.5].map(dropFraction=>({dropFraction,grossValueSol:evidence(.4),grossPnlSol:evidence(-.1),netValueSol:evidence(null)}))});
+  const preflight = () => ({poolAddress:address,name:pool.name,sizeSol:.5,fetchedAt:new Date(clock).toISOString(),canOpen:true,priceSol:evidence(1),range:{bins:[{sol:.5}],floorPriceSol:.6,topPriceSol:.95,depthFraction:.4,binCount:3,alignment:'estimated',source:'Synthetic model',asOf:new Date(clock).toISOString(),note:'No live execution'},expectedFeesPerDaySol:evidence(.001),transferFeeBps:evidence(null),entryCostSol:evidence(null),exitCostSol:evidence(null),entryConversionSol:evidence(0),exitConversionSol:evidence(null),networkCostSol:evidence(null),missingEvidence:['Costs'],verdict:{label:'Marginal',reason:'<script>unknown costs</script>'},scenarios:[.2,.5].map(dropFraction=>({dropFraction,grossValueSol:evidence(.4),grossPnlSol:evidence(-.1),netValueSol:evidence(null)})),...preflightFields});
   let failMode = null,accountReady=false;
   const fetch = async (path, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : undefined; requests.push({path,method:options.method,body});
@@ -267,9 +267,36 @@ const samePairPools=[];const poolIdentity=fixture({poolFields:{name:'SAME/SOL',c
 samePairPools.push({...poolIdentity.pool,address:'B'.repeat(32),id:'solana:'+'B'.repeat(32),cardSummary:{...cardSummary,verdict:{label:'Skip',reason:'A different pool has different costs.'}}});
 await poolIdentity.click({go:'pools'});
 const identityHtml=poolIdentity.elements['#screen'].innerHTML;
-assert.equal((identityHtml.match(/class="pool-card"/g)||[]).length,2,'Pools sharing a pair name keep separate cards');
+assert.equal((identityHtml.match(/class="pool-card(?: [^"]*)?"/g)||[]).length,2,'Pools sharing a pair name keep separate cards');
 assert.ok(identityHtml.includes('data-pool="'+'A'.repeat(32)+'"'));assert.ok(identityHtml.includes('data-pool="'+'B'.repeat(32)+'"'));
 assert.match(identityHtml,/<h4><img[^>]+alt="Worth a look"/);assert.match(identityHtml,/<h4><img[^>]+alt="Skip for now"/,'Each pool keeps its own observed summary');
 await poolIdentity.click({pool:'B'.repeat(32)});
 const identityRead=poolIdentity.requests.find(request=>request.path.startsWith('/api/still/preflight?'));
 assert.equal(new URL('https://still.example'+identityRead.path).searchParams.get('poolAddress'),'B'.repeat(32),'Pre-flight navigation uses the selected pool address, never its shared display name');
+
+// Costs and presentation are separate: missing net and USD inputs never become zero.
+assert.equal(helpers.money(1234.56),'$1,234.56');
+assert.equal(helpers.money(null),'Unavailable');
+assert.equal(helpers.money(0),'$0.00');
+assert.deepEqual(JSON.parse(JSON.stringify(helpers.netSummary({netReturnPct:{value:1.25},breakEvenHours:{value:2.5},breakEvenStatus:'covered'}))),{net:'+1.25%',cover:'Fees cover costs in about 2.5 hours'});
+assert.equal(helpers.netSummary({breakEvenStatus:'never',breakEvenHours:{value:null}}).cover,"Fees don't cover costs");
+assert.equal(helpers.netSummary({breakEvenStatus:'unavailable',breakEvenHours:{value:null}}).cover,'Fees cover costs: Unavailable');
+assert.equal(helpers.netSummary({netReturnPct:{value:null}}).net,'Unavailable');
+const sentence=helpers.ticketSentence({sizeSol:.5,name:'SOL/USDC',solPriceUsd:{value:100},range:{topPriceSol:1,floorPriceSol:.5}});
+assert.equal(sentence.replace(/<[^>]+>/g,''),"You're adding 0.5 SOL to SOL/USDC, from $100.00 down to $50.00");
+const unknownRange=helpers.ticketSentence({sizeSol:.5,name:'X/SOL',solPriceUsd:{value:null},range:{topPriceSol:1,floorPriceSol:.5}});
+assert.equal((unknownRange.match(/Unavailable/g)||[]).length,2);
+assert.ok(!unknownRange.includes('$0.00'));
+assert.match(browser.elements['#screen'].innerHTML,/still-empty/);
+console.log('Still ticket: exact real-data sentence, US money format, separate net percent/cover-time states, and explicit missing values passed.');
+
+const noExit=fixture({preflightFields:{exitCostComplete:false,exitCostSol:{value:null},positionRentSol:{value:.05,source:'Solana RPC · 8,120-byte account schema',asOf:'2026-10-09T12:00:00.000Z',note:'Detailed rent layout disclosure'}}});await noExit.ready();
+const noExitHtml=noExit.elements['#screen'].innerHTML;
+assert.ok(noExitHtml.includes('Exit cost is Unavailable.'));assert.ok(!noExitHtml.includes('Exit cost is a known minimum.'));
+const primaryTicket=noExitHtml.split('<details class="still-ticket__fold">')[0];
+assert.ok(primaryTicket.includes('Deposit, returned on close'));assert.ok(primaryTicket.includes('0.05 SOL'));assert.ok(primaryTicket.includes('Returned on close; excluded from net.'));
+assert.ok(!primaryTicket.includes('8,120-byte'));assert.ok(!primaryTicket.includes('Detailed rent layout disclosure'));
+assert.ok(noExitHtml.includes('Detailed rent layout disclosure'),'Rent schema/source detail is retained inside the numbers fold');
+const minimumExit=fixture({preflightFields:{exitCostComplete:false,exitCostSol:{value:.001}}});await minimumExit.ready();
+assert.ok(minimumExit.elements['#screen'].innerHTML.includes('Exit cost is a known minimum.'));
+console.log('Still ticket: numeric-only exit minimum and compact refundable deposit before the action passed.');

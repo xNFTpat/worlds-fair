@@ -15,7 +15,7 @@ Small Solana LPs often lose money to costs, not bad calls: the exit swap on a th
 ## Demo path — the clicks that work today
 
 1. **Home → Pick a pool.** The primary button goes directly to live pools. Optional **How it works** explains the paper model; Settings lets you change pace.
-2. **Run Pre-flight** on a pool. Read the eight rows (the two downside cases are separate), the dated sources and verdict. **Change range** opens size, shape, floor, ceiling and planned hold; **Run Pre-flight** checks the chosen settings again.
+2. **Run Pre-flight** on a pool. Read the ticket sentence, net percentage, cost recovery time and verdict. Open **See the numbers** for the eight checks, raw SOL costs and dated evidence. **Change range** opens size, shape, floor, ceiling and planned hold; **Run Pre-flight** checks the chosen settings again.
 3. **Open on paper → Open on paper** in the confirmation. If the verdict is Skip for now, use **Open on paper anyway** only to demonstrate that risk on paper. A fresh price is required. The new position's pool expands in **Positions**; every position keeps its own address and history.
 4. **Follow → Narrow Spot → See rules → Follow on paper → Follow on paper** in the confirmation. The run starts now and waits for fresh qualifying data. It does not invent an immediate trade.
 5. In **Make your own paper bot**, change the controls and name, then **Start paper bot → Start paper bot** in the confirmation. The server runs the saved rules against the same practice balance.
@@ -54,6 +54,18 @@ The browser's random Secure, HttpOnly, SameSite=Strict cookie identifies its iso
 
 **Steady / Busy / Spicy** describe observed age, liquidity and fee activity, not safety. The shortlist contains at most eight SOL-paired pools. Fee trend compares the last-hour pace with the trailing-day hourly average, not the previous hour. Daily pace is size × hourly pool fees/TVL × 24, not a promise of concentrated-position earnings. Custom ranges can be narrower than requested because the paper setup is capped at 69 bins; the displayed bounds are the actual modelled range.
 
+## Cost story and the thin-pool example
+
+Pre-flight separates the **entry transaction fee**, **Deposit, returned on close**, **one-off setup cost**, and **exit cost**. Position rent is read with Solana `getMinimumBalanceForRentExemption` for the full 8,120-byte PositionV2 allocation, including its Anchor discriminator; no fixed SOL rent is supplied. Existing bin-array/bitmap accounts are verified by program, discriminator, pool and index. Missing required arrays use current chain rent plus the declared setup transaction fee and count toward net. Returned position rent is excluded from net. This remains an unsigned paper plan: wallet-specific token-account setup, priority bids and future execution changes are not simulated.
+
+A verified Token-2022 withdrawal fee is rounded up in raw token units and capped at the on-chain maximum. It is separate from swap fees already embedded in Jupiter proceeds. Without a complete quote, a known positive fee is shown as an **at least** exit-cost component; full net and recovery time remain **Unavailable**. Missing is never assumed to be zero. The exact existing STONK demo mint `6GmAFSYs4gk3FDao5FzzySQpPZaWsa4rUJHacpMpUNgx` is legacy SPL, with no transfer-fee extension; a ticker alone is not tax evidence.
+
+Net percentage is `(estimated fees over the selected hold − entry − exit − non-refundable setup) / paper SOL amount × 100`. Recovery hours use complete costs divided by current projected hourly fees. “Fees don't cover costs” requires an observed zero fee pace with positive costs; missing data says Unavailable. All inputs preserve source times.
+
+The additional thin learning example is **SKR/SOL**, pool `BCv5Ggg5563AYfkrErdXok2hKfjgUNtQ1A4yKuNbTjQ9`, with mint X `SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3` and mint Y `So11111111111111111111111111111111111111112`. The shortlist pins this exact identity only when fresh and eligible; returns and verdicts remain live calculations. Its observed exit quote exceeded four-hour fee income at 0.5 SOL when selected. This illustrates an unfavorable cost check, not a recommendation.
+
+The supplied Still app motion pack is served locally from `public/motion`: status loader, ticket reveal/fold, range gauge, confirmation sheet/splash, empty-state art, header, card texture, page wipe and favicon. Reduced motion and reduced transparency remove movement/blur as appropriate. The below-range ring uses caution ink with 5.48:1 contrast on cream. No external animation service is loaded.
+
 ## Data sources and architecture
 
 Static HTML, CSS and JavaScript call a Cloudflare Worker. Durable Objects serialize paper accounts, schedule strategy observations and enforce shared quote and public-RPC budgets. The isolated Workers KV namespace stores source caches and earlier research journals. This build uses **branch `worldsfair`**, **Worker `lp-terminal-worldsfair`**, and the standalone **xNFTpat/worlds-fair** repository only.
@@ -88,7 +100,7 @@ npm run check
 npm run verify
 ```
 
-`verify` runs 81 test scripts, TypeScript checks and five local Worker runtime suites, including secret selection/privacy, independent same-pool positions, recovery/idempotency, strategy parsing/scheduling, unavailable evidence and atomic Park rounding/quote failures. Runtime tests bind localhost; signing/provider fixtures are synthetic and submit no transactions. [Accessibility checks](docs/ACCESSIBILITY.md) record Home's Lighthouse 100/100 result and responsive/keyboard coverage.
+`verify` runs 84 test scripts, TypeScript checks and five local Worker runtime suites, including secret selection/privacy, independent same-pool positions, recovery/idempotency, strategy parsing/scheduling, unavailable evidence and atomic Park rounding/quote failures. Runtime tests bind localhost; signing/provider fixtures are synthetic and submit no transactions. [Accessibility checks](docs/ACCESSIBILITY.md) record Home's Lighthouse 100/100 result and responsive/keyboard coverage.
 
 To deploy after tests, commit and push the reviewed work, then run `npm run deploy`. The guard requires a clean worldsfair branch and the exact public origin, runs the publication audit, uses `wrangler.worldsfair.toml`, stamps the real Git SHA and writes a receipt to the isolated demo KV. Verify `/api/version` matches the commit. Never use an unqualified deployment command or touch `lp-agg` / the personal terminal.
 
