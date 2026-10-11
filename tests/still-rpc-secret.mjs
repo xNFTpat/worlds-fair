@@ -12,7 +12,7 @@ let ledgerEnv;
 globalThis.__stillSecretLedger = env => {ledgerEnv = env;};
 try {
   await build({stdin: {contents: `export {paperEnvironment, RangeInbox} from './src/worldsfair';
-export {stillReadRpcUrl, stillReadEnvironment} from './src/still-rpc-env';
+export {stillReadRpcUrl, stillReadEnvironment, stillReadRpcState, INVALID_STILL_RPC} from './src/still-rpc-env';
 export {solanaBalances} from './src/sources/solana-balance';`, resolveDir: process.cwd()},
     outfile: join(dir, 'test.mjs'), bundle: true, platform: 'node', format: 'esm', mainFields: ['main'],
     banner: {js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);"},
@@ -21,12 +21,16 @@ export {solanaBalances} from './src/sources/solana-balance';`, resolveDir: proce
       b.onLoad({filter: /.*/, namespace: 'fixture'}, () => ({contents: `export class StillPaperLedger {
 constructor(ctx, env) {globalThis.__stillSecretLedger(env);} async alarm() {} }`, loader: 'js'}));
     }}]});
-  const {paperEnvironment, RangeInbox, stillReadRpcUrl, stillReadEnvironment, solanaBalances} = await import(join(dir, 'test.mjs'));
+  const {paperEnvironment, RangeInbox, stillReadRpcUrl, stillReadEnvironment, stillReadRpcState, INVALID_STILL_RPC, solanaBalances} = await import(join(dir, 'test.mjs'));
   const env = {SOLANA_RPC: publicRpc, STILL_RPC_URL: privateRpc, LP_CACHE: {}, WALLETS: '', MIN_TVL_USD: '5000'};
   assert(stillReadRpcUrl(env) === privateRpc, 'Secret wins over configured public fallback');
   assert(stillReadRpcUrl({SOLANA_RPC: publicRpc}) === publicRpc, 'Missing secret preserves public selection');
-  for (const invalid of ['', 'not-a-url', 'http://rpc.example.invalid'])
-    assert.throws(() => stillReadRpcUrl({STILL_RPC_URL: invalid, SOLANA_RPC: publicRpc}), /Still read RPC configuration is unavailable/, 'Invalid present secret never selects public fallback');
+  for (const invalid of ['', 'not-a-url', 'http://rpc.example.invalid']) {
+    const bad = {STILL_RPC_URL: invalid, SOLANA_RPC: publicRpc};
+    assert(stillReadRpcUrl(bad) === INVALID_STILL_RPC, 'Invalid present secret never selects public fallback');
+    assert.equal(stillReadRpcState(bad), 'invalid-secret');
+    assert(paperEnvironment(bad).SOLANA_RPC === INVALID_STILL_RPC, 'Malformed configuration does not crash the HTTP environment');
+  }
   const safe = paperEnvironment(env);
   assert(safe.SOLANA_RPC === privateRpc && safe.STILL_RPC_URL === privateRpc, 'HTTP and scheduled environment preserve server-only selection');
   assert(env.SOLANA_RPC === publicRpc, 'Input environment remains unchanged');
@@ -49,6 +53,9 @@ constructor(ctx, env) {globalThis.__stillSecretLedger(env);} async alarm() {} }`
   globalThis.fetch = async url => {targets.push(String(url)); throw Error('Synthetic provider failure');};
   await assert.rejects(solanaBalances('11111111111111111111111111111111', publicRpc, stillReadEnvironment(env)), /Solana balance read unavailable/);
   assert(targets.length === 2 && targets.every(url => url === privateRpc), 'A failed private read never falls back to a public endpoint');
+  targets.length = 0;
+  await assert.rejects(solanaBalances('11111111111111111111111111111111', publicRpc, stillReadEnvironment({...env, STILL_RPC_URL:''})), /Solana balance read unavailable/);
+  assert.equal(targets.length, 0, 'Malformed secret neither crashes the app nor dispatches a provider request');
   console.log('PASS Still secret: HTTP, scheduler and Durable Object selection; missing-only fallback; private balance success and failure without endpoint disclosure');
 } finally {
   globalThis.fetch = originalFetch;

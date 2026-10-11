@@ -37,6 +37,7 @@ export function createSolanaReadRpc(deps: {fetcher?: typeof fetch; now?: () => n
   try {if(init.method?.toUpperCase()!=='POST'||typeof init.body!=='string'||init.body.length>100000)throw Error();body=JSON.parse(init.body);} catch {throw Error('Only bounded JSON-RPC reads are supported.');}
   const batch=Array.isArray(body), reads=(batch?body:[body]) as RpcRead[];
   if(!reads.length||reads.length>50||reads.some(r=>!r||r.jsonrpc!=='2.0'||!READ_METHODS.has(r.method)||!['number','string'].includes(typeof r.id)||(r.params!==undefined&&!Array.isArray(r.params)))||new Set(reads.map(r=>r.id)).size!==reads.length)throw Error('Only bounded, identified Solana read methods are supported.');
+  if(url.hostname==='still-rpc-unavailable.invalid')return unavailable(reads,batch,'Still read RPC configuration is unavailable.');
   const headers = new Headers(init.headers), cleanHeaders=[...headers.keys()].every(k=>['content-type','accept'].includes(k)||(k==='solana-client'&&/^js\/[a-zA-Z0-9.+-]{1,64}$/.test(headers.get(k)||'')));
   const onfinality=url.href===ONFINALITY_SOLANA_READ_RPC;
   // The fixed public URL must never escape its shared budget just because an

@@ -9,7 +9,7 @@ import {publicError} from './health';
 import {StillBackgroundScanner} from './still-background';
 import {worldsfairPaperRoute} from './worldsfair-paper';
 import {stillDemoRoute} from './still-demo-routes';
-import {stillReadRpcUrl} from './still-rpc-env';
+import {stillReadRpcUrl,stillReadRpcState} from './still-rpc-env';
 
 export {WorldsfairRangeInbox as RangeInbox} from './worldsfair-paper';
 
@@ -157,6 +157,10 @@ async function fetchPaper(req: Request, env: Env, ctx?: ExecutionContext): Promi
   }
   // HEAD is evaluated as GET so legacy method checks remain read-only.
   const response = await legacyWorker.fetch(new Request(url, {method: 'GET', headers: req.headers}), safeEnv, ctx);
+  if(path==='/api/version'){
+    const headers=new Headers(response.headers);headers.set('x-still-rpc-config',stillReadRpcState(env));
+    return new Response(response.body,{status:response.status,headers});
+  }
   if (path === '/api/long-game' && response.ok && !includeOther) {
     const data = await response.json() as {items?: {chain: string}[]};
     return json({...data, items: (data.items || []).filter(item => item.chain.toLowerCase() === 'solana')});
