@@ -115,7 +115,7 @@ Cutoff requested for disclosure: **14 September 2026, 14:00 UK**. This public re
 
 | Group | First → last verifiable SHA | What can be claimed |
 | --- | --- | --- |
-| Known private pre-cutoff baseline | `bccf1bb049dc58381a60b87356bde729a6b8fd06` → same, 4 September | Existing private Still. Private provenance tags identify this commit; full later pre-cutoff history is unavailable here. |
+| Known private pre-cutoff baseline | `bccf1bb049dc58381a60b87356bde729a6b8fd06` → same, 4 September | Existing private LP Terminal (Still's predecessor). Private provenance tags identify this commit; full later pre-cutoff history is unavailable here. |
 | Inherited later source | Exact before/after-cutoff endpoints **unavailable** | Research screens, market integrations, range mathematics and strategy/fleet foundations are inherited. They are not newly authored merely because imported on 5 October. |
 | Initial public snapshot | `1916c029ba9cfad87ccf64aa02af1d2756006dbc` → same, 5 October | Sanitised export excluding personal records, private archives/history, credentials and original deployment configuration. |
 | Public 5 October changes | `d2ed57d2e64b291c071c8378a79d7cdc2286c2bb` → `bd097a52ee97ecfe3233a1787c9d55f3b89e4a58` | Public provenance, simpler paper flows, data-read and contrast fixes. |
